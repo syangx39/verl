@@ -152,4 +152,4 @@ RUN CUDA_VERSION_MAJOR=$(echo ${CUDA_VERSION} | cut -d '.' -f 1) && \
         CUDNN_HDR=$(find /usr/include -name cudnn_version.h | head -1) && \
         CUDNN_VERSION=$(grep -E '^#define CUDNN_(MAJOR|MINOR|PATCHLEVEL) ' "${CUDNN_HDR}" | awk '{print $3}' | paste -sd. -); \
     fi && \
-    pip install "nvidia-cudnn-cu${CUDA_VERSION_MAJOR}>=${CUDNN_VERSION}"
+    pip install "nvidia-cudnn-cu${CUDA_VERSION_MAJOR}>=9.24"
