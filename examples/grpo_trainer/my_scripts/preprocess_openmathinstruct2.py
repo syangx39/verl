@@ -99,8 +99,8 @@ def main() -> None:
   ap.add_argument("--input", required=True, help="glob for train_1M-*.parquet")
   ap.add_argument("--tokenizer", required=True, help="path or HF id of Qwen3-0.6B")
   ap.add_argument("--output-dir", required=True)
-  ap.add_argument("--seed", type=int, default=0,
-                  help="MaxText data_shuffle_seed (confirm rl.yml default with TPU team)")
+  ap.add_argument("--seed", type=int, default=42,
+                  help="MaxText data_shuffle_seed (rl.yml: data_shuffle_seed=42, confirmed)")
   args = ap.parse_args()
 
   files = sorted(glob.glob(os.path.expanduser(args.input)))

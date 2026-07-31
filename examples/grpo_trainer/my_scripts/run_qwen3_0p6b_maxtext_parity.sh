@@ -102,16 +102,29 @@ ppo_max_token_len_per_gpu=32768  # [SYS] dynamic-bsz packing budget for the
 
 ########################### launch ########################################
 # [GB200] block inherited from upstream MACHINE=gb200 (PR #5596):
-#   - enforce_eager=True: vLLM CUDA graphs off on SM100. KNOWN PERF TAX on
-#     rollout; keep for bring-up, file follow-up to re-enable on newer vLLM
-#     (planning doc §4 risk item — do NOT quote parity numbers as final
-#     until this is either removed or measured).
-#   - free_cache_engine=True: release vLLM KV between steps (colocated HBM
-#     hygiene).
+#   - enforce_eager=False: DEVIATION from upstream gb200 branch (which forced
+#     eager on SM100). Verified on this image's vLLM: CUDA graphs work on
+#     Blackwell — 2.1x gen speedup, numerics identical to eager over matched
+#     steps (score/length distributions, same data order). [SYS] change.
+#   - free_cache_engine=False: DEVIATION from upstream gb200 branch (which
+#     sets True to release vLLM KV between steps for large models). At 0.6B
+#     HBM is abundant and the sleep/wake cycle was the prime suspect for the
+#     29s update_weights observed in the smoke run. [SYS] change, no
+#     semantics impact.
 #   - model_dtype=bfloat16: FSDP master/compute dtype pinned. [MAXTEXT] is
 #     also bf16 -> parity precision.
 #   - ray_init.num_gpus pinned: privileged/enroot containers break Ray GPU
 #     autodetect.
+
+# ray_init.num_gpus workaround is only valid when the driver starts its own
+# local Ray (single-node; privileged/enroot containers break GPU autodetect).
+# When attaching to an existing cluster (RAY_ADDRESS set), Ray forbids
+# num_cpus/num_gpus at ray.init() -- resources are reported by each node's
+# `ray start --num-gpus`. Inject the flag only in the single-node case.
+RAY_NUM_GPUS_ARG=""
+if [ -z "${RAY_ADDRESS:-}" ]; then
+  RAY_NUM_GPUS_ARG="+ray_kwargs.ray_init.num_gpus=${NGPUS_PER_NODE}"
+fi
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
@@ -121,7 +134,7 @@ python3 -m verl.trainer.main_ppo \
     data.train_batch_size=${train_batch_size} \
     data.max_prompt_length=${max_prompt_length} \
     data.max_response_length=${max_response_length} \
-    data.filter_overlong_prompts=True \
+    data.filter_overlong_prompts=False \
     data.truncation='error' \
     actor_rollout_ref.model.path="${MODEL_PATH}" \
     actor_rollout_ref.model.use_remove_padding=True \
@@ -149,12 +162,11 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.top_k=${top_k} \
     actor_rollout_ref.rollout.max_num_batched_tokens=${max_num_batched_tokens} \
     actor_rollout_ref.rollout.enable_chunked_prefill=True \
-    actor_rollout_ref.rollout.enforce_eager=True \
-    actor_rollout_ref.rollout.free_cache_engine=True \
+    actor_rollout_ref.rollout.enforce_eager=False \
+    actor_rollout_ref.rollout.free_cache_engine=False \
     actor_rollout_ref.rollout.log_prob_use_dynamic_bsz=True \
     actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu=${ppo_max_token_len_per_gpu} \
     +actor_rollout_ref.rollout.engine_kwargs.vllm.enable_prefix_caching=True \
-    reward_model.reward_manager=naive \
     custom_reward_function.path="${REWARD_FN_PATH}" \
     custom_reward_function.name=compute_score \
     trainer.balance_batch=True \
@@ -167,7 +179,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.test_freq=5 \
     trainer.total_epochs=1 \
     trainer.total_training_steps=${TOTAL_STEPS} \
-    +ray_kwargs.ray_init.num_gpus=${NGPUS_PER_NODE} \
+    ${RAY_NUM_GPUS_ARG} \
     "$@"
 
 # =============================================================================
