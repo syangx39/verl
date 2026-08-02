@@ -6,7 +6,7 @@
 #SBATCH --time=04:00:00
 #SBATCH --output=%x-%j.out
 #SBATCH --mem=0
-#SBATCH --nodelist=a4xlustref-a4xnodeset2-[0-7,9-13,15-17],a4xlustref-a4xnodeset3-[0-15]
+#SBATCH --nodelist=a4xlustref-a4xnodeset1-[0-11,13-16],a4xlustref-a4xnodeset0-[0,2-16]
 
 # =============================================================================
 # NuminaMath TRL-parity multi-node run: 32 nodes x 4 GPU = 128 GPUs
