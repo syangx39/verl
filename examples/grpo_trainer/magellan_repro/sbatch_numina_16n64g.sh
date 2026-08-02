@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=numina-trlparity-16n64g
+#SBATCH --nodes=16
+#SBATCH --gres=gpu:4
+#SBATCH --ntasks-per-node=1
+#SBATCH --time=04:00:00
+#SBATCH --output=%x-%j.out
+#SBATCH --mem=0
+
+# =============================================================================
+# NuminaMath TRL-parity multi-node run: 16 nodes x 4 GPU = 64 GPUs
+# (W=64 -> SPG=2, i.e. 2 optimizer updates per step, mirroring TRL).
+# Default 40 steps. Direct comparison row: TRL GB200 W=64
+# (rollout 23.04s, opt_step_wall 35.17s, T_64 = 23.04 + 2x35.17 = 93.4s).
+# THIS IS THE COMPARISON POINT Meta flagged as highest-value ("the direct
+# cross-accelerator comparison point") — and the most conservative one for
+# us: at SPG=2 TRL pays its per-update framework tax only twice.
+# Topology note for the env table: TRL's W=64 spans 32 hosts (2 GPU/host);
+# ours spans 16 nodes (4 GPU/node, NVL72) — record, don't hide.
+#
+# Ray scaffolding identical to the other multi-node scripts —
+#   step 1: ray head on node[0]           (background, --block)
+#   step 2: ray worker on node[1..15]     (background, --block)
+#   step 3: driver on node[0], --overlap, attaches via RAY_ADDRESS
+# /tmp:/tmp mount REQUIRED (raylet Unix socket shared between head and
+# driver container instances on the same node).
+# NOTE: 15 workers registering — sleep after worker launch raised to 90s;
+# verify "ray status" in the driver log shows 64 GPUs before training starts.
+#
+# Check afterwards:
+#   1. "[accounting] W=64 SPG=2 ppo_mini_batch_size=128" at launch
+#   2. timing_s/step vs TRL T_64=93.4s; compare completion lengths
+#   3. gen vs our W=16/32 points — the tail wall should be visible by now
+#      (per-replica seq count down to 32); this bounds the ladder
+# =============================================================================
+
+CONTAINER=$HOME/meta-RL/containers/verl-vllm-arm64.sqsh
+MOUNTS=$HOME/meta-RL:/workspace/meta-RL,/tmp:/tmp
+REPRO_DIR=/workspace/meta-RL/data/magellan_repro
+
+# Environment block shared by every container invocation (head/worker/driver).
+# Single-quoted heredoc-style variable: expanded inside the container shell.
+ENV_SETUP='
+  export HOME=/workspace/meta-RL/.home
+  export CACHE_ROOT=/workspace/meta-RL/.cache
+  mkdir -p $HOME $CACHE_ROOT
+  export XDG_CACHE_HOME=$CACHE_ROOT
+  export FLASHINFER_WORKSPACE_BASE=$CACHE_ROOT/flashinfer
+  export HF_HOME=$CACHE_ROOT/huggingface
+  export TRITON_CACHE_DIR=$CACHE_ROOT/triton
+  export TORCHINDUCTOR_CACHE_DIR=$CACHE_ROOT/inductor
+  export HF_HUB_OFFLINE=1
+  unset ROCR_VISIBLE_DEVICES HIP_VISIBLE_DEVICES
+  export PYTHONPATH=/workspace/meta-RL/verl:$PYTHONPATH
+  export DATA_DIR=/workspace/meta-RL/data/numina_verl
+  export REWARD_FN_PATH=REPRO_PLACEHOLDER/format_reward_verl.py
+  export MODEL_PATH=/workspace/meta-RL/models/Qwen3-0.6B
+'
+ENV_SETUP=${ENV_SETUP//REPRO_PLACEHOLDER/$REPRO_DIR}
+
+nodes=($(scontrol show hostnames "$SLURM_JOB_NODELIST"))
+head_node=${nodes[0]}
+head_ip=$(srun -N1 -n1 -w "$head_node" --mem=1G hostname -I | awk '{print $1}')
+port=6379
+echo "Ray head: $head_node ($head_ip:$port); workers: ${nodes[*]:1}"
+
+# ---- 1) Ray head (node 0), stays up via --block ---------------------------
+srun -N1 -n1 -w "$head_node" --mem=200G \
+     --container-image=$CONTAINER --container-mounts=$MOUNTS \
+     --container-workdir=/workspace/meta-RL \
+     bash -c "$ENV_SETUP
+  ray start --head --node-ip-address=$head_ip --port=$port \
+    --num-gpus=4 --dashboard-host=0.0.0.0 --block
+" &
+sleep 40
+
+# ---- 2) Ray workers (nodes 1..N-1) ----------------------------------------
+for node in "${nodes[@]:1}"; do
+  srun -N1 -n1 -w "$node" --mem=200G \
+       --container-image=$CONTAINER --container-mounts=$MOUNTS \
+       --container-workdir=/workspace/meta-RL \
+       bash -c "$ENV_SETUP
+      ray start --address=$head_ip:$port --num-gpus=4 --block
+  " &
+done
+sleep 90
+
+# ---- 3) Training driver on head node, attach to the cluster ---------------
+srun -N1 -n1 -w "$head_node" --overlap --mem=200G \
+     --container-image=$CONTAINER --container-mounts=$MOUNTS \
+     --container-workdir=/workspace/meta-RL \
+     bash -c "$ENV_SETUP
+  export RAY_ADDRESS=$head_ip:$port
+  ray status
+  NNODES=16 TOTAL_STEPS=\${TOTAL_STEPS:-40} bash $REPRO_DIR/run_qwen3_0p6b_trlparity.sh \
+    trainer.test_freq=-1 \
+    trainer.val_before_train=False
+"
+EXIT=$?
+
+# Driver done -> tear down the background ray sruns (head + workers) so the
+# job exits cleanly. Kill only our child srun processes, not the whole job,
+# so Slurm records COMPLETED rather than CANCELLED.
+pkill -TERM -P $$ srun 2>/dev/null || true
+sleep 5
+exit $EXIT
