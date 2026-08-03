@@ -1,55 +1,34 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=numina-trlparity-32n128g
+#SBATCH --job-name=numina-trlparity-32n128g-pd8
 #SBATCH --nodes=32
+#SBATCH --nodelist=a4xlustref-a4xnodeset2-[0-7,9-13,15-17],a4xlustref-a4xnodeset3-[0-15]
 #SBATCH --gres=gpu:4
 #SBATCH --ntasks-per-node=1
 #SBATCH --time=04:00:00
 #SBATCH --output=%x-%j.out
 #SBATCH --mem=0
-#SBATCH --nodelist=a4xlustref-a4xnodeset1-[0-11,13-16],a4xlustref-a4xnodeset0-[0,2-16]
 
 # =============================================================================
 # NuminaMath TRL-parity multi-node run: 32 nodes x 4 GPU = 128 GPUs
-# (W=128 -> SPG=1, i.e. ONE optimizer update per step, mini_batch=256).
-# Default 40 steps. TRL W=128 reference: rollout_gen_s=21.17s ONLY —
-# their train/framework are NOT separable at SPG=1 (no gen-free steps),
-# so per their own methodology ONLY the gen phase is apples-to-apples
-# at this point. Our full breakdown remains valid (verl phases are
-# timer-separated regardless of SPG).
+# (W=128 -> SPG=1 under the pd=8 / round-2 accounting: 1 optimizer
+# update per rollout, mini_batch=256).
+# Default 40 steps. TP control: sbatch --export=ALL,ROLLOUT_TP=2 --job-name=...-tp2
 #
-# ---- CROSS-NVL-DOMAIN POINT — new territory, read this ----
-# 32 nodes exceeds a single NVL72 domain (18 nodes x 4 GPU = 72 GPUs).
-# This run necessarily spans >=2 NVLink domains. Implications:
-#   * Rollout (DP replicas) is domain-agnostic: no cross-replica traffic.
-#   * FSDP collectives (all-gather/reduce-scatter over 128 ranks) and the
-#     refit broadcast now cross the domain boundary over the scale-out
-#     fabric (RoCE), not NVLink. At 0.6B the volumes are small; expect a
-#     modest bump in update_actor/update_weights, not a cliff — measure.
-#   * BALANCE the split across domains (e.g. 16+16 from two nodesets):
-#     asymmetric splits (e.g. 18+14) skew collective ring latency andmake
-#     the numbers harder to attribute. Use the -w override below to pin.
-#   * nvidia-imex is per-domain: verify the imex service is healthy on ALL
-#     participating nodesets before the run (known failure mode on A4X).
-#   * NCCL: no MNNVL-specific env should assume a single domain; defaults
-#     handle mixed NVLink+RoCE, but capture NCCL_DEBUG=INFO on rank 0 for
-#     the first run to archive the detected topology.
-# Pin nodes explicitly for a balanced split (edit to your idle sets):
-#   sbatch -w a4xlustref-a4xnodeset0-[0,2-16],a4xlustref-a4xnodeset3-[0-15] \
-#          sbatch_numina_32n128g.sh
-# The topology-echo step below logs the nodes-per-nodeset split — check it
-# in the log before trusting the numbers.
+# Comparison anchors:
+#   metaface W=128 pd=8 TRUE CYCLE = 44.3 s (gen 21.2 / update 1.3 / framework 21.8)
+#   our archived pd=2 number       = 38.6 s (do NOT mix accountings)
 #
-# Ray scaffolding identical to the other multi-node scripts; worker
-# registration sleep raised to 120s (31 workers).
+# Ray scaffolding: head on node[0] -> workers on node[1..31] -> driver
+# attaches via RAY_ADDRESS; /tmp:/tmp mount REQUIRED (raylet socket shared
+# between head and driver container instances).
+# CROSS-NVL-DOMAIN: spans 2 domains; balanced 16+16 pin in --nodelist below
+# (edit if nodes busy; keep 16+16). Verify imex health on both nodesets and
+# check the topology echo in the log (16/16 split) before trusting numbers.
 #
 # Check afterwards:
 #   1. "[accounting] W=128 SPG=1 ppo_mini_batch_size=256" at launch
-#   2. gen vs TRL's 21.17s (their only comparable number here) and vs our
-#      W=64 gen=19.0s — per-replica seq count is 16; if gen stops falling,
-#      that is the rollout parallelism saturation point (matches TRL's
-#      own flattening 23.0 -> 21.2 at 64 -> 128)
-#   3. update_actor/update_weights vs W=64 (6.9/2.1s) — the cross-domain
-#      collective tax, if any, shows up here
+#   2. timing_s/step vs the two anchors above
+#   3. response_length/mean ~3,900-4,000, clip ~0.25 (regime check)
 # =============================================================================
 
 CONTAINER=$HOME/meta-RL/containers/verl-vllm-arm64.sqsh
@@ -77,10 +56,6 @@ ENV_SETUP='
 ENV_SETUP=${ENV_SETUP//REPRO_PLACEHOLDER/$REPRO_DIR}
 
 nodes=($(scontrol show hostnames "$SLURM_JOB_NODELIST"))
-# ---- topology echo: nodes per nodeset (check balance across NVL domains) --
-echo "[topology] nodes-per-nodeset split:"
-printf '%s\n' "${nodes[@]}" | sed 's/-[0-9]*$//' | sort | uniq -c
-
 head_node=${nodes[0]}
 head_ip=$(srun -N1 -n1 -w "$head_node" --mem=1G hostname -I | awk '{print $1}')
 port=6379
@@ -114,7 +89,7 @@ srun -N1 -n1 -w "$head_node" --overlap --mem=200G \
      bash -c "$ENV_SETUP
   export RAY_ADDRESS=$head_ip:$port
   ray status
-  NNODES=32 TOTAL_STEPS=\${TOTAL_STEPS:-40} bash $REPRO_DIR/run_qwen3_0p6b_trlparity.sh \
+  ROLLOUT_TP=\${ROLLOUT_TP:-1} NNODES=32 TOTAL_STEPS=\${TOTAL_STEPS:-40} bash $REPRO_DIR/run_qwen3_0p6b_trlparity.sh \
     trainer.test_freq=-1 \
     trainer.val_before_train=False
 "

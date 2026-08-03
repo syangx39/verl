@@ -1,24 +1,30 @@
 #!/usr/bin/env bash
 # =============================================================================
-# TRL-parity run: verl GRPO on GB200 (A4X), NuminaMath, accounting frozen to
-# the Meta engineer's TRL strong-scaling sweep (qwen3_0p6b_strong_scaling.csv)
+# TRL-parity run: verl GRPO on GB200 (A4X), NuminaMath — Meta metaface
+# strong-scaling counterpart (round-2 / pd=8 accounting)
 # =============================================================================
-# Same-hardware, cross-framework comparison: TRL (accelerate+FSDP+vLLM) vs
-# verl (FSDP2+vLLM, colocated), Qwen3-0.6B, format-only reward.
+# Same-hardware, cross-framework comparison: metaface (TRL+accelerate+FSDP+
+# vLLM) vs verl (FSDP2+vLLM, colocated), Qwen3-0.6B, format-only reward.
 #
-# THE CONTRACT (three blocks + one derived formula):
-#   1. Frozen accounting  — 256 prompts x n=8 = 2048 completions/step, and
-#      optimizer updates/step matched to TRL's steps_per_generation schedule:
-#          SPG = 256 / (2 * W)          (TRL derivation, W = total GPUs)
-#          updates/step (verl) = SPG  =>  ppo_mini_batch_size = 256 / SPG
-#      computed below from W. DO NOT hand-set the mini batch.
-#      Unit confirmed (yaml note): prompts. Formula final.
-#   2. Values confirmed from configs/grpo_qwen3_0p6b.yaml (received) — see
-#      the "confirmed values" section. per_device unit also CONFIRMED by the
-#      yaml's own note: generation_batch_size counts PROMPTS (256 prompts ->
-#      2048 completions/rollout, verified against trl grpo_config.py).
-#   3. System adaptations — verl-native, deliberately NOT mirrored from TRL
-#      (attention backend, packing, memory fractions). Recorded in env table.
+# THE CONTRACT (four categories):
+#   1. Frozen invariant — global batch: 256 prompts x n=8 = 2048 completions
+#      per rollout (generation_batch_size counts PROMPTS, per the yaml's own
+#      note). Any change here invalidates the comparison.
+#   2. Yaml-confirmed values — lengths/sampling/beta/lr/steps from
+#      configs/grpo_qwen3_0p6b.yaml; every such line tagged [YAML] below.
+#   3. System knobs — free per stack, recorded in the env table:
+#        * Update schedule (MATCHED per comparison row, not frozen):
+#          Meta round-2 accounting, pd=8:
+#              SPG = 256 / (8 * W), floored at 1
+#              ppo_mini_batch_size = 256 / SPG
+#          => mini 32/64/128/256/256/256 at W=4/8/16/32/64/128.
+#          Derived below from W; resolved accounting printed at launch.
+#        * Rollout engine: Meta TP=2 (mem 0.4, Triton-attn); verl TP=1
+#          per-GPU engines (mem 0.30, FlashInfer). TP=2 control runs at
+#          W<=16 via rollout_tp override — each side reports its own best.
+#        * Training-pass chunking: use_dynamic_bsz splits large mini-batches
+#          into gradient-accumulation chunks; final gradient identical.
+#   4. Scale knobs — NNODES / NGPUS_PER_NODE / TOTAL_STEPS env vars.
 # =============================================================================
 
 set -xeuo pipefail
@@ -38,15 +44,17 @@ W=$(( NNODES * NGPUS_PER_NODE ))
 PROJECT_NAME=${PROJECT_NAME:-numina_trlparity}
 EXPERIMENT_NAME=${EXPERIMENT_NAME:-qwen3_0p6b_trlparity_${NNODES}n${W}g_$(date +%Y%m%d_%H%M)}
 
-########################### frozen accounting (derived from W) ##############
-train_batch_size=256           # [TRL] generation_batch_size=256 prompts
-rollout_n=8                    # [TRL] G=8 -> 2048 completions/step
+########################### accounting (update schedule; derived from W) ####
+train_batch_size=256           # [FROZEN] generation_batch_size=256 prompts
+rollout_n=8                    # [FROZEN] G=8 -> 2048 completions/rollout
 
-if (( 256 % (2 * W) != 0 )); then
-  echo "ERROR: 256 not divisible by 2*W=$((2*W)); TRL sweep only defines W in {4,8,16,32,64,128}" >&2
+# pd=8 accounting (Meta round-2): SPG = 256/(pd*W), pd=8, floored at 1.
+# W in {4,8,16,32,64,128}; at W>=32 the floor engages (SPG=1, mini=256).
+if (( W < 4 || 256 % W != 0 )); then
+  echo "ERROR: W=${W} not in the sweep {4,8,16,32,64,128}" >&2
   exit 1
 fi
-SPG=$(( 256 / (2 * W) ))       # [TRL] steps_per_generation = 256/(2W)
+SPG=$(( 256 / (8 * W) )); (( SPG < 1 )) && SPG=1
 ppo_mini_batch_size=$(( 256 / SPG ))   # verl: updates/step = 256/mini = SPG
 echo "[accounting] W=${W}  SPG=${SPG}  ppo_mini_batch_size=${ppo_mini_batch_size} (=> ${SPG} optimizer updates/step)"
 
@@ -66,9 +74,10 @@ actor_lr=${ACTOR_LR:-1e-6}                        # yaml unset -> TRL default 1e
 USE_KL=${USE_KL:-False}                           # tied to beta=0.0
 
 ########################### system adaptations (verl-native) ################
-rollout_tp=1                   # [free var] TRL uses vllm TP=2 (W/2 engines),
-                               # mem_util 0.4; verl native: TP=1 per-GPU
-                               # engines, 0.30. Recorded in env table.
+rollout_tp=${ROLLOUT_TP:-1}    # [knob] Meta: TP=2 (W/2 engines, mem 0.4,
+                               # Triton-attn); verl default: TP=1 per-GPU
+                               # engines. Set ROLLOUT_TP=2 for the control
+                               # ladder at W<=16. Each side reports its best.
 rollout_gpu_mem_util=0.30
 max_num_batched_tokens=8192
 ppo_max_token_len_per_gpu=16384
@@ -136,13 +145,14 @@ python3 -m verl.trainer.main_ppo \
     "$@"
 
 # =============================================================================
-# Open items:
-#   1. RESOLVED: yaml values filled; unit confirmed (prompts) per yaml note
-#   2. verl mini-batch update order differs from TRL's SPG loop in WHICH
-#      completions each update sees (verl: contiguous slices of one shuffled
-#      batch; TRL: sequential micro-batches). Same count, same data, same
-#      staleness structure (both progressively off-policy within the step);
-#      exact per-update sample assignment is not reproducible — document as
-#      known delta, analogous to the data-order delta in the MaxText line.
-#   3. gen-time comparability: cap now matched at 8192 (yaml-confirmed)
+# Notes:
+#   1. ACCOUNTING VERSION: this script implements the pd=8 (round-2)
+#      schedule. Data measured under the earlier pd=2 schedule is archived
+#      and labeled; never mix accountings within a comparison row.
+#   2. Known delta: verl mini-batch update order differs from TRL's SPG
+#      loop in WHICH completions each update sees (verl: contiguous slices
+#      of one shuffled batch; TRL: sequential micro-batches). Same count,
+#      same data, same progressive off-policy structure; per-update sample
+#      assignment not reproducible across frameworks.
+#   3. gen-time comparability: caps matched (8192) per yaml.
 # =============================================================================

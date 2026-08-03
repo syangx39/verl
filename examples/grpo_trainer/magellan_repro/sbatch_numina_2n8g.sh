@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=numina-trlparity-2n8g
+#SBATCH --job-name=numina-trlparity-2n8g-pd8
 #SBATCH --nodes=2
 #SBATCH --gres=gpu:4
 #SBATCH --ntasks-per-node=1
@@ -9,22 +9,22 @@
 
 # =============================================================================
 # NuminaMath TRL-parity multi-node run: 2 nodes x 4 GPU = 8 GPUs
-# (W=8 -> SPG=16, i.e. 16 optimizer updates per step, mirroring TRL).
-# Default 40 steps. Direct comparison row: TRL GB200 W=8
-# (rollout 53.00s, opt_step_wall 20.90s, T_8 = 53.00 + 16x20.90 = 387.4s).
+# (W=8 -> SPG=4 under the pd=8 / round-2 accounting: 4 optimizer
+# updates per rollout, mini_batch=64).
+# Default 40 steps. TP control: sbatch --export=ALL,ROLLOUT_TP=2 --job-name=...-tp2
 #
-# Topology: identical Ray scaffolding to the other multi-node scripts —
-#   step 1: ray head on node[0]           (background, --block)
-#   step 2: ray worker on node[1]         (background, --block)
-#   step 3: driver on node[0], --overlap, attaches via RAY_ADDRESS
-# /tmp:/tmp mount REQUIRED (raylet Unix socket shared between head and
-# driver container instances on the same node).
+# Comparison anchors:
+#   metaface W=8 pd=8 TRUE CYCLE = 121.2 s (gen 47.5 / update 20.1 / framework 52.5)
+#   our archived pd=2 number       = 131.1 s (do NOT mix accountings)
 #
-# Check afterwards (vs the other scale points and TRL's W=8 row):
-#   1. "[accounting] W=8 SPG=16 ppo_mini_batch_size=16" at launch
-#   2. timing_s/step vs TRL T_8=387.4s; compare completion lengths to
-#      confirm regime
-#   3. fills the W=8 rung of the scaling ladder (4/8/16/32)
+# Ray scaffolding: head on node[0] -> workers on node[1..1] -> driver
+# attaches via RAY_ADDRESS; /tmp:/tmp mount REQUIRED (raylet socket shared
+# between head and driver container instances).
+#
+# Check afterwards:
+#   1. "[accounting] W=8 SPG=4 ppo_mini_batch_size=64" at launch
+#   2. timing_s/step vs the two anchors above
+#   3. response_length/mean ~3,900-4,000, clip ~0.25 (regime check)
 # =============================================================================
 
 CONTAINER=$HOME/meta-RL/containers/verl-vllm-arm64.sqsh
@@ -85,7 +85,7 @@ srun -N1 -n1 -w "$head_node" --overlap --mem=200G \
      bash -c "$ENV_SETUP
   export RAY_ADDRESS=$head_ip:$port
   ray status
-  NNODES=2 TOTAL_STEPS=\${TOTAL_STEPS:-40} bash $REPRO_DIR/run_qwen3_0p6b_trlparity.sh \
+  ROLLOUT_TP=\${ROLLOUT_TP:-1} NNODES=2 TOTAL_STEPS=\${TOTAL_STEPS:-40} bash $REPRO_DIR/run_qwen3_0p6b_trlparity.sh \
     trainer.test_freq=-1 \
     trainer.val_before_train=False
 "

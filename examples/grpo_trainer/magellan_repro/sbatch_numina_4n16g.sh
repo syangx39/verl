@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=numina-trlparity-4n16g
+#SBATCH --job-name=numina-trlparity-4n16g-pd8
 #SBATCH --nodes=4
 #SBATCH --gres=gpu:4
 #SBATCH --ntasks-per-node=1
@@ -9,22 +9,22 @@
 
 # =============================================================================
 # NuminaMath TRL-parity multi-node run: 4 nodes x 4 GPU = 16 GPUs
-# (W=16 -> SPG=8, i.e. 8 optimizer updates per step, mirroring TRL).
-# Default 40 steps (TRL max_steps). Direct comparison row: TRL GB200 W=16
-# (rollout 31.98s, opt_step_wall 22.32s, T_16 = 31.98 + 8x22.32 = 210.5s).
+# (W=16 -> SPG=2 under the pd=8 / round-2 accounting: 2 optimizer
+# updates per rollout, mini_batch=128).
+# Default 40 steps. TP control: sbatch --export=ALL,ROLLOUT_TP=2 --job-name=...-tp2
 #
-# Topology: identical Ray scaffolding to the other 4n16g scripts —
-#   step 1: ray head on node[0]           (background, --block)
-#   step 2: ray worker on node[1..3]      (background, --block)
-#   step 3: driver on node[0], --overlap, attaches via RAY_ADDRESS
-# /tmp:/tmp mount REQUIRED (raylet Unix socket shared between head and
-# driver container instances on the same node).
+# Comparison anchors:
+#   metaface W=16 pd=8 TRUE CYCLE = 70.1 s (gen 32.1 / update 9.9 / framework 27.6)
+#   our archived pd=2 number       = 75.0 s (do NOT mix accountings)
 #
-# Check afterwards (vs numina 1n4g and vs TRL's W=16 row):
-#   1. "[accounting] W=16 SPG=8 ppo_mini_batch_size=32" at launch
-#   2. timing_s/step vs TRL T_16=210.5s — config now yaml-matched
-#      (cap 8192, temp 1.0); compare completion lengths to confirm regime
-#   3. score/length distributions consistent with 1n4g
+# Ray scaffolding: head on node[0] -> workers on node[1..3] -> driver
+# attaches via RAY_ADDRESS; /tmp:/tmp mount REQUIRED (raylet socket shared
+# between head and driver container instances).
+#
+# Check afterwards:
+#   1. "[accounting] W=16 SPG=2 ppo_mini_batch_size=128" at launch
+#   2. timing_s/step vs the two anchors above
+#   3. response_length/mean ~3,900-4,000, clip ~0.25 (regime check)
 # =============================================================================
 
 CONTAINER=$HOME/meta-RL/containers/verl-vllm-arm64.sqsh
@@ -85,7 +85,7 @@ srun -N1 -n1 -w "$head_node" --overlap --mem=200G \
      bash -c "$ENV_SETUP
   export RAY_ADDRESS=$head_ip:$port
   ray status
-  NNODES=4 TOTAL_STEPS=\${TOTAL_STEPS:-40} bash $REPRO_DIR/run_qwen3_0p6b_trlparity.sh \
+  ROLLOUT_TP=\${ROLLOUT_TP:-1} NNODES=4 TOTAL_STEPS=\${TOTAL_STEPS:-40} bash $REPRO_DIR/run_qwen3_0p6b_trlparity.sh \
     trainer.test_freq=-1 \
     trainer.val_before_train=False
 "

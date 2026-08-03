@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=numina-trlparity-16n64g
+#SBATCH --job-name=numina-trlparity-16n64g-pd8
 #SBATCH --nodes=16
 #SBATCH --gres=gpu:4
 #SBATCH --ntasks-per-node=1
@@ -9,29 +9,22 @@
 
 # =============================================================================
 # NuminaMath TRL-parity multi-node run: 16 nodes x 4 GPU = 64 GPUs
-# (W=64 -> SPG=2, i.e. 2 optimizer updates per step, mirroring TRL).
-# Default 40 steps. Direct comparison row: TRL GB200 W=64
-# (rollout 23.04s, opt_step_wall 35.17s, T_64 = 23.04 + 2x35.17 = 93.4s).
-# THIS IS THE COMPARISON POINT Meta flagged as highest-value ("the direct
-# cross-accelerator comparison point") — and the most conservative one for
-# us: at SPG=2 TRL pays its per-update framework tax only twice.
-# Topology note for the env table: TRL's W=64 spans 32 hosts (2 GPU/host);
-# ours spans 16 nodes (4 GPU/node, NVL72) — record, don't hide.
+# (W=64 -> SPG=1 under the pd=8 / round-2 accounting: 1 optimizer
+# update per rollout, mini_batch=256).
+# Default 40 steps. TP control: sbatch --export=ALL,ROLLOUT_TP=2 --job-name=...-tp2
 #
-# Ray scaffolding identical to the other multi-node scripts —
-#   step 1: ray head on node[0]           (background, --block)
-#   step 2: ray worker on node[1..15]     (background, --block)
-#   step 3: driver on node[0], --overlap, attaches via RAY_ADDRESS
-# /tmp:/tmp mount REQUIRED (raylet Unix socket shared between head and
-# driver container instances on the same node).
-# NOTE: 15 workers registering — sleep after worker launch raised to 90s;
-# verify "ray status" in the driver log shows 64 GPUs before training starts.
+# Comparison anchors:
+#   metaface W=64 pd=8 TRUE CYCLE = 42.7 s (gen 23.2 / update 2.5 / framework 17.0)
+#   our archived pd=2 number       = 31.4 s (do NOT mix accountings)
+#
+# Ray scaffolding: head on node[0] -> workers on node[1..15] -> driver
+# attaches via RAY_ADDRESS; /tmp:/tmp mount REQUIRED (raylet socket shared
+# between head and driver container instances).
 #
 # Check afterwards:
-#   1. "[accounting] W=64 SPG=2 ppo_mini_batch_size=128" at launch
-#   2. timing_s/step vs TRL T_64=93.4s; compare completion lengths
-#   3. gen vs our W=16/32 points — the tail wall should be visible by now
-#      (per-replica seq count down to 32); this bounds the ladder
+#   1. "[accounting] W=64 SPG=1 ppo_mini_batch_size=256" at launch
+#   2. timing_s/step vs the two anchors above
+#   3. response_length/mean ~3,900-4,000, clip ~0.25 (regime check)
 # =============================================================================
 
 CONTAINER=$HOME/meta-RL/containers/verl-vllm-arm64.sqsh
@@ -92,7 +85,7 @@ srun -N1 -n1 -w "$head_node" --overlap --mem=200G \
      bash -c "$ENV_SETUP
   export RAY_ADDRESS=$head_ip:$port
   ray status
-  NNODES=16 TOTAL_STEPS=\${TOTAL_STEPS:-40} bash $REPRO_DIR/run_qwen3_0p6b_trlparity.sh \
+  ROLLOUT_TP=\${ROLLOUT_TP:-1} NNODES=16 TOTAL_STEPS=\${TOTAL_STEPS:-40} bash $REPRO_DIR/run_qwen3_0p6b_trlparity.sh \
     trainer.test_freq=-1 \
     trainer.val_before_train=False
 "
