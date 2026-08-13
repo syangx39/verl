@@ -1,0 +1,87 @@
+# =============================================================================
+# verl-gemma4:v2.1 — GKE A4X (GB200, arm64) image for the gemma-4 decode-light
+# line (and future verl-on-GKE runs, incl. long-OSL lines needing FA2).
+#
+# Base: official vLLM gemma4 recipe image (arm64 layer present).
+#   vllm 0.20.2rc1.dev49+g9b4e83934 (gemma4-aware, OLD FusedMoE API -> verl
+#   needs no patches), matching torch / CUDA 13.0 / transformers, all frozen.
+#
+# This build ADDS, relative to the base:
+#   1. verl runtime deps discovered during GKE bring-up
+#      (tensordict, peft, accelerate, ... — the runtime-pip archaeology,
+#      frozen here once and for all)
+#   2. flash-attn compiled from source (no arm64 wheel exists for this
+#      torch/cu130 combo; MAX_JOBS capped to avoid OOM). Enables:
+#        - transformers FA2 path (gemma config.json requests it) -> the
+#          `attn_implementation=sdpa` override becomes unnecessary
+#        - verl's flash_attn.bert_padding imports (remove_padding path)
+#        - future long-OSL lines where FA2 actually matters
+#
+# verl itself is NOT baked in — source tree mounted from the bucket at
+# /workspace/meta-RL/verl (PYTHONPATH env in the RayCluster yaml).
+#
+# Build & push (Slurm controller, native arm64 — no emulation needed):
+#   cd ~/meta-RL/verl/docker
+#   nohup docker buildx build --platform linux/arm64 \
+#     -t us-central1-docker.pkg.dev/supercomputer-testing/pirillo-gcr/verl-gemma4:v2.1 \
+#     -f Dockerfile.v2 --push . > build_v21.log 2>&1 &
+#
+# After push: point both image: fields in verl-gemma4-dra-cluster.yaml at
+# :v2.1, delete/apply. Then DROP the temporary overrides
+# (attn_implementation=sdpa, use_remove_padding=False) — default verl
+# form is restored.
+# =============================================================================
+FROM vllm/vllm-openai:gemma4-0505-cu130
+
+# Base is a serving image (entrypoint = OpenAI API server); we run ray/bash.
+ENTRYPOINT []
+CMD ["/bin/bash"]
+
+# ---- system tools (git for source installs; tmux/iproute2 for debugging) ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git tmux iproute2 && \
+    rm -rf /var/lib/apt/lists/*
+
+# ---- verl runtime dependencies (verl body mounted, not installed) ----------
+# ray pinned to the KubeRay rayVersion in the cluster yaml (2.56.1).
+# List = image-v2 set + every ModuleNotFoundError hit during bring-up.
+RUN pip install --break-system-packages --no-cache-dir \
+    "ray[default]==2.56.1" \
+    hydra-core \
+    omegaconf \
+    codetiming \
+    tensorboard \
+    tbparse \
+    torchdata \
+    datasets \
+    pyarrow \
+    pandas \
+    math-verify \
+    pylatexenc \
+    pybind11 \
+    tensordict \
+    peft \
+    accelerate \
+    dill
+
+# ---- flash-attn: prebuilt wheel (compiled once on a GKE A4X build pod ------
+# against this exact base torch 2.11.0+cu130 / cp312 / aarch64; archived on
+# the bucket at meta-RL/wheels/). Copy it into the build context first:
+#   gsutil cp gs://xiaotongyang-bucket/meta-rl/GKE_repro/meta-RL/wheels/flash_attn-2.8.3.post1-cp312-cp312-linux_aarch64.whl .
+COPY flash_attn-2.8.3.post1-cp312-cp312-linux_aarch64.whl /tmp/
+RUN pip install --break-system-packages --no-cache-dir /tmp/flash_attn-*.whl && \
+    rm /tmp/flash_attn-*.whl
+
+# ---- build stamp: freeze the version quadruple into the build log ----------
+RUN python3 - <<'PYEOF'
+import torch, vllm, transformers
+print("BUILD-STAMP torch        ", torch.__version__, "cuda_available_at_build_ignored")
+print("BUILD-STAMP vllm         ", vllm.__version__)
+print("BUILD-STAMP transformers ", transformers.__version__)
+import flash_attn
+print("BUILD-STAMP flash_attn   ", flash_attn.__version__)
+from flash_attn.bert_padding import unpad_input, pad_input
+print("BUILD-STAMP bert_padding  OK")
+import ray
+print("BUILD-STAMP ray          ", ray.__version__)
+PYEOF
