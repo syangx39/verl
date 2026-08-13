@@ -77,7 +77,7 @@ spec:
           effect: NoSchedule
         containers:
         - name: ray-head
-          image: us-central1-docker.pkg.dev/supercomputer-testing/pirillo-gcr/verl-gemma4:v2
+          image: us-central1-docker.pkg.dev/supercomputer-testing/pirillo-gcr/verl-gemma4:v2.1
           env:
           - name: PYTHONPATH
             value: /workspace/meta-RL/verl
@@ -152,7 +152,7 @@ spec:
           effect: NoSchedule
         containers:
         - name: ray-worker
-          image: us-central1-docker.pkg.dev/supercomputer-testing/pirillo-gcr/verl-gemma4:v2
+          image: us-central1-docker.pkg.dev/supercomputer-testing/pirillo-gcr/verl-gemma4:v2.1
           env:
           - name: PYTHONPATH
             value: /workspace/meta-RL/verl
