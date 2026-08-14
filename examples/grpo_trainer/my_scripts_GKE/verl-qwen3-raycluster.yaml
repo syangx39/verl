@@ -1,0 +1,213 @@
+# =============================================================================
+# DRA ComputeDomain for MNNVL/IMEX on GB200 (required for cross-node NCCL
+# over NVLink). numNodes must match the RayCluster's total node count.
+# Prereq: NVIDIA DRA driver installed (kubectl get crd | grep computedomain).
+# =============================================================================
+apiVersion: resource.nvidia.com/v1beta1
+kind: ComputeDomain
+metadata:
+  name: verl-rl05-compute-domain
+spec:
+  numNodes: 2
+  channel:
+    resourceClaimTemplate:
+      name: verl-rl05-compute-domain-channel
+---
+# =============================================================================
+# verl on GKE A4X — rl-05 parity (Qwen3-0.6B GRPO/DAPO vs TPU tianyu-rl-05),
+# debug cluster: 1 head + 3 workers = 4 nodes x 4 GPU = 16 (W=16; batch 256x8,
+# mu=1, beta=0, clip 0.2/0.28). TPU anchor: 274.9 s median @ 64 tpu7x chips
+# (32 rollout + 32 trainer, serial).
+# Built from your current RayJob yaml with three fixes:
+#   1. kind: RayCluster — cluster persists; exec in and run manually.
+#      (Switch back to RayJob for the official measured run.)
+#   2. Script paths -> the verl fork tree (where they actually live):
+#      /workspace/meta-RL/verl/examples/grpo_trainer/magellan_repro/
+#   3. setup_env: REWARD_FN_PATH corrected to the same tree.
+# Bootstrap state on the bucket (already done): models/gemma-4-E2B-it ✓,
+# data/numina_verl ✓, verl clone ✓. Missing only:
+#   run_gemma4_2b_decodelight.sh in the fork dir (cat it in, chmod +x).
+# Smoke:
+#   kubectl exec -it <head-pod> -c ray-head -- bash
+#   source /workspace/setup_env.sh && ray status   # expect 8 GPU
+#   NNODES=2 TOTAL_STEPS=2 bash $SCRIPTS_DIR/run_gemma4_2b_decodelight.sh \
+#     trainer.test_freq=-1 trainer.val_before_train=False
+# =============================================================================
+apiVersion: ray.io/v1
+kind: RayCluster
+metadata:
+  name: verl-rl05
+spec:
+  rayVersion: "2.56.1"
+  headGroupSpec:
+    rayStartParams:
+      num-gpus: "4"
+      dashboard-host: "0.0.0.0"
+    template:
+      metadata:
+        annotations:
+          gke-gcsfuse/volumes: "true"
+          gke-gcsfuse/memory-limit: "8Gi"
+          networking.gke.io/default-interface: 'eth0'
+          networking.gke.io/interfaces: |
+            [
+              {"interfaceName":"eth0","network":"default"},
+              {"interfaceName":"eth2","network":"rdma-0"},
+              {"interfaceName":"eth3","network":"rdma-1"},
+              {"interfaceName":"eth4","network":"rdma-2"},
+              {"interfaceName":"eth5","network":"rdma-3"}
+            ]
+      spec:
+        serviceAccountName: verl-runner
+        resourceClaims:
+        - name: compute-domain-channel
+          resourceClaimTemplateName: verl-rl05-compute-domain-channel
+        nodeSelector:
+          cloud.google.com/gke-nodepool: a4x-highgpu-4g-a4x-pool-2
+        tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+        - key: kubernetes.io/arch
+          operator: Equal
+          value: arm64
+          effect: NoSchedule
+        containers:
+        - name: ray-head
+          image: us-central1-docker.pkg.dev/supercomputer-testing/pirillo-gcr/verl-gemma4:v2.1
+          env:
+          - name: PYTHONPATH
+            value: /workspace/meta-RL/verl
+          - name: LD_LIBRARY_PATH
+            value: /usr/local/nvidia/lib64
+          - name: PATH
+            value: /usr/local/nvidia/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          - name: GLOO_SOCKET_IFNAME
+            value: eth0
+          - name: NCCL_SOCKET_IFNAME
+            value: eth0
+          resources:
+            requests: { nvidia.com/gpu: 4, cpu: "40", memory: 200Gi }
+            limits:   { nvidia.com/gpu: 4, cpu: "60", memory: 400Gi }
+            claims:
+            - name: compute-domain-channel
+          volumeMounts:
+          - { name: meta-rl, mountPath: /workspace/meta-RL }
+          - { name: setup, mountPath: /workspace/setup_env.sh, subPath: setup_env.sh }
+          - { name: dshm, mountPath: /dev/shm }
+          - { name: nvidia-host, mountPath: /usr/local/nvidia }
+          - { name: gib, mountPath: /usr/local/gib }
+        volumes:
+        - name: meta-rl
+          csi:
+            driver: gcsfuse.csi.storage.gke.io
+            volumeAttributes:
+              bucketName: xiaotongyang-bucket
+              mountOptions: "only-dir=meta-rl/GKE_repro/meta-RL,implicit-dirs,file-cache:max-size-mb:20480"
+        - name: setup
+          configMap: { name: verl-rl05-setup-env, defaultMode: 0755 }
+        - name: dshm
+          emptyDir: { medium: Memory, sizeLimit: 64Gi }
+        - name: nvidia-host
+          hostPath: { path: /home/kubernetes/bin/nvidia }
+        - name: gib
+          hostPath: { path: /home/kubernetes/bin/gib }
+  workerGroupSpecs:
+  - groupName: gpu-workers
+    replicas: 1
+    minReplicas: 1
+    maxReplicas: 1
+    rayStartParams:
+      num-gpus: "4"
+    template:
+      metadata:
+        annotations:
+          gke-gcsfuse/volumes: "true"
+          networking.gke.io/default-interface: 'eth0'
+          networking.gke.io/interfaces: |
+            [
+              {"interfaceName":"eth0","network":"default"},
+              {"interfaceName":"eth2","network":"rdma-0"},
+              {"interfaceName":"eth3","network":"rdma-1"},
+              {"interfaceName":"eth4","network":"rdma-2"},
+              {"interfaceName":"eth5","network":"rdma-3"}
+            ]
+      spec:
+        serviceAccountName: verl-runner
+        resourceClaims:
+        - name: compute-domain-channel
+          resourceClaimTemplateName: verl-rl05-compute-domain-channel
+        nodeSelector:
+          cloud.google.com/gke-nodepool: a4x-highgpu-4g-a4x-pool-2
+        tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+        - key: kubernetes.io/arch
+          operator: Equal
+          value: arm64
+          effect: NoSchedule
+        containers:
+        - name: ray-worker
+          image: us-central1-docker.pkg.dev/supercomputer-testing/pirillo-gcr/verl-gemma4:v2.1
+          env:
+          - name: PYTHONPATH
+            value: /workspace/meta-RL/verl
+          - name: LD_LIBRARY_PATH
+            value: /usr/local/nvidia/lib64
+          - name: PATH
+            value: /usr/local/nvidia/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          - name: GLOO_SOCKET_IFNAME
+            value: eth0
+          - name: NCCL_SOCKET_IFNAME
+            value: eth0
+          resources:
+            requests: { nvidia.com/gpu: 4, cpu: "40", memory: 200Gi }
+            limits:   { nvidia.com/gpu: 4, cpu: "60", memory: 400Gi }
+            claims:
+            - name: compute-domain-channel
+          volumeMounts:
+          - { name: meta-rl, mountPath: /workspace/meta-RL }
+          - { name: setup, mountPath: /workspace/setup_env.sh, subPath: setup_env.sh }
+          - { name: dshm, mountPath: /dev/shm }
+          - { name: nvidia-host, mountPath: /usr/local/nvidia }
+          - { name: gib, mountPath: /usr/local/gib }
+        volumes:
+        - name: meta-rl
+          csi:
+            driver: gcsfuse.csi.storage.gke.io
+            volumeAttributes:
+              bucketName: xiaotongyang-bucket
+              mountOptions: "only-dir=meta-rl/GKE_repro/meta-RL,implicit-dirs,file-cache:max-size-mb:20480"
+        - name: setup
+          configMap: { name: verl-rl05-setup-env, defaultMode: 0755 }
+        - name: dshm
+          emptyDir: { medium: Memory, sizeLimit: 64Gi }
+        - name: nvidia-host
+          hostPath: { path: /home/kubernetes/bin/nvidia }
+        - name: gib
+          hostPath: { path: /home/kubernetes/bin/gib }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: verl-rl05-setup-env
+data:
+  setup_env.sh: |-
+    export HOME=/workspace/meta-RL/.home
+    export CACHE_ROOT=/workspace/meta-RL/.cache
+    mkdir -p $HOME $CACHE_ROOT
+    export XDG_CACHE_HOME=$CACHE_ROOT
+    export FLASHINFER_WORKSPACE_BASE=$CACHE_ROOT/flashinfer
+    export HF_HOME=$CACHE_ROOT/huggingface
+    export TRITON_CACHE_DIR=$CACHE_ROOT/triton
+    export TORCHINDUCTOR_CACHE_DIR=$CACHE_ROOT/inductor
+    export HF_HUB_OFFLINE=1
+    unset ROCR_VISIBLE_DEVICES HIP_VISIBLE_DEVICES
+    # RDMA NCCL env (gib) — safe no-op if script absent
+    [ -f /usr/local/gib/scripts/set_nccl_env.sh ] && . /usr/local/gib/scripts/set_nccl_env.sh
+    export PYTHONPATH=/workspace/meta-RL/verl:$PYTHONPATH
+    export SCRIPTS_DIR=/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE
+    export DATA_DIR=/workspace/meta-RL/data/openmathinstruct2
+    export REWARD_FN_PATH=/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE/maxtext_math_reward.py
+    export MODEL_PATH=/workspace/meta-RL/models/Qwen3-0.6B
