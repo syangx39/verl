@@ -96,6 +96,8 @@ spec:
             value: /tmp/cache/inductor
           - name: HF_HUB_OFFLINE
             value: "1"
+          - name: HOME
+            value: /workspace/meta-RL/.home
           resources:
             requests: { nvidia.com/gpu: 4, cpu: "40", memory: 200Gi }
             limits:   { nvidia.com/gpu: 4, cpu: "60", memory: 400Gi }
@@ -181,6 +183,8 @@ spec:
             value: /tmp/cache/inductor
           - name: HF_HUB_OFFLINE
             value: "1"
+          - name: HOME
+            value: /workspace/meta-RL/.home
           resources:
             requests: { nvidia.com/gpu: 4, cpu: "40", memory: 200Gi }
             limits:   { nvidia.com/gpu: 4, cpu: "60", memory: 400Gi }
