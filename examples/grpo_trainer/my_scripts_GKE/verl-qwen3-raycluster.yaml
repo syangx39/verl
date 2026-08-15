@@ -102,6 +102,8 @@ spec:
             value: /workspace/meta-RL/.home
           - name: REWARD_DUMP_DIR
             value: /workspace/meta-RL/logs/rl05_reward_dump
+          - name: TENSORBOARD_DIR
+            value: /workspace/meta-RL/.home/tensorboard_log
           resources:
             requests: { nvidia.com/gpu: 4, cpu: "40", memory: 200Gi }
             limits:   { nvidia.com/gpu: 4, cpu: "60", memory: 400Gi }
@@ -193,6 +195,8 @@ spec:
             value: /workspace/meta-RL/.home
           - name: REWARD_DUMP_DIR
             value: /workspace/meta-RL/logs/rl05_reward_dump
+          - name: TENSORBOARD_DIR
+            value: /workspace/meta-RL/.home/tensorboard_log
           resources:
             requests: { nvidia.com/gpu: 4, cpu: "40", memory: 200Gi }
             limits:   { nvidia.com/gpu: 4, cpu: "60", memory: 400Gi }
