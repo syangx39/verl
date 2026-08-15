@@ -6,12 +6,12 @@
 apiVersion: resource.nvidia.com/v1beta1
 kind: ComputeDomain
 metadata:
-  name: verl-rl05-compute-domain
+  name: verl-qwen3-xiaotongyang-cd
 spec:
   numNodes: 2
   channel:
     resourceClaimTemplate:
-      name: verl-rl05-compute-domain-channel
+      name: verl-qwen3-xiaotongyang-cd-channel
 ---
 # =============================================================================
 # verl on GKE A4X — rl-05 parity (Qwen3-0.6B GRPO/DAPO vs TPU tianyu-rl-05),
@@ -61,7 +61,7 @@ spec:
         serviceAccountName: verl-runner
         resourceClaims:
         - name: compute-domain-channel
-          resourceClaimTemplateName: verl-rl05-compute-domain-channel
+          resourceClaimTemplateName: verl-qwen3-xiaotongyang-cd-channel
         nodeSelector:
           cloud.google.com/gke-nodepool: a4x-highgpu-4g-a4x-pool-2
         tolerations:
@@ -86,6 +86,16 @@ spec:
             value: eth0
           - name: NCCL_SOCKET_IFNAME
             value: eth0
+          - name: XDG_CACHE_HOME
+            value: /tmp/cache
+          - name: HF_HOME
+            value: /tmp/cache/huggingface
+          - name: TRITON_CACHE_DIR
+            value: /tmp/cache/triton
+          - name: TORCHINDUCTOR_CACHE_DIR
+            value: /tmp/cache/inductor
+          - name: HF_HUB_OFFLINE
+            value: "1"
           resources:
             requests: { nvidia.com/gpu: 4, cpu: "40", memory: 200Gi }
             limits:   { nvidia.com/gpu: 4, cpu: "60", memory: 400Gi }
@@ -105,7 +115,7 @@ spec:
               bucketName: xiaotongyang-bucket
               mountOptions: "only-dir=meta-rl/GKE_repro/meta-RL,implicit-dirs,file-cache:max-size-mb:20480"
         - name: setup
-          configMap: { name: verl-rl05-setup-env, defaultMode: 0755 }
+          configMap: { name: verl-qwen3-xiaotongyang-setup-env, defaultMode: 0755 }
         - name: dshm
           emptyDir: { medium: Memory, sizeLimit: 64Gi }
         - name: nvidia-host
@@ -136,7 +146,7 @@ spec:
         serviceAccountName: verl-runner
         resourceClaims:
         - name: compute-domain-channel
-          resourceClaimTemplateName: verl-rl05-compute-domain-channel
+          resourceClaimTemplateName: verl-qwen3-xiaotongyang-cd-channel
         nodeSelector:
           cloud.google.com/gke-nodepool: a4x-highgpu-4g-a4x-pool-2
         tolerations:
@@ -161,6 +171,16 @@ spec:
             value: eth0
           - name: NCCL_SOCKET_IFNAME
             value: eth0
+          - name: XDG_CACHE_HOME
+            value: /tmp/cache
+          - name: HF_HOME
+            value: /tmp/cache/huggingface
+          - name: TRITON_CACHE_DIR
+            value: /tmp/cache/triton
+          - name: TORCHINDUCTOR_CACHE_DIR
+            value: /tmp/cache/inductor
+          - name: HF_HUB_OFFLINE
+            value: "1"
           resources:
             requests: { nvidia.com/gpu: 4, cpu: "40", memory: 200Gi }
             limits:   { nvidia.com/gpu: 4, cpu: "60", memory: 400Gi }
@@ -180,7 +200,7 @@ spec:
               bucketName: xiaotongyang-bucket
               mountOptions: "only-dir=meta-rl/GKE_repro/meta-RL,implicit-dirs,file-cache:max-size-mb:20480"
         - name: setup
-          configMap: { name: verl-rl05-setup-env, defaultMode: 0755 }
+          configMap: { name: verl-qwen3-xiaotongyang-setup-env, defaultMode: 0755 }
         - name: dshm
           emptyDir: { medium: Memory, sizeLimit: 64Gi }
         - name: nvidia-host
@@ -191,23 +211,36 @@ spec:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: verl-rl05-setup-env
+  name: verl-qwen3-xiaotongyang-setup-env
 data:
-  setup_env.sh: |-
+  setup_env.sh: |
+    #!/bin/bash
+    # =========================================================================
+    # Environment for verl rl-05 parity runs (Qwen3-0.6B GRPO/DAPO on GKE A4X).
+    # Everything lives on the bucket (FUSE at /workspace/meta-RL):
+    #   verl/    source tree (bucket copy is the runtime source of truth;
+    #            sync to the github fork and record the SHA before any
+    #            OFFICIAL measured run -- see [provenance] echo below)
+    #   models/  Qwen3-0.6B     data/ openmathinstruct2     logs/  .home/
+    # =========================================================================
     export HOME=/workspace/meta-RL/.home
-    export CACHE_ROOT=/workspace/meta-RL/.cache
-    mkdir -p $HOME $CACHE_ROOT
+    mkdir -p "$HOME"
+
+    export PYTHONPATH=/workspace/meta-RL/verl:${PYTHONPATH:-}
+    export SCRIPTS_DIR=/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE
+
+    export MODEL_PATH=/workspace/meta-RL/models/Qwen3-0.6B
+    export DATA_DIR=/workspace/meta-RL/data/openmathinstruct2
+    export REWARD_FN_PATH=$SCRIPTS_DIR/maxtext_math_reward.py
+
+    export CACHE_ROOT=/tmp/cache
+    mkdir -p $CACHE_ROOT
     export XDG_CACHE_HOME=$CACHE_ROOT
-    export FLASHINFER_WORKSPACE_BASE=$CACHE_ROOT/flashinfer
     export HF_HOME=$CACHE_ROOT/huggingface
     export TRITON_CACHE_DIR=$CACHE_ROOT/triton
     export TORCHINDUCTOR_CACHE_DIR=$CACHE_ROOT/inductor
     export HF_HUB_OFFLINE=1
+
     unset ROCR_VISIBLE_DEVICES HIP_VISIBLE_DEVICES
-    # RDMA NCCL env (gib) — safe no-op if script absent
+    # RDMA NCCL env (gib) -- safe no-op if script absent
     [ -f /usr/local/gib/scripts/set_nccl_env.sh ] && . /usr/local/gib/scripts/set_nccl_env.sh
-    export PYTHONPATH=/workspace/meta-RL/verl:$PYTHONPATH
-    export SCRIPTS_DIR=/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE
-    export DATA_DIR=/workspace/meta-RL/data/openmathinstruct2
-    export REWARD_FN_PATH=/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE/maxtext_math_reward.py
-    export MODEL_PATH=/workspace/meta-RL/models/Qwen3-0.6B
