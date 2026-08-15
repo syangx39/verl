@@ -26,6 +26,8 @@
 set -xeuo pipefail
 
 ########################### paths (site-specific) ###########################
+export TENSORBOARD_DIR=${TENSORBOARD_DIR:-/workspace/meta-RL/.home/tensorboard_log}
+
 # Preprocessed OpenMathInstruct-2 parquet: MUST be built with the same chat
 # template / prompt format as the MaxText data template (see preprocess
 # script; token-identical prompts are a precondition for curve overlay).

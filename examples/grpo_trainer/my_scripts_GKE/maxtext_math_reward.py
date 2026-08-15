@@ -304,8 +304,21 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, **kw
       rec = {"call": _call_count, "fmt": fmt, "ans": ans,
              "n_chars": len(completion), "n_tokens": n_tok,
              "gt": str(ground_truth)[:80], "tail": completion[-160:]}
-      _run_tag = _os.environ.get("EXPERIMENT_NAME", "run")
-      fn = _os.path.join(_DUMP_DIR, f"{_run_tag}_pid{_os.getpid()}.jsonl")
+      # Per-run SUBDIRECTORY: <dump_dir>/<run_tag>/pid*.jsonl -- one folder
+      # per run, so runs never mix and archival needs no mv. run_tag prefers
+      # EXPERIMENT_NAME (usually absent in reward workers, which see only
+      # container env) and falls back to this process's first-call date+hour;
+      # all workers of one run boot within the same minute, so they agree on
+      # the folder and it matches the tee'd log's timestamp.
+      _run_tag = _os.environ.get("EXPERIMENT_NAME")
+      if not _run_tag:
+        if not hasattr(compute_score, "_boot_tag"):
+          import datetime as _dt
+          compute_score._boot_tag = _dt.datetime.now().strftime("run%m%d_%H%M")
+        _run_tag = compute_score._boot_tag
+      _run_dir = _os.path.join(_DUMP_DIR, _run_tag)
+      _os.makedirs(_run_dir, exist_ok=True)
+      fn = _os.path.join(_run_dir, f"pid{_os.getpid()}.jsonl")
       with open(fn, "a", encoding="utf-8") as f:
         f.write(_json.dumps(rec, ensure_ascii=False) + "\n")
     except OSError:
