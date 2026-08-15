@@ -304,7 +304,8 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, **kw
       rec = {"call": _call_count, "fmt": fmt, "ans": ans,
              "n_chars": len(completion), "n_tokens": n_tok,
              "gt": str(ground_truth)[:80], "tail": completion[-160:]}
-      fn = _os.path.join(_DUMP_DIR, f"reward_dump_pid{_os.getpid()}.jsonl")
+      _run_tag = _os.environ.get("EXPERIMENT_NAME", "run")
+      fn = _os.path.join(_DUMP_DIR, f"{_run_tag}_pid{_os.getpid()}.jsonl")
       with open(fn, "a", encoding="utf-8") as f:
         f.write(_json.dumps(rec, ensure_ascii=False) + "\n")
     except OSError:

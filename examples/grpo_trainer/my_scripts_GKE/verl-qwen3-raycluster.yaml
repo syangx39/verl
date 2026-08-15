@@ -92,12 +92,16 @@ spec:
             value: /tmp/cache/huggingface
           - name: TRITON_CACHE_DIR
             value: /tmp/cache/triton
+          - name: FLASHINFER_WORKSPACE_BASE
+            value: /tmp/cache/flashinfer
           - name: TORCHINDUCTOR_CACHE_DIR
             value: /tmp/cache/inductor
           - name: HF_HUB_OFFLINE
             value: "1"
           - name: HOME
             value: /workspace/meta-RL/.home
+          - name: REWARD_DUMP_DIR
+            value: /workspace/meta-RL/logs/rl05_reward_dump
           resources:
             requests: { nvidia.com/gpu: 4, cpu: "40", memory: 200Gi }
             limits:   { nvidia.com/gpu: 4, cpu: "60", memory: 400Gi }
@@ -181,10 +185,14 @@ spec:
             value: /tmp/cache/triton
           - name: TORCHINDUCTOR_CACHE_DIR
             value: /tmp/cache/inductor
+          - name: FLASHINFER_WORKSPACE_BASE
+            value: /tmp/cache/flashinfer
           - name: HF_HUB_OFFLINE
             value: "1"
           - name: HOME
             value: /workspace/meta-RL/.home
+          - name: REWARD_DUMP_DIR
+            value: /workspace/meta-RL/logs/rl05_reward_dump
           resources:
             requests: { nvidia.com/gpu: 4, cpu: "40", memory: 200Gi }
             limits:   { nvidia.com/gpu: 4, cpu: "60", memory: 400Gi }
@@ -220,23 +228,24 @@ data:
   setup_env.sh: |
     #!/bin/bash
     # =========================================================================
-    # Environment for verl rl-05 parity runs (Qwen3-0.6B GRPO/DAPO on GKE A4X).
-    # Everything lives on the bucket (FUSE at /workspace/meta-RL):
-    #   verl/    source tree (bucket copy is the runtime source of truth;
-    #            sync to the github fork and record the SHA before any
-    #            OFFICIAL measured run -- see [provenance] echo below)
-    #   models/  Qwen3-0.6B     data/ openmathinstruct2     logs/  .home/
+    # setup_env.sh -- INTERACTIVE-SHELL environment for rl-05 parity runs
+    # (Qwen3-0.6B GRPO/DAPO on GKE A4X; bucket FUSE at /workspace/meta-RL).
+    #
+    # TWO WORLDS RULE
+    #   * Values read by PYTHON TRAINING PROCESSES (ray actors/workers) MUST
+    #     live in the pod containers' env: in this yaml. They do NOT inherit
+    #     shell exports. Currently there: PYTHONPATH, LD_LIBRARY_PATH, PATH,
+    #     GLOO/NCCL_SOCKET_IFNAME, HOME, REWARD_DUMP_DIR, XDG_CACHE_HOME,
+    #     HF_HOME, TRITON_CACHE_DIR, TORCHINDUCTOR_CACHE_DIR, HF_HUB_OFFLINE.
+    #   * Values read by BASH (this shell, launch scripts) live here.
+    # This file mirrors a few container-env values for shell convenience only;
+    # the yaml copies are the ones that matter for the run.
     # =========================================================================
+
+    # ---- mirrors of container env (shell convenience; yaml is authoritative)
     export HOME=/workspace/meta-RL/.home
     mkdir -p "$HOME"
-
     export PYTHONPATH=/workspace/meta-RL/verl:${PYTHONPATH:-}
-    export SCRIPTS_DIR=/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE
-
-    export MODEL_PATH=/workspace/meta-RL/models/Qwen3-0.6B
-    export DATA_DIR=/workspace/meta-RL/data/openmathinstruct2
-    export REWARD_FN_PATH=$SCRIPTS_DIR/maxtext_math_reward.py
-
     export CACHE_ROOT=/tmp/cache
     mkdir -p $CACHE_ROOT
     export XDG_CACHE_HOME=$CACHE_ROOT
@@ -245,6 +254,14 @@ data:
     export TORCHINDUCTOR_CACHE_DIR=$CACHE_ROOT/inductor
     export HF_HUB_OFFLINE=1
 
+    # ---- shell-world values (read by launch scripts, not by ray workers)
+    export SCRIPTS_DIR=/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE
+    export MODEL_PATH=/workspace/meta-RL/models/Qwen3-0.6B
+    export DATA_DIR=/workspace/meta-RL/data/openmathinstruct2
+    export REWARD_FN_PATH=$SCRIPTS_DIR/maxtext_math_reward.py
+    mkdir -p /workspace/meta-RL/logs
+
+    # ---- runtime hygiene
     unset ROCR_VISIBLE_DEVICES HIP_VISIBLE_DEVICES
     # RDMA NCCL env (gib) -- safe no-op if script absent
     [ -f /usr/local/gib/scripts/set_nccl_env.sh ] && . /usr/local/gib/scripts/set_nccl_env.sh
