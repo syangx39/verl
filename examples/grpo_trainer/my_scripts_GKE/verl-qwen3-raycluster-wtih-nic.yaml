@@ -47,6 +47,14 @@ spec:
         resourceClaims:
         - name: compute-domain-channel
           resourceClaimTemplateName: verl-qwen3-xiaotongyang-cd-channel
+        - name: rdma-nic-0
+          resourceClaimTemplateName: verl-rdma-nic
+        - name: rdma-nic-1
+          resourceClaimTemplateName: verl-rdma-nic
+        - name: rdma-nic-2
+          resourceClaimTemplateName: verl-rdma-nic
+        - name: rdma-nic-3
+          resourceClaimTemplateName: verl-rdma-nic
         nodeSelector:
           cloud.google.com/gke-nodepool: a4x-highgpu-4g-a4x-pool-2
         tolerations:
@@ -110,6 +118,10 @@ spec:
             limits:   { nvidia.com/gpu: 4, cpu: "60", memory: 400Gi }
             claims:
             - name: compute-domain-channel
+            - name: rdma-nic-0
+            - name: rdma-nic-1
+            - name: rdma-nic-2
+            - name: rdma-nic-3
           volumeMounts:
           - { name: meta-rl, mountPath: /workspace/meta-RL }
           - { name: setup, mountPath: /workspace/setup_env.sh, subPath: setup_env.sh }
@@ -133,9 +145,9 @@ spec:
           hostPath: { path: /home/kubernetes/bin/gib }
   workerGroupSpecs:
   - groupName: gpu-workers
-    replicas: 15
-    minReplicas: 15
-    maxReplicas: 15
+    replicas: 1
+    minReplicas: 1
+    maxReplicas: 1
     rayStartParams:
       num-gpus: "4"
     template:
@@ -156,6 +168,14 @@ spec:
         resourceClaims:
         - name: compute-domain-channel
           resourceClaimTemplateName: verl-qwen3-xiaotongyang-cd-channel
+        - name: rdma-nic-0
+          resourceClaimTemplateName: verl-rdma-nic
+        - name: rdma-nic-1
+          resourceClaimTemplateName: verl-rdma-nic
+        - name: rdma-nic-2
+          resourceClaimTemplateName: verl-rdma-nic
+        - name: rdma-nic-3
+          resourceClaimTemplateName: verl-rdma-nic
         nodeSelector:
           cloud.google.com/gke-nodepool: a4x-highgpu-4g-a4x-pool-2
         tolerations:
@@ -219,6 +239,10 @@ spec:
             limits:   { nvidia.com/gpu: 4, cpu: "60", memory: 400Gi }
             claims:
             - name: compute-domain-channel
+            - name: rdma-nic-0
+            - name: rdma-nic-1
+            - name: rdma-nic-2
+            - name: rdma-nic-3
           volumeMounts:
           - { name: meta-rl, mountPath: /workspace/meta-RL }
           - { name: setup, mountPath: /workspace/setup_env.sh, subPath: setup_env.sh }
