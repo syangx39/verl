@@ -113,6 +113,10 @@ if [ -z "${RAY_ADDRESS:-}" ]; then
   RAY_NUM_GPUS_ARG="+ray_kwargs.ray_init.num_gpus=${NGPUS_PER_NODE}"
 fi
 
+# runtime-env: propagates to ALL ray-launched processes (engines, reward
+# workers, TaskRunner) — the sanctioned channel for per-run dynamic values.
+# RAY_RUNTIME_ENV_ARG="+ray_kwargs.ray_init.runtime_env.env_vars.EXPERIMENT_NAME=${EXPERIMENT_NAME}"
+
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
     algorithm.use_kl_in_reward=False \
@@ -169,6 +173,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.total_epochs=1 \
     trainer.total_training_steps=${TOTAL_STEPS} \
     ${RAY_NUM_GPUS_ARG} \
+    # ${RAY_RUNTIME_ENV_ARG} \
     "$@"
 
 # =============================================================================
