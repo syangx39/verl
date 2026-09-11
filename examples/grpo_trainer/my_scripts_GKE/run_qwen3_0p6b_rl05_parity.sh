@@ -71,7 +71,8 @@ W=$(( NNODES * NGPUS_PER_NODE ))
 EXPERIMENT_NAME=${EXPERIMENT_NAME:-qwen3_0p6b_phase0_seed${SEED}_${NNODES}n${W}g_$(date +%Y%m%d_%H%M)}
 TB_DIR=${TB_ROOT}/${PROJECT_NAME}/${EXPERIMENT_NAME}
 VAL_DUMP_DIR=${LOG_DIR}/${EXPERIMENT_NAME}/val_dump
-mkdir -p "${TB_DIR}" "${VAL_DUMP_DIR}"
+ROLLOUT_DUMP_DIR=${LOG_DIR}/${EXPERIMENT_NAME}/rollout_dump   # per-step train samples (acc/fmt per sample)
+mkdir -p "${TB_DIR}" "${VAL_DUMP_DIR}" "${ROLLOUT_DUMP_DIR}"
 
 ########################### frozen invariants -- do not tune ################
 # BYTE-IDENTICAL to run_qwen3_0p6b_rl05_parity.sh. Any change here = new recipe.
@@ -100,6 +101,7 @@ echo "[phase0] steps=${TOTAL_STEPS} test_freq=${TEST_FREQ} save_freq=${SAVE_FREQ
 echo "[phase0] tensorboard -> ${TB_DIR}"
 echo "[phase0] checkpoints -> ${CKPT_DIR}/${EXPERIMENT_NAME}"
 echo "[phase0] val dumps   -> ${VAL_DUMP_DIR}"
+echo "[phase0] train dumps -> ${ROLLOUT_DUMP_DIR}"
 echo "[phase0] reward dump -> ${REWARD_DUMP_DIR:-<unset>}/${EXPERIMENT_NAME}"
 
 RAY_NUM_GPUS_ARG=""
@@ -170,6 +172,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.val_before_train=True \
     trainer.log_val_generations=10 \
     trainer.validation_data_dir="${VAL_DUMP_DIR}" \
+    trainer.rollout_data_dir="${ROLLOUT_DUMP_DIR}" \
     trainer.total_epochs=100 \
     trainer.total_training_steps=${TOTAL_STEPS} \
     +ray_kwargs.ray_init.runtime_env.env_vars.TENSORBOARD_DIR="${TB_DIR}" \
@@ -180,13 +183,13 @@ python3 -m verl.trainer.main_ppo \
 # =============================================================================
 # Notes:
 #   * trainer.total_epochs=100 is a ceiling; verl stops at total_training_steps.
-#   * If you want the FULL per-sample training record (inputs/outputs/score/acc/fmt
-#     for all 2048 completions every step, ~30 MB/step on gcsfuse) add
-#     trainer.rollout_data_dir=${LOG_DIR}/${EXPERIMENT_NAME}/rollout_dump
-#     The aggregate jsonl from the reward fn is the cheap default.
+#   * trainer.rollout_data_dir writes <step>.jsonl (input/output/gts/score/acc/fmt for
+#     all 2048 completions) in a background thread, ~35 MB/step on gcsfuse -> ~11 GB
+#     for 300 steps. It is the source for the per-step train acc / solve_all /
+#     solve_none panels (plot_phase0.py --rollout). Drop the flag for timing runs.
 #   * Smoke-test checklist before the real run:
 #       - TB tags present: critic/score/mean, val-core/*/reward/mean@1,
 #         val-aux/*/acc/mean@1, training/rollout_probs_diff_mean, actor/pg_clipfrac
-#       - ${REWARD_DUMP_DIR}/${EXPERIMENT_NAME}/agg_pid*.jsonl written; sum(n) == steps*2048
+#       - ${ROLLOUT_DUMP_DIR}/1.jsonl exists with 2048 lines and acc/fmt keys
 #       - one checkpoint written, hf_model/ present inside it, write time noted
 # =============================================================================

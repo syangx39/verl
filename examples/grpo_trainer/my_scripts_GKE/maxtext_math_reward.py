@@ -25,24 +25,19 @@ verl interface (custom_reward_function.path/.name):
                    == MaxText `answer` element
 
 PHASE-0 CHANGE (logging only, reward semantics untouched):
-  * compute_score now returns a dict. verl's reward manager uses ["score"] as the
+  * compute_score returns a dict. verl's reward manager uses ["score"] as the
     training reward (identical to the old scalar: fmt + ans) and forwards the
     other keys as reward_extra_info:
         score = fmt + ans          (what the optimizer sees; unchanged)
         acc   = 1.0 if ans >= 1.0  (answer correct)            <- Y axis of the main plot
         fmt   = 1.0 if fmt  > 0    (<reasoning>/<answer> tags present)
-    Validation logs these per data_source as val-aux/<ds>/acc/mean@1 etc.
-    Training does NOT log reward_extra_info to TensorBoard in verl 0.8, so:
-  * per-window AGGREGATES: every REWARD_AGG_EVERY calls (default = REWARD_DUMP_EVERY,
-    i.e. one training step's share for this process) each reward process writes one
-    record {n, acc, fmt, n_groups, solve_all, solve_none, mean_chars} to
-    <REWARD_DUMP_DIR>/<run_tag>/agg_pid<pid>.jsonl. solve_all/solve_none are computed
-    over GRPO groups (completions sharing extra_info["index"]) that landed fully inside
-    this process's window -- exact when one process scores whole groups, approximate
-    otherwise; n_groups/mean_group_size are recorded so you can tell.
-    plot_phase0.py merges the pid files by window index.
-    Sanity check for the window size: sum(n) over all pids and windows must equal
-    steps x 2048. If you see 1 pid file, set REWARD_AGG_EVERY=2048.
+    Validation logs these per data_source (val-core/<ds>/acc/mean@1, val-aux/...).
+    For the per-step TRAINING acc/fmt curve use trainer.rollout_data_dir: verl then
+    writes <dir>/<step>.jsonl with input/output/gts/score/acc/fmt for every sample
+    of every step, in a background thread. plot_phase0.py reads that. (An earlier
+    version aggregated inside this function; verl calls compute_score from several
+    threads per AgentLoopWorker and also for validation rows, so call-count windows
+    are neither thread-safe nor step-aligned. Dropped.)
 
 Porting notes / deltas:
   * normalize chain (SUBSTITUTIONS/UNITS/REMOVED_EXPRESSIONS, fix_latex_escaping,
@@ -290,28 +285,31 @@ def _answer_score(completion: str, ground_truth_json: str) -> float:
   return 0.0
 
 
-# --------------------------- dump / aggregate plumbing ----------------------
-# Sample dump (unchanged from the rl05 version): the FIRST N reward calls per
-# process per step-window, a handful of concrete completions per step.
+# --------------------------- sample dump -----------------------------------
+# A small qualitative sample of concrete completions (tail text + reward split),
+# the FIRST N reward calls per process per window of REWARD_DUMP_EVERY calls.
 #   REWARD_DUMP_DIR=<dir>       enable (default off)
-#   REWARD_DUMP_PER_STEP=2      samples per process per step-window
-#   REWARD_DUMP_EVERY=512       calls per process per step-window
-#                               (2048 completions / 4 reward processes)
-# Aggregate (Phase 0): one record per process per window, see module docstring.
-#   REWARD_AGG_EVERY=<int>      window size for aggregates (default = REWARD_DUMP_EVERY)
+#   REWARD_DUMP_PER_STEP=2      samples per process per window
+#   REWARD_DUMP_EVERY=512       calls per window
+# verl calls compute_score from several threads per AgentLoopWorker process and
+# from many nodes (pids collide across nodes), so: one lock per process, and the
+# file name carries the hostname. Validation rows also pass through here; the
+# record carries data_source so they can be told apart.
+import socket as _socket
+import threading as _threading
+
 _DUMP_DIR = os.environ.get("REWARD_DUMP_DIR", "")
 _DUMP_PER_STEP = int(os.environ.get("REWARD_DUMP_PER_STEP", "2"))
 _DUMP_EVERY = int(os.environ.get("REWARD_DUMP_EVERY", "512"))
-_AGG_EVERY = int(os.environ.get("REWARD_AGG_EVERY", str(_DUMP_EVERY)))
 _call_count = 0
-
-# Per-run SUBDIRECTORY: <dump_dir>/<run_tag>/... -- one folder per run, so runs
-# never mix. run_tag prefers EXPERIMENT_NAME (passed via ray runtime_env in the
-# Phase-0 launcher) and falls back to this process's first-call date+hour.
+_lock = _threading.Lock()
 _boot_tag = None
+_host = _socket.gethostname().split(".")[0]
 
 
 def _run_dir() -> str:
+  """<dump_dir>/<run_tag>/ -- run_tag = EXPERIMENT_NAME (pushed via ray runtime_env
+  by the Phase-0 launcher) or this process's first-call date+hour as fallback."""
   global _boot_tag
   tag = os.environ.get("EXPERIMENT_NAME")
   if not tag:
@@ -323,77 +321,37 @@ def _run_dir() -> str:
   return d
 
 
-def _new_agg():
-  return {"n": 0, "acc": 0.0, "fmt": 0.0, "chars": 0, "groups": {}}
-
-
-_agg = _new_agg()
-
-
-def _agg_add(acc_flag: float, fmt_flag: float, n_chars: int, group_key):
-  _agg["n"] += 1
-  _agg["acc"] += acc_flag
-  _agg["fmt"] += fmt_flag
-  _agg["chars"] += n_chars
-  if group_key is not None:
-    _agg["groups"].setdefault(str(group_key), []).append(acc_flag >= 1.0)
-
-
-def _agg_flush(window_idx: int):
-  global _agg
-  a, _agg = _agg, _new_agg()
-  if a["n"] == 0:
-    return
-  groups = [g for g in a["groups"].values() if len(g) >= 2]
-  rec = {
-      "window": window_idx,
-      "n": a["n"],
-      "acc": a["acc"] / a["n"],
-      "fmt": a["fmt"] / a["n"],
-      "mean_chars": a["chars"] / a["n"],
-      "n_groups": len(groups),
-      "mean_group_size": (sum(len(g) for g in groups) / len(groups)) if groups else 0.0,
-      "solve_all": (sum(1 for g in groups if all(g)) / len(groups)) if groups else None,
-      "solve_none": (sum(1 for g in groups if not any(g)) / len(groups)) if groups else None,
-  }
-  fn = os.path.join(_run_dir(), f"agg_pid{os.getpid()}.jsonl")
-  with open(fn, "a", encoding="utf-8") as f:
-    f.write(json.dumps(rec) + "\n")
-
-
 def compute_score(data_source, solution_str, ground_truth, extra_info=None, **kwargs):
   """verl custom reward entry point.
 
   Returns a dict: {"score": fmt + ans, "acc": 0/1, "fmt": 0/1}.
   "score" is the training reward (identical to the previous scalar return).
   """
-  del data_source, kwargs
+  del kwargs
   completion = solution_str if isinstance(solution_str, str) else str(solution_str)
   fmt = _format_score(completion)
   ans = _answer_score(completion, ground_truth)
   acc_flag = 1.0 if ans >= REWARD_EXACT_ANSWER else 0.0
   fmt_flag = 1.0 if fmt > 0 else 0.0
 
-  global _call_count
   if _DUMP_DIR:
+    global _call_count
     try:  # fail-open: a logging bug must never affect the run
-      group_key = extra_info.get("index") if isinstance(extra_info, dict) else None
-      _agg_add(acc_flag, fmt_flag, len(completion), group_key)
-      if (_call_count % _AGG_EVERY) == _AGG_EVERY - 1:
-        _agg_flush(_call_count // _AGG_EVERY)
-      if (_call_count % _DUMP_EVERY) < _DUMP_PER_STEP:
-        n_tok = None
-        if isinstance(extra_info, dict):
-          n_tok = extra_info.get("num_response_tokens") or extra_info.get("response_length")
-        rec = {"call": _call_count, "fmt": fmt, "ans": ans,
-               "n_chars": len(completion), "n_tokens": n_tok,
-               "gt": str(ground_truth)[:80], "tail": completion[-160:]}
-        fn = os.path.join(_run_dir(), f"pid{os.getpid()}.jsonl")
-        with open(fn, "a", encoding="utf-8") as f:
-          f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+      with _lock:
+        c = _call_count
+        _call_count += 1
+        if (c % _DUMP_EVERY) < _DUMP_PER_STEP:
+          n_tok = None
+          if isinstance(extra_info, dict):
+            n_tok = extra_info.get("num_response_tokens") or extra_info.get("response_length")
+          rec = {"call": c, "data_source": str(data_source), "fmt": fmt, "ans": ans,
+                 "n_chars": len(completion), "n_tokens": n_tok,
+                 "gt": str(ground_truth)[:80], "tail": completion[-160:]}
+          fn = os.path.join(_run_dir(), f"samples_{_host}_pid{os.getpid()}.jsonl")
+          with open(fn, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     except (OSError, AttributeError):
       pass
-  _call_count += 1
   return {"score": fmt + ans, "acc": acc_flag, "fmt": fmt_flag}
 
 
