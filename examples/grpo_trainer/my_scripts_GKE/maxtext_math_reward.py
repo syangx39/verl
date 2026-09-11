@@ -19,25 +19,47 @@ MaxText total reward per completion = sum of three fns:
 Reward support: {0.0, 0.1, 1.0, 1.1}.
 
 verl interface (custom_reward_function.path/.name):
-    compute_score(data_source, solution_str, ground_truth, extra_info=None) -> float
+    compute_score(data_source, solution_str, ground_truth, extra_info=None) -> dict
   - solution_str : the decoded completion (response only)  == MaxText `completion`
   - ground_truth : json.dumps([answer, answer]) written by our preprocess script
                    == MaxText `answer` element
 
+PHASE-0 CHANGE (logging only, reward semantics untouched):
+  * compute_score now returns a dict. verl's reward manager uses ["score"] as the
+    training reward (identical to the old scalar: fmt + ans) and forwards the
+    other keys as reward_extra_info:
+        score = fmt + ans          (what the optimizer sees; unchanged)
+        acc   = 1.0 if ans >= 1.0  (answer correct)            <- Y axis of the main plot
+        fmt   = 1.0 if fmt  > 0    (<reasoning>/<answer> tags present)
+    Validation logs these per data_source as val-aux/<ds>/acc/mean@1 etc.
+    Training does NOT log reward_extra_info to TensorBoard in verl 0.8, so:
+  * per-window AGGREGATES: every REWARD_AGG_EVERY calls (default = REWARD_DUMP_EVERY,
+    i.e. one training step's share for this process) each reward process writes one
+    record {n, acc, fmt, n_groups, solve_all, solve_none, mean_chars} to
+    <REWARD_DUMP_DIR>/<run_tag>/agg_pid<pid>.jsonl. solve_all/solve_none are computed
+    over GRPO groups (completions sharing extra_info["index"]) that landed fully inside
+    this process's window -- exact when one process scores whole groups, approximate
+    otherwise; n_groups/mean_group_size are recorded so you can tell.
+    plot_phase0.py merges the pid files by window index.
+    Sanity check for the window size: sum(n) over all pids and windows must equal
+    steps x 2048. If you see 1 pid file, set REWARD_AGG_EVERY=2048.
+
 Porting notes / deltas:
   * normalize chain (SUBSTITUTIONS/UNITS/REMOVED_EXPRESSIONS, fix_latex_escaping,
-    normalize_final_answer, extract_answer) copied verbatim — these define which
+    normalize_final_answer, extract_answer) copied verbatim -- these define which
     answers count as correct; any drift breaks curve overlay.
   * math_verify: MaxText runs it in a kill-able spawn pool (hung sympy). Here we
     call in-process with try/except. Pathological hangs are rarer than crashes;
     if a hang is observed, add signal.alarm or a pebble pool. Pin the SAME
-    math-verify version as the TPU image (record in §3.5 version table).
+    math-verify version as the TPU image (record in the rulebook version table).
   * debug logging / MCQ path / gsm8k hash path dropped (not exercised by
     OpenMathInstruct-2 default question_type).
 """
 
+import datetime as _dt
 import itertools
 import json
+import os
 import re
 
 from math_verify import parse, verify
@@ -268,79 +290,127 @@ def _answer_score(completion: str, ground_truth_json: str) -> float:
   return 0.0
 
 
-# --------------------------- lendist / reward dump --------------------------
-# Parity instrumentation mirroring the TPU side's patch_lendist.py. Headline
-# cross-check numbers (osl_mean, cap-hit %) come from tensorboard for free
-# (response_length/mean|max|min|clip_ratio, full-batch, every step). This dump
-# adds a small qualitative sample: the FIRST N reward calls in each worker
-# process per step-window, giving a handful of concrete completions per step
-# (reward split + tail text) without per-call RNG or volume.
+# --------------------------- dump / aggregate plumbing ----------------------
+# Sample dump (unchanged from the rl05 version): the FIRST N reward calls per
+# process per step-window, a handful of concrete completions per step.
 #   REWARD_DUMP_DIR=<dir>       enable (default off)
-#   REWARD_DUMP_PER_STEP=2      samples per worker per step-window
-# Step detection is call-count based: batch_size x rollout_n / num_workers
-# calls arrive per step per worker; we reset the quota every REWARD_DUMP_EVERY
-# calls (default 512 = 2048 completions / 4 reward workers).
-import json as _json, os as _os
-
-_DUMP_DIR = _os.environ.get("REWARD_DUMP_DIR", "")
-_DUMP_PER_STEP = int(_os.environ.get("REWARD_DUMP_PER_STEP", "2"))
-_DUMP_EVERY = int(_os.environ.get("REWARD_DUMP_EVERY", "512"))
+#   REWARD_DUMP_PER_STEP=2      samples per process per step-window
+#   REWARD_DUMP_EVERY=512       calls per process per step-window
+#                               (2048 completions / 4 reward processes)
+# Aggregate (Phase 0): one record per process per window, see module docstring.
+#   REWARD_AGG_EVERY=<int>      window size for aggregates (default = REWARD_DUMP_EVERY)
+_DUMP_DIR = os.environ.get("REWARD_DUMP_DIR", "")
+_DUMP_PER_STEP = int(os.environ.get("REWARD_DUMP_PER_STEP", "2"))
+_DUMP_EVERY = int(os.environ.get("REWARD_DUMP_EVERY", "512"))
+_AGG_EVERY = int(os.environ.get("REWARD_AGG_EVERY", str(_DUMP_EVERY)))
 _call_count = 0
+
+# Per-run SUBDIRECTORY: <dump_dir>/<run_tag>/... -- one folder per run, so runs
+# never mix. run_tag prefers EXPERIMENT_NAME (passed via ray runtime_env in the
+# Phase-0 launcher) and falls back to this process's first-call date+hour.
+_boot_tag = None
+
+
+def _run_dir() -> str:
+  global _boot_tag
+  tag = os.environ.get("EXPERIMENT_NAME")
+  if not tag:
+    if _boot_tag is None:
+      _boot_tag = _dt.datetime.now().strftime("run%m%d_%H%M")
+    tag = _boot_tag
+  d = os.path.join(_DUMP_DIR, tag)
+  os.makedirs(d, exist_ok=True)
+  return d
+
+
+def _new_agg():
+  return {"n": 0, "acc": 0.0, "fmt": 0.0, "chars": 0, "groups": {}}
+
+
+_agg = _new_agg()
+
+
+def _agg_add(acc_flag: float, fmt_flag: float, n_chars: int, group_key):
+  _agg["n"] += 1
+  _agg["acc"] += acc_flag
+  _agg["fmt"] += fmt_flag
+  _agg["chars"] += n_chars
+  if group_key is not None:
+    _agg["groups"].setdefault(str(group_key), []).append(acc_flag >= 1.0)
+
+
+def _agg_flush(window_idx: int):
+  global _agg
+  a, _agg = _agg, _new_agg()
+  if a["n"] == 0:
+    return
+  groups = [g for g in a["groups"].values() if len(g) >= 2]
+  rec = {
+      "window": window_idx,
+      "n": a["n"],
+      "acc": a["acc"] / a["n"],
+      "fmt": a["fmt"] / a["n"],
+      "mean_chars": a["chars"] / a["n"],
+      "n_groups": len(groups),
+      "mean_group_size": (sum(len(g) for g in groups) / len(groups)) if groups else 0.0,
+      "solve_all": (sum(1 for g in groups if all(g)) / len(groups)) if groups else None,
+      "solve_none": (sum(1 for g in groups if not any(g)) / len(groups)) if groups else None,
+  }
+  fn = os.path.join(_run_dir(), f"agg_pid{os.getpid()}.jsonl")
+  with open(fn, "a", encoding="utf-8") as f:
+    f.write(json.dumps(rec) + "\n")
 
 
 def compute_score(data_source, solution_str, ground_truth, extra_info=None, **kwargs):
-  """verl custom reward entry point. Total = format(0.1) + answer(1.0)."""
+  """verl custom reward entry point.
+
+  Returns a dict: {"score": fmt + ans, "acc": 0/1, "fmt": 0/1}.
+  "score" is the training reward (identical to the previous scalar return).
+  """
   del data_source, kwargs
   completion = solution_str if isinstance(solution_str, str) else str(solution_str)
   fmt = _format_score(completion)
   ans = _answer_score(completion, ground_truth)
+  acc_flag = 1.0 if ans >= REWARD_EXACT_ANSWER else 0.0
+  fmt_flag = 1.0 if fmt > 0 else 0.0
+
   global _call_count
-  if _DUMP_DIR and (_call_count % _DUMP_EVERY) < _DUMP_PER_STEP:
+  if _DUMP_DIR:
     try:  # fail-open: a logging bug must never affect the run
-      _os.makedirs(_DUMP_DIR, exist_ok=True)
-      n_tok = None
-      if isinstance(extra_info, dict):
-        n_tok = extra_info.get("num_response_tokens") or extra_info.get("response_length")
-      rec = {"call": _call_count, "fmt": fmt, "ans": ans,
-             "n_chars": len(completion), "n_tokens": n_tok,
-             "gt": str(ground_truth)[:80], "tail": completion[-160:]}
-      # Per-run SUBDIRECTORY: <dump_dir>/<run_tag>/pid*.jsonl -- one folder
-      # per run, so runs never mix and archival needs no mv. run_tag prefers
-      # EXPERIMENT_NAME (usually absent in reward workers, which see only
-      # container env) and falls back to this process's first-call date+hour;
-      # all workers of one run boot within the same minute, so they agree on
-      # the folder and it matches the tee'd log's timestamp.
-      _run_tag = _os.environ.get("EXPERIMENT_NAME")
-      if not _run_tag:
-        if not hasattr(compute_score, "_boot_tag"):
-          import datetime as _dt
-          compute_score._boot_tag = _dt.datetime.now().strftime("run%m%d_%H%M")
-        _run_tag = compute_score._boot_tag
-      _run_dir = _os.path.join(_DUMP_DIR, _run_tag)
-      _os.makedirs(_run_dir, exist_ok=True)
-      fn = _os.path.join(_run_dir, f"pid{_os.getpid()}.jsonl")
-      with open(fn, "a", encoding="utf-8") as f:
-        f.write(_json.dumps(rec, ensure_ascii=False) + "\n")
-    except OSError:
+      group_key = extra_info.get("index") if isinstance(extra_info, dict) else None
+      _agg_add(acc_flag, fmt_flag, len(completion), group_key)
+      if (_call_count % _AGG_EVERY) == _AGG_EVERY - 1:
+        _agg_flush(_call_count // _AGG_EVERY)
+      if (_call_count % _DUMP_EVERY) < _DUMP_PER_STEP:
+        n_tok = None
+        if isinstance(extra_info, dict):
+          n_tok = extra_info.get("num_response_tokens") or extra_info.get("response_length")
+        rec = {"call": _call_count, "fmt": fmt, "ans": ans,
+               "n_chars": len(completion), "n_tokens": n_tok,
+               "gt": str(ground_truth)[:80], "tail": completion[-160:]}
+        fn = os.path.join(_run_dir(), f"pid{os.getpid()}.jsonl")
+        with open(fn, "a", encoding="utf-8") as f:
+          f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except (OSError, AttributeError):
       pass
   _call_count += 1
-  return fmt + ans
+  return {"score": fmt + ans, "acc": acc_flag, "fmt": fmt_flag}
 
 
 # --------------------------- self-test -------------------------------------
 if __name__ == "__main__":
   gt = json.dumps(["72", "72"])
   cases = [
-      # (completion, expected, note)
-      ("<reasoning>2*36</reasoning><answer>72</answer>", 1.1, "exact + format"),
-      ("<reasoning>2*36</reasoning><answer>\\boxed{72}</answer>", 1.1, "boxed inside tags"),
-      ("blah <answer> 72 </answer>", 1.0, "whitespace match, no format"),
-      ("<answer>36*2</answer>", 1.0, "math_verify equivalence, no format"),
-      ("<reasoning>hmm</reasoning><answer>71</answer>", 0.1, "format only, wrong"),
-      ("no tags at all 72", 0.0, "fallback -> FALLBACK_ANSWER -> 0"),
-      ("<answer>7.2e1</answer>", 1.0, "math_verify numeric forms"),
+      # (completion, expected score, expected acc, note)
+      ("<reasoning>2*36</reasoning><answer>72</answer>", 1.1, 1.0, "exact + format"),
+      ("<reasoning>2*36</reasoning><answer>\\boxed{72}</answer>", 1.1, 1.0, "boxed inside tags"),
+      ("blah <answer> 72 </answer>", 1.0, 1.0, "whitespace match, no format"),
+      ("<answer>36*2</answer>", 1.0, 1.0, "math_verify equivalence, no format"),
+      ("<reasoning>hmm</reasoning><answer>71</answer>", 0.1, 0.0, "format only, wrong"),
+      ("no tags at all 72", 0.0, 0.0, "fallback -> FALLBACK_ANSWER -> 0"),
+      ("<answer>7.2e1</answer>", 1.0, 1.0, "math_verify numeric forms"),
   ]
-  for completion, expected, note in cases:
-    got = compute_score("x", completion, gt)
-    flag = "OK " if abs(got - expected) < 1e-9 else "FAIL"
-    print(f"{flag} {note}: got={got} expected={expected}")
+  for completion, exp_score, exp_acc, note in cases:
+    got = compute_score("x", completion, gt, extra_info={"index": 0})
+    ok = abs(got["score"] - exp_score) < 1e-9 and abs(got["acc"] - exp_acc) < 1e-9
+    print(f"{'OK ' if ok else 'FAIL'} {note}: got={got} expected score={exp_score} acc={exp_acc}")

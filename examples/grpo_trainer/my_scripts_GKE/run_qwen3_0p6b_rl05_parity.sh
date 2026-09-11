@@ -1,67 +1,84 @@
 #!/usr/bin/env bash
 # =============================================================================
-# rl-05 parity: verl GRPO(DAPO) on GB200/GKE, semantics matched to the TPU
-# team's tianyu-rl-05 (their reproduction of Magellan's 299 s tpu7x config;
-# measured 274.9 s median, 64 chips split 32+32 rollout/trainer, serial)
+# Track A / Phase 0 -- PRE-CHECK: does the rl05 recipe learn on GB200 at all?
 # =============================================================================
-# Derived from run_qwen3_0p6b_maxtext_parity.sh. Deltas vs that (line-1) config:
-#   1. batch 480 -> 256 prompts (x8 = 2048 completions)      [RL05]
-#   2. mini 480 -> 256 (mu=1 preserved: ONE update/rollout)  [RL05]
-#   3. beta 0.05 -> 0: use_kl_loss=False, NO ref model, the
-#      ref/refer_inference phase disappears on both stacks   [RL05]
-#   4. clip_ratio_high=0.28 (DAPO clip-higher; low stays 0.2)[RL05]
-#   5. test_freq 5 -> -1 (pure timing run, matches TPU side) [RL05]
-# Unchanged and already matched: response cap 8192, sampling 0.8/50/0.95,
-# lr 1e-6, grad clip 1.0, reward=maxtext_math_reward (utils_rl.py port),
-# dataset OpenMathInstruct-2, 20 steps.
-# Known deltas (documented, not blockers): prompt-cap budget (ours 8192+margin
-# vs their prefill 8192 -- non-binding either way, isl_max ~631); data split/
-# order not reproducible across frameworks; their ~30 s unaccounted phase
-# (likely logprob) means phase tables don't sum -- compare full-step wall.
-# Comparison anchor: MaxText 274.9 s median (n=8 warm), 64 tpu7x chips
-# (32 rollout + 32 trainer, serial); phases rollout ~193 / train 48.3 /
-# sync 2.9 / ~30 unaccounted.
+# Derived from run_qwen3_0p6b_rl05_parity.sh. The "frozen invariants" block is
+# byte-identical to rl05 -- this run must train the SAME recipe, only longer and
+# with eval + logging switched on. If this run learns, it IS Level-3 GB200 seed #1.
+#
+# Diff vs rl05 (all trainer/data/logging; nothing in the frozen block):
+#   1. TOTAL_STEPS 20 -> 300 (env override)                          [PHASE0]
+#   2. eval: test_freq -1 -> 50, val_before_train True (step-0 anchor),
+#      greedy n=1 (val_kwargs made explicit), val generations dumped [PHASE0]
+#   3. checkpoints: save_freq -1 -> 50, hf_model included so every
+#      checkpoint is directly evalable by an offline vLLM harness     [PHASE0]
+#   4. data.seed explicit (=SEED); EXPERIMENT_NAME carries the seed   [PHASE0]
+#   5. rollout.calculate_log_probs=True -> TensorBoard gets
+#      training/rollout_probs_diff_{mean,max,std} (trainer-vs-rollout
+#      logp mismatch, the Miles Fig.4b panel)                          [PHASE0]
+#   6. TENSORBOARD_DIR and EXPERIMENT_NAME pushed into the Ray runtime_env
+#      so each run gets its own TB directory and its own reward-dump folder.
+#      NOTE: verl's TensorboardLogger uses TENSORBOARD_DIR *as the log dir*
+#      (no project/experiment suffix). The pod-level env in the RayCluster
+#      yaml points every run at the SAME directory -- earlier runs' event
+#      files are mixed together there. The per-run override below fixes it.
+#   7. reward: maxtext_math_reward.py (Phase-0 version) returns
+#      {score, acc, fmt}; score is unchanged, acc/fmt are logging only.
+#
+# Usage (inside the head pod, after `source /workspace/setup_env.sh`):
+#   # smoke (5 steps, eval at 2 and 4, one checkpoint):
+#   TOTAL_STEPS=5 TEST_FREQ=2 SAVE_FREQ=4 NNODES=4 bash $SCRIPTS_DIR/run_qwen3_0p6b_phase0_precheck.sh
+#   # real run, one seed, under tmux:
+#   SEED=1 NNODES=4 bash $SCRIPTS_DIR/run_qwen3_0p6b_phase0_precheck.sh 2>&1 | tee $LOG_DIR/phase0_seed1.log
 # =============================================================================
 
 set -xeuo pipefail
 
 ########################### paths (site-specific) ###########################
-# Preprocessed OpenMathInstruct-2 parquet: MUST be built with the same chat
-# template / prompt format as the MaxText data template (see preprocess
-# script; token-identical prompts are a precondition for curve overlay).
 DATA_DIR=${DATA_DIR:-$HOME/meta-RL/data/openmathinstruct2}
 TRAIN_FILE=${TRAIN_FILE:-$DATA_DIR/train.parquet}
+
+# Eval sets. OMI2 val is in-distribution (same template, held-out prompts).
+# gsm8k_test.parquet is optional for the first pass: if the file exists it is
+# added as a second data_source and reported separately (val-core/gsm8k/...).
 VAL_FILE=${VAL_FILE:-$DATA_DIR/val.parquet}
+GSM8K_TEST_FILE=${GSM8K_TEST_FILE:-$DATA_DIR/gsm8k_test.parquet}
+if [ -f "${GSM8K_TEST_FILE}" ]; then
+  VAL_FILES="['${VAL_FILE}','${GSM8K_TEST_FILE}']"
+else
+  VAL_FILES="['${VAL_FILE}']"
+fi
 
-# Reward: port of MaxText's default stack (match_format_exactly +
-# match_format_approximately + check_numbers), single compute_score entry.
 REWARD_FN_PATH=${REWARD_FN_PATH:-$HOME/meta-RL/reward/maxtext_math_reward.py}
-
 MODEL_PATH=${MODEL_PATH:-Qwen/Qwen3-0.6B}   # [MAXTEXT] model_name=qwen3-0.6b
-                                            # [TODO] confirm exact HF revision
-                                            # matches TPU checkpoint source
+                                            # [TODO] record exact HF revision in the rulebook
+
+LOG_DIR=${LOG_DIR:-$HOME/meta-RL/logs}
+CKPT_DIR=${CKPT_DIR:-$HOME/meta-RL/ckpt}
+TB_ROOT=${TB_ROOT:-$HOME/meta-RL/.home/tensorboard_log}
+mkdir -p "${LOG_DIR}" "${CKPT_DIR}" "${TB_ROOT}"
 
 ########################### scale knobs (only these vary between runs) ######
 NNODES=${NNODES:-1}
 NGPUS_PER_NODE=${NGPUS_PER_NODE:-4}         # [GB200] A4X: 4 GPUs/node
-TOTAL_STEPS=${TOTAL_STEPS:-20}              # [MAXTEXT] num_batches=20 for
-                                            # smoke; raise for convergence runs
+TOTAL_STEPS=${TOTAL_STEPS:-300}             # [PHASE0] 20 -> 300
+TEST_FREQ=${TEST_FREQ:-50}                  # [PHASE0] eval every N steps
+SAVE_FREQ=${SAVE_FREQ:-50}                  # [PHASE0] checkpoint every N steps
+SEED=${SEED:-1}                             # [PHASE0] data order seed (frozen in Level 0)
 
-PROJECT_NAME=${PROJECT_NAME:-rl05_parity}
+PROJECT_NAME=${PROJECT_NAME:-trackA_phase0}
 W=$(( NNODES * NGPUS_PER_NODE ))
-EXPERIMENT_NAME=${EXPERIMENT_NAME:-qwen3_0p6b_rl05_${NNODES}n${W}g_tp${ROLLOUT_TP:-1}_$(date +%Y%m%d_%H%M)}
+EXPERIMENT_NAME=${EXPERIMENT_NAME:-qwen3_0p6b_phase0_seed${SEED}_${NNODES}n${W}g_$(date +%Y%m%d_%H%M)}
+TB_DIR=${TB_ROOT}/${PROJECT_NAME}/${EXPERIMENT_NAME}
+VAL_DUMP_DIR=${LOG_DIR}/${EXPERIMENT_NAME}/val_dump
+mkdir -p "${TB_DIR}" "${VAL_DUMP_DIR}"
 
-########################### frozen invariants — do not tune ################
+########################### frozen invariants -- do not tune ################
+# BYTE-IDENTICAL to run_qwen3_0p6b_rl05_parity.sh. Any change here = new recipe.
 train_batch_size=256          # [RL05] batch_size=256
 ppo_mini_batch_size=256       # [RL05] mu=1: one optimizer update per rollout
-                              # (mini == batch is the explicit on-policy
-                              # setting; their tmbs=16 is grad accumulation
-                              # inside that single update, as is our
-                              # dynamic-bsz chunking).
 max_prompt_length=8192        # [MAXTEXT] max_prefill_predict_length=8192
 max_response_length=8192      # [MAXTEXT] max_target_length(16384) - prefill(8192)
-                              # NOTE: Meta A100 script uses 16384/16384 — we
-                              # anchor to MaxText, not Meta (planning doc §1.2)
 rollout_n=8                   # [MAXTEXT] rl.num_generations=8
 kl_loss_coef=0.0              # [RL05] rl.grpo_beta=0.0 -> NO KL, NO ref
 clip_ratio_low=0.2            # [RL05] rl.grpo_epsilon=0.2
@@ -73,60 +90,35 @@ max_num_batched_tokens=32768  # [MAXTEXT] max_num_batched_tokens=32768
 actor_lr=1e-6                 # [MAXTEXT] learning_rate=1e-6
 
 ########################### system adaptations ############################
-rollout_tp=${ROLLOUT_TP:-1}   # [SYS] free variable. Qwen numina line measured
-                              # TP=2 optimal at W=8-32 on GB200; run both at
-                              # W=16 and report each side's best.
-rollout_gpu_mem_util=0.30     # [SYS] colocated HBM split. MaxText uses 0.22 on
-                              # v7x; exact fraction is hardware-dependent, not
-                              # semantic. 0.30 leaves ample room for 0.6B FSDP.
-ppo_max_token_len_per_gpu=32768  # [SYS] dynamic-bsz packing budget for the
-                              # training pass (prompt+response=16384 -> holds
-                              # 2 full-length seqs). Tune freely; throughput
-                              # only, no semantics.
+rollout_tp=${ROLLOUT_TP:-1}   # [SYS] free variable; not a timing run
+rollout_gpu_mem_util=0.30     # [SYS]
+ppo_max_token_len_per_gpu=32768  # [SYS] dynamic-bsz packing budget
 
 ########################### launch ########################################
-# [GB200] block: adapted from upstream MACHINE=gb200 (PR #5596), with two
-# measured deviations:
-#   - enforce_eager=False: DEVIATION from upstream (which forced eager on
-#     SM100). Verified on this image's vLLM: CUDA graphs work on Blackwell.
-#     Result: 2.1x gen speedup (1n4g: 700s -> 325s), numerics identical to
-#     eager over matched steps (score & length distributions, same data
-#     order). [SYS] change, no semantics impact.
-#   - free_cache_engine=False: DEVIATION from upstream (which sets True to
-#     release vLLM KV between steps for large models). At 0.6B HBM is
-#     abundant; the sleep/wake cycle caused the 29s update_weights seen in
-#     the smoke run (fix: 29s -> 4s). [SYS] change, no semantics impact.
-#   - model_dtype=bfloat16: FSDP master/compute dtype pinned. [MAXTEXT] is
-#     also bf16 -> parity precision.
-#   - ray_init.num_gpus pinned (single-node only, see below): privileged/
-#     enroot containers break Ray GPU autodetect.
-
-# ray_init.num_gpus workaround is only valid when the driver starts its own
-# local Ray (single-node; privileged/enroot containers break GPU autodetect).
-# When attaching to an existing cluster (RAY_ADDRESS set), Ray forbids
-# num_cpus/num_gpus at ray.init() -- resources are reported by each node's
-# `ray start --num-gpus`. Inject the flag only in the single-node case.
-echo "[accounting] W=${W}  batch=256x8=2048  updates/rollout=1 (mini=256)  beta=0  clip=0.2/0.28  rollout_tp=${ROLLOUT_TP:-1}"
+echo "[accounting] W=${W}  batch=256x8=2048  updates/rollout=1 (mini=256)  beta=0  clip=0.2/0.28  rollout_tp=${rollout_tp}  seed=${SEED}"
+echo "[phase0] steps=${TOTAL_STEPS} test_freq=${TEST_FREQ} save_freq=${SAVE_FREQ}"
+echo "[phase0] tensorboard -> ${TB_DIR}"
+echo "[phase0] checkpoints -> ${CKPT_DIR}/${EXPERIMENT_NAME}"
+echo "[phase0] val dumps   -> ${VAL_DUMP_DIR}"
+echo "[phase0] reward dump -> ${REWARD_DUMP_DIR:-<unset>}/${EXPERIMENT_NAME}"
 
 RAY_NUM_GPUS_ARG=""
 if [ -z "${RAY_ADDRESS:-}" ]; then
   RAY_NUM_GPUS_ARG="+ray_kwargs.ray_init.num_gpus=${NGPUS_PER_NODE}"
 fi
 
-# runtime-env: propagates to ALL ray-launched processes (engines, reward
-# workers, TaskRunner) — the sanctioned channel for per-run dynamic values.
-# RAY_RUNTIME_ENV_ARG="+ray_kwargs.ray_init.runtime_env.env_vars.EXPERIMENT_NAME=${EXPERIMENT_NAME}"
-
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
     algorithm.use_kl_in_reward=False \
     data.train_files="['${TRAIN_FILE}']" \
-    data.val_files="['${VAL_FILE}']" \
+    data.val_files="${VAL_FILES}" \
     data.train_batch_size=${train_batch_size} \
     data.max_prompt_length=${max_prompt_length} \
     data.max_response_length=${max_response_length} \
     data.filter_overlong_prompts=False \
     data.truncation='error' \
+    data.shuffle=True \
+    data.seed=${SEED} \
     actor_rollout_ref.model.path="${MODEL_PATH}" \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
@@ -142,6 +134,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
     actor_rollout_ref.actor.fsdp_config.model_dtype=bfloat16 \
+    actor_rollout_ref.actor.checkpoint.save_contents='["model","optimizer","extra","hf_model"]' \
     actor_rollout_ref.ref.log_prob_use_dynamic_bsz=True \
     actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=${ppo_max_token_len_per_gpu} \
     actor_rollout_ref.ref.fsdp_config.param_offload=False \
@@ -158,6 +151,10 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.free_cache_engine=False \
     actor_rollout_ref.rollout.log_prob_use_dynamic_bsz=True \
     actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu=${ppo_max_token_len_per_gpu} \
+    actor_rollout_ref.rollout.calculate_log_probs=True \
+    actor_rollout_ref.rollout.val_kwargs.do_sample=False \
+    actor_rollout_ref.rollout.val_kwargs.temperature=0 \
+    actor_rollout_ref.rollout.val_kwargs.n=1 \
     +actor_rollout_ref.rollout.engine_kwargs.vllm.enable_prefix_caching=True \
     custom_reward_function.path="${REWARD_FN_PATH}" \
     custom_reward_function.name=compute_score \
@@ -167,24 +164,29 @@ python3 -m verl.trainer.main_ppo \
     trainer.experiment_name=${EXPERIMENT_NAME} \
     trainer.n_gpus_per_node=${NGPUS_PER_NODE} \
     trainer.nnodes=${NNODES} \
-    trainer.save_freq=-1 \
-    trainer.test_freq=-1 \
-    trainer.val_before_train=False \
-    trainer.total_epochs=1 \
+    trainer.save_freq=${SAVE_FREQ} \
+    trainer.default_local_dir="${CKPT_DIR}/${EXPERIMENT_NAME}" \
+    trainer.test_freq=${TEST_FREQ} \
+    trainer.val_before_train=True \
+    trainer.log_val_generations=10 \
+    trainer.validation_data_dir="${VAL_DUMP_DIR}" \
+    trainer.total_epochs=100 \
     trainer.total_training_steps=${TOTAL_STEPS} \
+    +ray_kwargs.ray_init.runtime_env.env_vars.TENSORBOARD_DIR="${TB_DIR}" \
+    +ray_kwargs.ray_init.runtime_env.env_vars.EXPERIMENT_NAME="${EXPERIMENT_NAME}" \
     ${RAY_NUM_GPUS_ARG} \
-    # ${RAY_RUNTIME_ENV_ARG} \
     "$@"
 
 # =============================================================================
-# Open items:
-#   1. loss_agg_mode: verl default token-mean; Tunix default unconfirmed.
-#      Affects curve overlay, not step time.
-#   2. Data split/order: same source dataset, split implementations differ
-#      (make_tpu_split.py cross-check still pending). OSL distribution
-#      statistics (mean/cap%) are the cross-check: theirs 3,750/22-25%%,
-#      ours ~3,950/25%% on the numina regime -- expect similar here.
-#   3. Their ~30 s unaccounted phase (global - rollout - train - sync):
-#      likely old-logprob + advantage. We itemize old_log_prob; when
-#      comparing phase tables, compare full-step wall first.
+# Notes:
+#   * trainer.total_epochs=100 is a ceiling; verl stops at total_training_steps.
+#   * If you want the FULL per-sample training record (inputs/outputs/score/acc/fmt
+#     for all 2048 completions every step, ~30 MB/step on gcsfuse) add
+#     trainer.rollout_data_dir=${LOG_DIR}/${EXPERIMENT_NAME}/rollout_dump
+#     The aggregate jsonl from the reward fn is the cheap default.
+#   * Smoke-test checklist before the real run:
+#       - TB tags present: critic/score/mean, val-core/*/reward/mean@1,
+#         val-aux/*/acc/mean@1, training/rollout_probs_diff_mean, actor/pg_clipfrac
+#       - ${REWARD_DUMP_DIR}/${EXPERIMENT_NAME}/agg_pid*.jsonl written; sum(n) == steps*2048
+#       - one checkpoint written, hf_model/ present inside it, write time noted
 # =============================================================================
