@@ -588,8 +588,14 @@ if __name__ == "__main__":
       ("<answer>7.2e1</answer>", 1.0, 1.0, "math_verify numeric forms"),
   ]
   for completion, exp_score, exp_acc, note in cases:
-    got = compute_score("x", completion, gt, extra_info={"index": 0})
+    got = compute_score("x", completion, gt, extra_info={"index": 0, "response_len": 100})   # short: no length penalty
     exp = exp_acc + (0.1 if "<reasoning>" in completion and "</reasoning>" in completion and "<answer>" in completion else 0.0) * (_FMT_WEIGHT / 0.1)
-    ok = abs(got["score"] - exp) < 1e-9 and abs(got["acc"] - exp_acc) < 1e-9
+    ok = abs(got["score"] - exp) < 1e-9 and abs(got["acc"] - exp_acc) < 1e-9 and got["length_penalty"] == 0.0
     print(f"{'OK ' if ok else 'FAIL'} {note}: got={got} expected score={exp} acc={exp_acc}")
+  if _OVERLONG_BUFFER > 0:   # penalty direction/magnitude at the buffer edge, midway, and the cap
+    good = "<reasoning>x</reasoning><answer>72</answer>"
+    for n, exp_pen in ((_MAX_RESP_LEN - _OVERLONG_BUFFER, 0.0), (_MAX_RESP_LEN - _OVERLONG_BUFFER // 2, -0.5 * _OVERLONG_PENALTY), (_MAX_RESP_LEN, -_OVERLONG_PENALTY)):
+      got = compute_score("x", good, gt, extra_info={"index": 0, "response_len": n})
+      ok = abs(got["length_penalty"] - exp_pen) < 1e-9 and abs(got["score"] - (1.0 + _FMT_WEIGHT + exp_pen)) < 1e-9
+      print(f"{'OK ' if ok else 'FAIL'} length {n}: penalty={got['length_penalty']:+.3f} expected {exp_pen:+.3f}, score={got['score']:+.3f}")
   print(f"knobs: fmt_weight={_FMT_WEIGHT} overlong_buffer={_OVERLONG_BUFFER} penalty={_OVERLONG_PENALTY} max_resp_len={_MAX_RESP_LEN}")

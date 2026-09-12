@@ -69,8 +69,8 @@ def load_rollout(rollout_dir, require_uid=True):
 
   Three distinct "zero-advantage" quantities (Henry's point 4):
     solve_all / solve_none   : group's ANSWER correctness all 1 / all 0
-    frac_zero_std_reward     : group's actual TRAINING reward (acc + 0.1*fmt)
-                               has zero std -> no gradient from this group
+    frac_zero_std_reward     : group's actual TRAINING reward has zero std ->
+                               zero GRPO advantage (the KL term can still give gradient)
     format_only_groups       : acc identical inside the group but reward std > 0
                                -> the only signal in that group is format
   """
@@ -291,7 +291,7 @@ def main():
   # ---- 3. zero-advantage groups (three distinct quantities) ------------
   ax = axes[2]
   if agg is not None and np.isfinite(agg["zero_std_reward"]).any():
-    ax.plot(agg["step"], agg["zero_std_reward"], color="k", lw=1.8, label="frac_zero_std (actual reward) = no gradient")
+    ax.plot(agg["step"], agg["zero_std_reward"], color="k", lw=1.8, label="frac_zero_std (actual reward) = zero GRPO advantage")
     ax.plot(agg["step"], agg["solve_none"], color="#de2d26", lw=1.2, label="solve_none (acc all 0)")
     ax.plot(agg["step"], agg["solve_all"], color="#31a354", lw=1.2, label="solve_all (acc all 1)")
     ax.plot(agg["step"], agg["nonacc_signal"], color="#e6550d", lw=1.5, ls="--",

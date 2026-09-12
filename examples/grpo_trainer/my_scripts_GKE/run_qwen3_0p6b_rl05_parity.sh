@@ -103,7 +103,15 @@ TOTAL_STEPS=${TOTAL_STEPS:-300}             # [PHASE0] 20 -> 300
 TEST_FREQ=${TEST_FREQ:-10}                  # [v5] eval every 10 steps (was 50) to see inflection points
 SAVE_FREQ=${SAVE_FREQ:-50}                  # [PHASE0] checkpoint every N steps
 SEED=${SEED:-1}                             # [PHASE0] data order seed (frozen in Level 0)
-RUN_TAG=${RUN_TAG:-v5}                      # [v5] set per ablation (e.g. kl001_T1_ansonly_ol1024)
+RUN_TAG=${RUN_TAG:-${PRESET:-v5}}           # [v5] set per ablation; defaults to the preset name
+# [v5] PRESET=stab sets the whole agreed stability-round recipe in one place
+# (individual env vars still override). Without PRESET every knob defaults to rl05.
+if [ "${PRESET:-}" = "stab" ]; then
+  : "${ROLLOUT_TEMPERATURE:=1.0}" "${ROLLOUT_TOP_P:=1.0}" "${ROLLOUT_TOP_K:=-1}"
+  : "${REWARD_FMT_WEIGHT:=0}" "${REWARD_OVERLONG_BUFFER:=1024}" "${REWARD_OVERLONG_PENALTY:=1.0}"
+  : "${FILTER_OVERLONG_PROMPTS:=True}" "${KL_COEF:=0.001}" "${KL_TYPE:=low_var_kl}" "${TEST_FREQ:=10}"
+  echo "[phase0] PRESET=stab: T=1 top_p=1 top_k=-1 fmt_w=0 overlong=1024/1.0 filter_overlong_prompts=True KL=0.001(low_var_kl) test_freq=10"
+fi
 # [v4] reward worker knobs. They must reach the Ray actors that run the reward,
 # so they are forwarded through ray runtime_env below (shell exports alone do NOT
 # reach them). The pre-flight below prints the values it sees.
@@ -150,7 +158,7 @@ RT=$(python3 -c "import verl.trainer.ppo.ray_trainer as m; print(m.__file__)" 2>
 grep -q "_DUMP_UID" "${RT}" || { echo "[phase0] ABORT: ${RT} lacks the uid dump patch. Run: python3 ${SCRIPTS_DIR:-.}/patch_verl_dump_uid.py ${RT}"; exit 2; }
 echo "[phase0] verl fork: ${RT} (uid dump patch present); git head $(git -C "$(dirname "${RT}")" rev-parse --short HEAD 2>/dev/null || echo n/a)"
 
-########################### [v4] pre-flight 1: reward must (a) start its worker pool, (b) score equivalences from a THREAD ####
+########################### [v5] pre-flight 1: reward workers up + knob-aware scoring from a THREAD ####
 python3 - "${REWARD_FN_PATH}" <<'PYEOF'
 import importlib.metadata as md, importlib.util, json, os, sys, threading, warnings
 warnings.filterwarnings("ignore")
@@ -159,31 +167,35 @@ try:
   spec.loader.exec_module(r)              # raises MathVerifyPoolError if workers cannot start
 except Exception as e:
   sys.exit(f"[phase0] ABORT: reward import failed: {type(e).__name__}: {e}")
+fmt_w = float(os.environ.get("REWARD_FMT_WEIGHT", "0.1")); buf = int(os.environ.get("REWARD_OVERLONG_BUFFER", "0"))
+pen = float(os.environ.get("REWARD_OVERLONG_PENALTY", "1.0")); mx = int(os.environ.get("REWARD_MAX_RESP_LEN", "8192"))
+gt = json.dumps(["\\frac{1}{2}", "\\frac{1}{2}"]); comp = "<reasoning>x</reasoning><answer>1/2</answer>"
 res = {}
-t = threading.Thread(target=lambda: res.__setitem__("s", r.compute_score("x", "<reasoning>x</reasoning><answer>1/2</answer>", json.dumps(["\\frac{1}{2}", "\\frac{1}{2}"]))))
+t = threading.Thread(target=lambda: res.__setitem__("s", r.compute_score("x", comp, gt, extra_info={"index": 0, "response_len": 100})))
 t.start(); t.join()
-st = r.mv_stats()
-print(f"[phase0] math-verify version = {md.version('math-verify')}; reward workers = {st['idle']}/{st['cfg_procs']} idle, "
-      f"pool={st['pool']}, timeout={st['cfg_timeout_s']}s, max_chars={st['cfg_max_chars']}; worker-thread equivalence = {res.get('s',{}).get('score')}")
-if res.get("s", {}).get("score") != 1.1:
-  sys.exit("[phase0] ABORT: reward does not award symbolic equivalence from a worker thread -- wrong reward file?")
+o = res.get("s", {}); st = r.mv_stats()
+print(f"[phase0] math-verify version = {md.version('math-verify')}; reward workers = {st['idle']}/{st['cfg_procs']} idle, pool={st['pool']}, "
+      f"timeout={st['cfg_timeout_s']}s; knobs fmt_w={fmt_w} overlong={buf}/{pen}; short correct answer -> {o}")
+checks = [("acc == 1", o.get("acc") == 1.0), ("fmt == 1", o.get("fmt") == 1.0), ("length_penalty == 0", o.get("length_penalty") == 0.0),
+          (f"score == 1 + fmt_w ({1.0 + fmt_w})", o.get("score") is not None and abs(o["score"] - (1.0 + fmt_w)) < 1e-9)]
+if buf > 0:   # penalty direction: at the cap the same correct answer must lose exactly `pen`
+  o2 = r.compute_score("x", comp, gt, extra_info={"index": 0, "response_len": mx})
+  checks.append((f"length_penalty at cap == -{pen}", abs(o2.get("length_penalty", 0.0) + pen) < 1e-9))
+  checks.append((f"score at cap == 1 + fmt_w - pen", abs(o2["score"] - (1.0 + fmt_w - pen)) < 1e-9))
+bad = [name for name, ok in checks if not ok]
+if bad:
+  sys.exit(f"[phase0] ABORT: reward pre-flight failed: {bad}")
 if os.environ.get("REWARD_MV_POOL", "1") == "1" and (not st["pool"] or st["idle"] != st["cfg_procs"]):
   sys.exit("[phase0] ABORT: math_verify worker pool not healthy")
+print("[phase0] reward pre-flight OK:", ", ".join(n for n, _ in checks))
 PYEOF
 
 ########################### [v2] TB mirror loop: local -> gcsfuse every 5 min, and once at exit ####
 ( while true; do sleep 300; cp -r "${TB_DIR}/." "${TB_MIRROR}/" 2>/dev/null || true; done ) &
 TB_SYNC_PID=$!
-# [v5] collapse guard: kills the driver on the v4 collapse signature (see collapse_guard.py)
-GUARD_LOG=${LOG_DIR}/${EXPERIMENT_NAME}/collapse_guard.log; mkdir -p "$(dirname "${GUARD_LOG}")"
-if [ "${COLLAPSE_GUARD:-1}" = "1" ]; then
-  python3 "${SCRIPTS_DIR:-$(dirname "$0")}/collapse_guard.py" --tb "${TB_DIR}" --rollout "${ROLLOUT_DUMP_DIR}" --poll 60 > "${GUARD_LOG}" 2>&1 &
-  GUARD_PID=$!
-  echo "[phase0] collapse guard pid ${GUARD_PID} -> ${GUARD_LOG}"
-else
-  GUARD_PID=""
-fi
-trap 'kill ${TB_SYNC_PID} ${GUARD_PID} 2>/dev/null; cp -r "${TB_DIR}/." "${TB_MIRROR}/" 2>/dev/null || true; test -f "${TB_DIR}/COLLAPSE_ABORT.txt" && { echo "[phase0] RUN ABORTED BY COLLAPSE GUARD:"; cat "${TB_DIR}/COLLAPSE_ABORT.txt"; }' EXIT
+# [v5] collapse guard is started AFTER the driver (it needs the driver PID) -- see the launch section.
+GUARD_PID=""
+trap 'kill ${TB_SYNC_PID} ${GUARD_PID} 2>/dev/null; cp -r "${TB_DIR}/." "${TB_MIRROR}/" 2>/dev/null || true; test -f "${TB_DIR}/COLLAPSE_ABORT.txt" && { echo "[phase0] RUN ABORTED BY COLLAPSE GUARD:"; cat "${TB_DIR}/COLLAPSE_ABORT.txt"; }; test -f "${TB_DIR}/COLLAPSE_WARN.txt" && { echo "[phase0] guard warnings:"; cat "${TB_DIR}/COLLAPSE_WARN.txt"; }' EXIT
 
 ########################### frozen invariants -- do not tune ################
 # BYTE-IDENTICAL to run_qwen3_0p6b_rl05_parity.sh. Any change here = new recipe.
@@ -268,7 +280,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.checkpoint.save_contents='["model","optimizer","extra","hf_model"]' \
     actor_rollout_ref.ref.log_prob_use_dynamic_bsz=True \
     actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=${ppo_max_token_len_per_gpu} \
-    actor_rollout_ref.ref.fsdp_config.param_offload=True \
+    actor_rollout_ref.ref.fsdp_config.param_offload=${REF_OFFLOAD:-False} \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.tensor_model_parallel_size=${rollout_tp} \
     actor_rollout_ref.rollout.gpu_memory_utilization=${rollout_gpu_mem_util} \
@@ -316,7 +328,20 @@ python3 -m verl.trainer.main_ppo \
     "+ray_kwargs.ray_init.runtime_env.env_vars.REWARD_OVERLONG_PENALTY='${REWARD_OVERLONG_PENALTY}'" \
     "+ray_kwargs.ray_init.runtime_env.env_vars.REWARD_MAX_RESP_LEN='${REWARD_MAX_RESP_LEN}'" \
     ${RAY_NUM_GPUS_ARG} \
-    "$@"
+    "$@" &
+DRIVER_PID=$!
+echo "[phase0] driver pid ${DRIVER_PID}"
+# [v5] collapse guard: warns on single-signal anomalies, stops ONLY this driver on
+# acc-decline AND (entropy OR cap-hit) -- see collapse_guard.py. COLLAPSE_GUARD=0 disables.
+GUARD_LOG=${LOG_DIR}/${EXPERIMENT_NAME}/collapse_guard.log; mkdir -p "$(dirname "${GUARD_LOG}")"
+if [ "${COLLAPSE_GUARD:-1}" = "1" ]; then
+  python3 "${SCRIPTS_DIR:-$(dirname "$0")}/collapse_guard.py" --tb "${TB_DIR}" --rollout "${ROLLOUT_DUMP_DIR}" --pid "${DRIVER_PID}" --poll 60 > "${GUARD_LOG}" 2>&1 &
+  GUARD_PID=$!
+  echo "[phase0] collapse guard pid ${GUARD_PID} (watching driver ${DRIVER_PID}) -> ${GUARD_LOG}"
+fi
+set +e; wait "${DRIVER_PID}"; DRIVER_RC=$?; set -e
+echo "[phase0] driver exited with rc=${DRIVER_RC}"
+exit ${DRIVER_RC}
 
 # =============================================================================
 # Notes:
