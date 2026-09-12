@@ -194,8 +194,28 @@ PYEOF
 ( while true; do sleep 300; cp -r "${TB_DIR}/." "${TB_MIRROR}/" 2>/dev/null || true; done ) &
 TB_SYNC_PID=$!
 # [v5] collapse guard is started AFTER the driver (it needs the driver PID) -- see the launch section.
-GUARD_PID=""
-trap 'kill ${TB_SYNC_PID} ${GUARD_PID} 2>/dev/null; cp -r "${TB_DIR}/." "${TB_MIRROR}/" 2>/dev/null || true; test -f "${TB_DIR}/COLLAPSE_ABORT.txt" && { echo "[phase0] RUN ABORTED BY COLLAPSE GUARD:"; cat "${TB_DIR}/COLLAPSE_ABORT.txt"; }; test -f "${TB_DIR}/COLLAPSE_WARN.txt" && { echo "[phase0] guard warnings:"; cat "${TB_DIR}/COLLAPSE_WARN.txt"; }' EXIT
+GUARD_PID=""; DRIVER_PID=""
+# [v5] Signal handling: the driver runs in the background (so the guard can target its PID), so
+# INT/TERM sent to this launcher are FORWARDED to that one driver; the EXIT trap also stops it if
+# still alive (e.g. `kill <launcher pid>`), then mirrors TB and prints guard verdicts.
+on_signal() {
+  echo "[phase0] caught signal -- stopping driver ${DRIVER_PID:-<none>}"
+  [ -n "${DRIVER_PID}" ] && kill -TERM "${DRIVER_PID}" 2>/dev/null || true
+}
+trap on_signal INT TERM
+on_exit() {
+  if [ -n "${DRIVER_PID}" ] && kill -0 "${DRIVER_PID}" 2>/dev/null; then
+    echo "[phase0] exit: driver ${DRIVER_PID} still alive -- sending TERM"; kill -TERM "${DRIVER_PID}" 2>/dev/null || true
+    for _ in $(seq 1 15); do kill -0 "${DRIVER_PID}" 2>/dev/null || break; sleep 2; done
+    kill -0 "${DRIVER_PID}" 2>/dev/null && { echo "[phase0] exit: driver did not stop -- KILL"; kill -KILL "${DRIVER_PID}" 2>/dev/null || true; }
+  fi
+  kill ${TB_SYNC_PID} ${GUARD_PID} 2>/dev/null || true
+  cp -r "${TB_DIR}/." "${TB_MIRROR}/" 2>/dev/null || true
+  test -f "${TB_DIR}/COLLAPSE_ABORT.txt" && { echo "[phase0] RUN ABORTED BY COLLAPSE GUARD:"; cat "${TB_DIR}/COLLAPSE_ABORT.txt"; }
+  test -f "${TB_DIR}/COLLAPSE_WARN.txt" && { echo "[phase0] guard warnings:"; cat "${TB_DIR}/COLLAPSE_WARN.txt"; }
+  return 0
+}
+trap on_exit EXIT
 
 ########################### frozen invariants -- do not tune ################
 # BYTE-IDENTICAL to run_qwen3_0p6b_rl05_parity.sh. Any change here = new recipe.
@@ -339,7 +359,11 @@ if [ "${COLLAPSE_GUARD:-1}" = "1" ]; then
   GUARD_PID=$!
   echo "[phase0] collapse guard pid ${GUARD_PID} (watching driver ${DRIVER_PID}) -> ${GUARD_LOG}"
 fi
-set +e; wait "${DRIVER_PID}"; DRIVER_RC=$?; set -e
+# wait for the driver; a signal interrupts `wait` (rc>128) -- after forwarding it, wait again
+set +e
+wait "${DRIVER_PID}"; DRIVER_RC=$?
+while kill -0 "${DRIVER_PID}" 2>/dev/null; do wait "${DRIVER_PID}"; DRIVER_RC=$?; done
+set -e
 echo "[phase0] driver exited with rc=${DRIVER_RC}"
 exit ${DRIVER_RC}
 

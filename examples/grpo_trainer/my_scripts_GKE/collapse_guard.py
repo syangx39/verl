@@ -13,6 +13,8 @@ train accuracy) and STOPS the training driver only on the agreed joint rule:
                consecutive steps, evaluated only after WARMUP steps
   grad (warn)  actor/grad_norm > GRAD_MAX on >= GRAD_STEPS of the last 20 steps
 
+Only COMPLETE rollout dumps count (2048 rows, 256 uid x 8, valid acc), and all
+rules are evaluated on the same last fully-completed step (TB and dump aligned).
 baseline = mean of the first BASE_STEPS logged steps. No rule uses the training
 reward (it is signed once a length penalty is on). The guard never changes LR or
 rolls back; it only warns/stops. The stop is scoped to ONE driver: --pid (SIGTERM,
@@ -39,7 +41,15 @@ def load_tb(tb_dir):
   return {t: [(e.step, e.value) for e in acc.Scalars(t)] for t in acc.Tags().get("scalars", [])}
 
 
-def rollout_acc(rollout_dir, max_files=40):
+def rollout_acc(rollout_dir, max_files=40, expect_rows=2048, expect_groups=256, group_size=8):
+  """Mean acc per step from the newest <step>.jsonl files.
+
+  A step is accepted ONLY if its dump is complete: exactly expect_rows valid rows,
+  expect_groups distinct uid with group_size rows each, and a numeric acc on every
+  row. The trainer writes dumps line by line in a background thread, so a
+  partially written file must not be mistaken for a low-accuracy step.
+  Returns a list of (step, mean_acc) for complete steps, ascending.
+  """
   files = []
   for fn in glob.glob(os.path.join(rollout_dir, "*.jsonl")):
     try:
@@ -50,17 +60,32 @@ def rollout_acc(rollout_dir, max_files=40):
   out = []
   for step, fn in files[-max_files:]:
     n = a = 0
+    uids = {}
+    ok = True
     try:
       with open(fn, encoding="utf-8") as f:
         for line in f:
-          if line.strip():
-            n += 1
-            a += float(json.loads(line).get("acc", 0.0))
+          if not line.strip():
+            continue
+          r = json.loads(line)
+          acc = r.get("acc")
+          uid = r.get("uid")
+          if acc is None or uid is None:
+            ok = False
+            break
+          n += 1
+          a += float(acc)
+          uids[uid] = uids.get(uid, 0) + 1
     except (OSError, ValueError):
-      continue
-    if n:
+      ok = False              # unreadable or a half-written last line
+    if ok and n == expect_rows and len(uids) == expect_groups and all(c == group_size for c in uids.values()):
       out.append((step, a / n))
   return out
+
+
+def align(series_dict, last_step):
+  """Truncate every series to steps <= last_step so all rules see the same steps."""
+  return {k: [(st, v) for st, v in ser if st <= last_step] for k, ser in series_dict.items()}
 
 
 def tail_run(series, pred):
@@ -140,7 +165,21 @@ def main():
       if args.once:
         return
       continue
-    step = ent[-1][0]
+    # ---- align: judge every rule on the same, fully completed step
+    last = ent[-1][0]
+    if args.rollout:
+      if not acc:
+        if args.once:
+          return
+        continue
+      last = min(last, acc[-1][0])
+    al = align({"ent": ent, "cap": cap, "gn": gn, "acc": acc}, last)
+    ent, cap, gn, acc = al["ent"], al["cap"], al["gn"], al["acc"]
+    if not ent:
+      if args.once:
+        return
+      continue
+    step = last
     for name, series in (("ent", ent), ("acc", acc)):
       if name not in base and len(series) >= args.base_steps:
         base[name] = sum(v for _, v in series[:args.base_steps]) / args.base_steps
