@@ -43,11 +43,11 @@ Porting notes / deltas:
   * normalize chain (SUBSTITUTIONS/UNITS/REMOVED_EXPRESSIONS, fix_latex_escaping,
     normalize_final_answer, extract_answer) copied verbatim -- these define which
     answers count as correct; any drift breaks curve overlay.
-  * math_verify: MaxText runs it in a kill-able spawn pool (hung sympy). Here we
-    call in-process from verl's reward THREADS, so the signal-based timeouts must
-    be off (parsing_timeout=None / timeout_seconds=None) -- see _math_verify_equal.
-    Hang guard = REWARD_MATH_VERIFY_MAX_CHARS. Pin the SAME math-verify version as
-    the TPU image (record in the rulebook version table).
+  * math_verify: MaxText runs it in a kill-able spawn pool (hung sympy). verl calls
+    compute_score from THREADS, where math_verify's signal timeouts raise, so this
+    file runs equivalence checks in its own fork-context pool with a get(timeout)
+    and pool reset on hang -- see the "killable process pool" section. Pin the
+    SAME math-verify version and the same timeout as the TPU image.
   * debug logging / MCQ path / gsm8k hash path dropped (not exercised by
     OpenMathInstruct-2 default question_type).
 """
@@ -238,35 +238,124 @@ def extract_answer(response: str) -> str:
   return FALLBACK_ANSWER
 
 
-# math_verify's default timeout uses signal.alarm(), which only works in the MAIN
-# thread. verl calls compute_score from worker threads inside AgentLoopWorker, so
-# with the defaults parse() raises ValueError, the except below swallowed it, and
-# every answer that needed symbolic equivalence (1/2 vs \frac{1}{2}, 0.5 vs 1/2,
-# 36*2 vs 72) scored 0 on GPU -- while MaxText runs the same check in a spawn pool
-# (main thread of each worker) and scores it 1.0. Found in Phase 0 seed 1.
-# Fix: disable the signal-based timeouts. Hang protection is a length guard
-# (pathological sympy hangs come from long expressions); MaxText's killable pool
-# is the remaining known delta (only matters if a hang actually occurs).
+# ---- math_verify in killable worker processes ---------------------------------
+# Two constraints collide: (1) math_verify's own timeouts use signal.alarm(), which
+# only works in a MAIN thread, and verl calls compute_score from worker threads;
+# (2) sympy can hang on pathological input, and one hung call would stall a
+# synchronous RL step. MaxText solves both with a kill-able spawn pool
+# (math_verify_num_procs). Same idea here: N forked worker processes per reward
+# process, talking over Pipes with plain data (no function pickling, so it works
+# however verl loaded this file). A call = send -> poll(timeout) -> recv; on
+# timeout that ONE worker is killed and replaced. Inside a worker (its main
+# thread) math_verify's signal timeouts are legal again and act as a 2nd guard.
+#   REWARD_MV_POOL=1        use workers (0 -> in-process, no hang protection)
+#   REWARD_MV_PROCS=4       workers per reward process
+#   REWARD_MV_TIMEOUT=5     seconds per equivalence check (match MaxText's value)
+#   REWARD_MATH_VERIFY_MAX_CHARS=400   length guard (counted as lenrej, scored 0)
+# Per-call outcome flags are returned in the reward dict (mv_timeout / mv_exc /
+# mv_lenrej) so they show up in val-aux metrics and in the rollout dump.
+import multiprocessing as _mp
+import queue as _queue
+import threading as _threading
+from itertools import chain as _chain
+
+_MV_POOL_ENABLED = os.environ.get("REWARD_MV_POOL", "1") == "1"
+_MV_PROCS = int(os.environ.get("REWARD_MV_PROCS", "4"))
+_MV_TIMEOUT = float(os.environ.get("REWARD_MV_TIMEOUT", "5"))
 _MV_MAX_CHARS = int(os.environ.get("REWARD_MATH_VERIFY_MAX_CHARS", "400"))
 _MV_CFG = (ExprExtractionConfig(), LatexExtractionConfig())
+_mv_ctx = _mp.get_context("fork")
+_mv_idle = _queue.Queue()      # idle _MVWorker objects; bounded by _MV_PROCS
 
 
-def _math_verify_equal(gold_boxed_list, guess_boxed: str) -> bool:
-  """Thread-safe equivalent of MaxText verify_math_worker.
-
-  math_verify.verify(gold, target): order matters (gold first).
-  """
-  if len(guess_boxed) > _MV_MAX_CHARS or any(len(g) > _MV_MAX_CHARS for g in gold_boxed_list):
-    return False
+def _mv_check(gold_boxed_list, guess_boxed, t):
+  """The actual math_verify call. t=None -> no timeouts (thread-safe fallback)."""
   try:
-    guess_parsed = parse(guess_boxed, _MV_CFG, parsing_timeout=None)
-    golds_parsed = list(itertools.chain.from_iterable(
-        parse(g, _MV_CFG, parsing_timeout=None) for g in gold_boxed_list))
-    if not guess_parsed or not golds_parsed:
+    guess = parse(guess_boxed, _MV_CFG, parsing_timeout=t)
+    golds = list(_chain.from_iterable(parse(g, _MV_CFG, parsing_timeout=t) for g in gold_boxed_list))
+    if not guess or not golds:
       return False
-    return bool(verify(golds_parsed, guess_parsed, timeout_seconds=None))
+    return bool(verify(golds, guess, timeout_seconds=t))
   except Exception:
     return False
+
+
+def _mv_server(conn):
+  """Worker process loop: recv (golds, guess) -> send bool. Runs in the child's main thread."""
+  t = max(1, int(_MV_TIMEOUT))
+  while True:
+    try:
+      golds, guess = conn.recv()
+    except (EOFError, OSError):
+      return
+    try:
+      conn.send(_mv_check(golds, guess, t))
+    except (EOFError, OSError):
+      return
+
+
+class _MVWorker:
+  def __init__(self):
+    self.conn, child = _mv_ctx.Pipe()
+    self.proc = _mv_ctx.Process(target=_mv_server, args=(child,), daemon=True)
+    self.proc.start()
+    child.close()
+
+  def kill(self):
+    try:
+      self.proc.kill()
+      self.proc.join(1)
+    except Exception:
+      pass
+    try:
+      self.conn.close()
+    except Exception:
+      pass
+
+
+def _mv_init():
+  global _MV_POOL_ENABLED
+  if not _MV_POOL_ENABLED:
+    return
+  try:
+    for _ in range(_MV_PROCS):
+      _mv_idle.put(_MVWorker())
+  except Exception:      # e.g. daemonic parent cannot fork -> fall back
+    _MV_POOL_ENABLED = False
+
+
+def _math_verify_equal(gold_boxed_list, guess_boxed: str):
+  """Returns (is_equal, flags) with flags = {"mv_timeout","mv_exc","mv_lenrej"} in {0,1}."""
+  flags = {"mv_timeout": 0.0, "mv_exc": 0.0, "mv_lenrej": 0.0}
+  if len(guess_boxed) > _MV_MAX_CHARS or any(len(g) > _MV_MAX_CHARS for g in gold_boxed_list):
+    flags["mv_lenrej"] = 1.0
+    return False, flags
+  if not _MV_POOL_ENABLED:
+    return _mv_check(gold_boxed_list, guess_boxed, None), flags
+  try:
+    w = _mv_idle.get(timeout=_MV_TIMEOUT * 4)
+  except _queue.Empty:
+    flags["mv_exc"] = 1.0
+    return False, flags
+  try:
+    w.conn.send((list(gold_boxed_list), guess_boxed))
+    if w.conn.poll(_MV_TIMEOUT + 1.0):
+      ok = bool(w.conn.recv())
+      _mv_idle.put(w)
+      return ok, flags
+    flags["mv_timeout"] = 1.0
+  except Exception:
+    flags["mv_exc"] = 1.0
+  # timeout or broken pipe: kill this worker only, replace it
+  w.kill()
+  try:
+    _mv_idle.put(_MVWorker())
+  except Exception:
+    pass
+  return False, flags
+
+
+_mv_init()   # fork early, at import, before verl's reward threads exist
 
 
 def _format_score(completion: str) -> float:
@@ -274,8 +363,11 @@ def _format_score(completion: str) -> float:
   return REWARD_EXACT_FORMAT_MATCH if MATCH_FORMAT.search(completion) else 0.0
 
 
-def _answer_score(completion: str, ground_truth_json: str) -> float:
-  """check_numbers (single-completion form)."""
+_NOFLAGS = {"mv_timeout": 0.0, "mv_exc": 0.0, "mv_lenrej": 0.0}
+
+
+def _answer_score(completion: str, ground_truth_json: str):
+  """check_numbers (single-completion form). Returns (score, mv_flags)."""
   try:
     acceptable = list(dict.fromkeys(json.loads(ground_truth_json)))
   except (json.JSONDecodeError, TypeError):
@@ -283,22 +375,21 @@ def _answer_score(completion: str, ground_truth_json: str) -> float:
 
   guess = extract_answer(completion)
   if guess == FALLBACK_ANSWER:
-    return PENALTY_INCORRECT_ANSWER  # 0.0
+    return PENALTY_INCORRECT_ANSWER, dict(_NOFLAGS)  # 0.0
 
   score = PENALTY_INCORRECT_FORMAT  # 0.0 default
   for true_answer in acceptable:
     if guess == true_answer:
-      return max(score, REWARD_EXACT_ANSWER)
+      return max(score, REWARD_EXACT_ANSWER), dict(_NOFLAGS)
     if guess.strip() == true_answer.strip():
       score = max(score, REWARD_WHITE_SPACE_FORMAT_MATCH)
   if score > 0:
-    return score
+    return score, dict(_NOFLAGS)
 
   norm_guess = boxed(preprocess_math_string(guess))
   norm_answers = [boxed(preprocess_math_string(a)) for a in acceptable]
-  if _math_verify_equal(norm_answers, norm_guess):
-    return REWARD_EXACT_ANSWER
-  return 0.0
+  ok, flags = _math_verify_equal(norm_answers, norm_guess)
+  return (REWARD_EXACT_ANSWER if ok else 0.0), flags
 
 
 # --------------------------- sample dump -----------------------------------
@@ -340,15 +431,16 @@ def _run_dir() -> str:
 def compute_score(data_source, solution_str, ground_truth, extra_info=None, **kwargs):
   """verl custom reward entry point.
 
-  Returns a dict: {"score": fmt + ans, "acc": 0/1, "fmt": 0/1}.
-  "score" is the training reward (identical to the previous scalar return).
+  Returns {"score": fmt + ans, "acc", "fmt", "qid", "mv_timeout", "mv_exc", "mv_lenrej"}.
+  "score" is the training reward (identical to the original scalar return).
   """
   del kwargs
   completion = solution_str if isinstance(solution_str, str) else str(solution_str)
   fmt = _format_score(completion)
-  ans = _answer_score(completion, ground_truth)
+  ans, mvf = _answer_score(completion, ground_truth)
   acc_flag = 1.0 if ans >= REWARD_EXACT_ANSWER else 0.0
   fmt_flag = 1.0 if fmt > 0 else 0.0
+  qid = float(extra_info.get("index", -1)) if isinstance(extra_info, dict) else -1.0
 
   if _DUMP_DIR:
     global _call_count
@@ -368,7 +460,9 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, **kw
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     except (OSError, AttributeError):
       pass
-  return {"score": fmt + ans, "acc": acc_flag, "fmt": fmt_flag}
+  # qid = extra_info["index"] (verl repeats it for the n=8 completions of a prompt)
+  # so the rollout dump can be grouped exactly; mv_* are per-call outcome flags.
+  return {"score": fmt + ans, "acc": acc_flag, "fmt": fmt_flag, "qid": qid, **mvf}
 
 
 # --------------------------- self-test -------------------------------------

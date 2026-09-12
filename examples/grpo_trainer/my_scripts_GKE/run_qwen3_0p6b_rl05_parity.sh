@@ -31,6 +31,20 @@
 #   9. [v2] reward: math_verify signal-timeouts disabled (thread-safe); launcher
 #      asserts from a worker thread that equivalence scoring works, and logs
 #      the math-verify version for the rulebook.
+#  10. [v3] PRECISION: master weights + Adam moments were bf16 (pilot checkpoint
+#      showed exp_avg/exp_avg_sq bf16 and 0.4% of params moving per step at
+#      lr 1e-6). Now explicit fp32 master + fp32 optimizer state, bf16 compute via
+#      FSDP mixed precision (verl default). Strategy pinned to fsdp (FSDP1) --
+#      that is what the resolved config showed; the perf doc's "FSDP2" was wrong.
+#  11. [v3] Optimizer/schedule made explicit: betas (0.9, 0.999), wd 0.01,
+#      clip_grad 1.0, lr_scheduler_type=constant, warmup ratio 0 (verl v0.8
+#      key names; `warmup_style` is deprecated there). These must be mirrored on
+#      the TPU side (MaxText rl.yml defaults differ) -- see rulebook. If your fork
+#      rejects a key, check the resolved config it prints at startup.
+#  12. [v3] Data: question-level split (train_qsplit / val_1k_qsplit, no
+#      leakage) and GSM8K test are REQUIRED; the launcher aborts if missing.
+#  13. [v3] reward v3: killable math_verify worker processes with timeout;
+#      returns qid + mv_timeout/mv_exc/mv_lenrej flags (val-aux + rollout dump).
 #
 # Usage (inside the head pod, after `source /workspace/setup_env.sh`):
 #   # smoke (5 steps, eval at 2 and 4, one checkpoint):
@@ -45,18 +59,15 @@ set -xeuo pipefail
 
 ########################### paths (site-specific) ###########################
 DATA_DIR=${DATA_DIR:-$HOME/meta-RL/data/openmathinstruct2}
-TRAIN_FILE=${TRAIN_FILE:-$DATA_DIR/train.parquet}
-
-# Eval sets. OMI2 val is in-distribution (same template, held-out prompts).
-# gsm8k_test.parquet is optional for the first pass: if the file exists it is
-# added as a second data_source and reported separately (val-core/gsm8k/...).
-VAL_FILE=${VAL_FILE:-$DATA_DIR/val.parquet}
-GSM8K_TEST_FILE=${GSM8K_TEST_FILE:-$DATA_DIR/gsm8k_test.parquet}
-if [ -f "${GSM8K_TEST_FILE}" ]; then
-  VAL_FILES="['${VAL_FILE}','${GSM8K_TEST_FILE}']"
-else
-  VAL_FILES="['${VAL_FILE}']"
-fi
+# [v3] question-level split (build_eval_data_v3.py). The old row-split train/val
+# leaked 77% of val questions into train -- do not use it.
+TRAIN_FILE=${TRAIN_FILE:-$DATA_DIR/train_qsplit.parquet}
+VAL_FILE=${VAL_FILE:-$DATA_DIR/val_1k_qsplit.parquet}       # in-distribution, held-out questions
+GSM8K_TEST_FILE=${GSM8K_TEST_FILE:-$DATA_DIR/gsm8k_test.parquet}   # held-out benchmark, primary
+for f in "${TRAIN_FILE}" "${VAL_FILE}" "${GSM8K_TEST_FILE}"; do
+  test -s "$f" || { echo "[phase0] ABORT: missing data file $f (run build_eval_data_v3.py)"; exit 2; }
+done
+VAL_FILES="['${VAL_FILE}','${GSM8K_TEST_FILE}']"
 
 REWARD_FN_PATH=${REWARD_FN_PATH:-$HOME/meta-RL/reward/maxtext_math_reward.py}
 MODEL_PATH=${MODEL_PATH:-Qwen/Qwen3-0.6B}   # [MAXTEXT] model_name=qwen3-0.6b
@@ -75,7 +86,7 @@ TOTAL_STEPS=${TOTAL_STEPS:-300}             # [PHASE0] 20 -> 300
 TEST_FREQ=${TEST_FREQ:-50}                  # [PHASE0] eval every N steps
 SAVE_FREQ=${SAVE_FREQ:-50}                  # [PHASE0] checkpoint every N steps
 SEED=${SEED:-1}                             # [PHASE0] data order seed (frozen in Level 0)
-RUN_TAG=${RUN_TAG:-rfix}                    # [v2] marks the reward-fixed recipe; bump when the recipe changes
+RUN_TAG=${RUN_TAG:-v3}                      # [v3] fp32-master + qsplit + gsm8k + reward v3; bump when the recipe changes
 
 PROJECT_NAME=${PROJECT_NAME:-trackA_phase0}
 W=$(( NNODES * NGPUS_PER_NODE ))
@@ -106,6 +117,9 @@ trap 'kill ${TB_SYNC_PID} 2>/dev/null; cp -r "${TB_DIR}/." "${TB_MIRROR}/" 2>/de
 
 ########################### frozen invariants -- do not tune ################
 # BYTE-IDENTICAL to run_qwen3_0p6b_rl05_parity.sh. Any change here = new recipe.
+# [v3] Precision/optimizer are ALSO frozen semantics now (see launch args):
+#   master weights fp32, Adam moments fp32, compute bf16 (FSDP mixed precision),
+#   AdamW betas (0.9,0.999) eps 1e-8 wd 0.01, clip_grad 1.0, constant LR, no warmup.
 train_batch_size=256          # [RL05] batch_size=256
 ppo_mini_batch_size=256       # [RL05] mu=1: one optimizer update per rollout
 max_prompt_length=8192        # [MAXTEXT] max_prefill_predict_length=8192
@@ -152,10 +166,17 @@ python3 -m verl.trainer.main_ppo \
     data.truncation='error' \
     data.shuffle=True \
     data.seed=${SEED} \
+    data.dataloader_num_workers=8 \
     actor_rollout_ref.model.path="${MODEL_PATH}" \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
+    actor_rollout_ref.actor.strategy=fsdp \
     actor_rollout_ref.actor.optim.lr=${actor_lr} \
+    actor_rollout_ref.actor.optim.betas='[0.9,0.999]' \
+    actor_rollout_ref.actor.optim.weight_decay=0.01 \
+    actor_rollout_ref.actor.optim.clip_grad=1.0 \
+    actor_rollout_ref.actor.optim.lr_warmup_steps_ratio=0.0 \
+    actor_rollout_ref.actor.optim.lr_scheduler_type=constant \
     actor_rollout_ref.actor.ppo_mini_batch_size=${ppo_mini_batch_size} \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=${ppo_max_token_len_per_gpu} \
@@ -166,7 +187,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.entropy_coeff=0 \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
-    actor_rollout_ref.actor.fsdp_config.model_dtype=bfloat16 \
+    actor_rollout_ref.actor.fsdp_config.model_dtype=fp32 \
     actor_rollout_ref.actor.checkpoint.save_contents='["model","optimizer","extra","hf_model"]' \
     actor_rollout_ref.ref.log_prob_use_dynamic_bsz=True \
     actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=${ppo_max_token_len_per_gpu} \
@@ -204,6 +225,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.log_val_generations=10 \
     trainer.validation_data_dir="${VAL_DUMP_DIR}" \
     trainer.rollout_data_dir="${ROLLOUT_DUMP_DIR}" \
+    trainer.resume_mode=disable \
     trainer.total_epochs=100 \
     trainer.total_training_steps=${TOTAL_STEPS} \
     +ray_kwargs.ray_init.runtime_env.env_vars.TENSORBOARD_DIR="${TB_DIR}" \
@@ -218,9 +240,15 @@ python3 -m verl.trainer.main_ppo \
 #     all 2048 completions) in a background thread, ~35 MB/step on gcsfuse -> ~11 GB
 #     for 300 steps. It is the source for the per-step train acc / solve_all /
 #     solve_none panels (plot_phase0.py --rollout). Drop the flag for timing runs.
+#   * After the smoke run, VERIFY the precision change took effect:
+#       optim shard: python3 -c "import zipfile,glob; p=glob.glob('<ckpt>/actor/optim_*rank_0.pt')[0];
+#         z=zipfile.ZipFile(p); d=z.read([n for n in z.namelist() if n.endswith('data.pkl')][0]);
+#         print('bf16', d.count(b'BFloat16Storage'), 'fp32', d.count(b'FloatStorage'))"  -> fp32 >> bf16
+#       and 'strategy': 'fsdp', betas/weight_decay/warmup in the resolved config printed at start.
 #   * Smoke-test checklist before the real run:
 #       - TB tags present: critic/score/mean, val-core/*/reward/mean@1,
 #         val-aux/*/acc/mean@1, training/rollout_probs_diff_mean, actor/pg_clipfrac
 #       - ${ROLLOUT_DUMP_DIR}/1.jsonl exists with 2048 lines and acc/fmt keys
-#       - one checkpoint written, hf_model/ present inside it, write time noted
+#       - one checkpoint written, actor/huggingface/ present inside it, write time noted
+#       - val-aux/<ds>/mv_timeout|mv_exc|mv_lenrej/mean@1 ~ 0 (reward workers healthy)
 # =============================================================================

@@ -12,11 +12,12 @@ Panels
                                  step) + moving mean; TB critic/score/mean - 0.1*fmt
                                  overlaid as a cross-check (score = acc + 0.1*fmt)
   2. eval vs step             -- val-core/<ds>/reward/mean@1 and val-aux/<ds>/acc/mean@1
-  3. solve_all / solve_none   -- rollout dump, GRPO groups = samples sharing the same
-                                 input string (8 per prompt); fraction all-correct / all-wrong
+  3. zero-advantage groups    -- rollout dump, groups by qid: frac_zero_std of the ACTUAL
+                                 reward, solve_all/solve_none on acc, format-only groups
   4. response length          -- response_length/mean and response_length/clip_ratio
   5. pg_clipfrac / grad_norm  -- actor/pg_clipfrac, actor/grad_norm
-  6. rollout-vs-trainer logp  -- training/rollout_probs_diff_mean / _max
+  6. rollout-vs-trainer       -- probability-space MAE (training/rollout_probs_diff_*) and
+                                 log-domain rollout_corr/kl, log_ppl_abs_diff if logged
 
 Summary printed to stdout: first/last 5-step means and an OLS slope per 100 steps
 with a naive 95% CI for train acc and each eval series.
@@ -59,51 +60,71 @@ def load_tb(tb_dir):
 def load_rollout(rollout_dir):
   """Per-step stats from trainer.rollout_data_dir (<step>.jsonl, one line per sample).
 
-  Groups = samples with identical input text (the n=8 completions of a prompt).
-  balance_batch reorders samples across ranks, so grouping by position is unsafe;
-  grouping by input is exact.
+  Groups = the n=8 completions of one prompt. Grouped by the reward's `qid`
+  (= extra_info.index, unique per dataset row) when present; falls back to the
+  input string (which can merge two rows of the same question). Every step is
+  checked for 256 groups x 8 samples and anomalies are reported, not hidden.
+
+  Three distinct "zero-advantage" quantities (Henry's point 4):
+    solve_all / solve_none   : group's ANSWER correctness all 1 / all 0
+    frac_zero_std_reward     : group's actual TRAINING reward (acc + 0.1*fmt)
+                               has zero std -> no gradient from this group
+    format_only_groups       : acc identical inside the group but reward std > 0
+                               -> the only signal in that group is format
   """
   if not rollout_dir or not os.path.isdir(rollout_dir):
     return None
-  files = glob.glob(os.path.join(rollout_dir, "*.jsonl"))
-  steps = []
-  for fn in files:
+  files = []
+  for fn in glob.glob(os.path.join(rollout_dir, "*.jsonl")):
     try:
-      steps.append((int(os.path.splitext(os.path.basename(fn))[0]), fn))
+      files.append((int(os.path.splitext(os.path.basename(fn))[0]), fn))
     except ValueError:
       continue
-  if not steps:
+  if not files:
     return None
-  steps.sort()
-  out = {"step": [], "n": [], "acc": [], "fmt": [], "chars": [],
-         "solve_all": [], "solve_none": [], "n_groups": []}
-  for step, fn in steps:
-    groups = defaultdict(list)
-    n = acc = fmt = chars = 0
+  files.sort()
+  keys = ["step", "n", "acc", "fmt", "chars", "n_groups", "bad_groups",
+          "solve_all", "solve_none", "zero_std_reward", "format_only",
+          "mv_timeout", "mv_exc", "mv_lenrej"]
+  out = {k: [] for k in keys}
+  anomalies = []
+  for step, fn in files:
+    groups = defaultdict(list)     # key -> list of (acc, score)
+    n = acc = fmt = chars = tmo = exc = lrj = 0
     with open(fn, encoding="utf-8") as f:
       for line in f:
         if not line.strip():
           continue
         r = json.loads(line)
-        a = float(r.get("acc", 1.0 if float(r.get("score", 0)) >= 1.0 else 0.0))
+        sc = float(r.get("score", 0.0))
+        a = float(r.get("acc", 1.0 if sc >= 1.0 else 0.0))
         fm = float(r.get("fmt", 0.0))
-        n += 1
-        acc += a
-        fmt += fm
-        chars += len(r.get("output", ""))
-        groups[r.get("input", "")].append(a >= 1.0)
+        key = r.get("qid", None)
+        key = ("qid", int(key)) if key is not None and key >= 0 else ("input", r.get("input", ""))
+        groups[key].append((a, sc))
+        n += 1; acc += a; fmt += fm; chars += len(r.get("output", ""))
+        tmo += float(r.get("mv_timeout", 0)); exc += float(r.get("mv_exc", 0)); lrj += float(r.get("mv_lenrej", 0))
     if n == 0:
       continue
-    gs = [g for g in groups.values() if len(g) >= 2]
-    out["step"].append(step)
-    out["n"].append(n)
-    out["acc"].append(acc / n)
-    out["fmt"].append(fmt / n)
-    out["chars"].append(chars / n)
-    out["n_groups"].append(len(gs))
-    out["solve_all"].append(sum(all(g) for g in gs) / len(gs) if gs else np.nan)
-    out["solve_none"].append(sum(not any(g) for g in gs) / len(gs) if gs else np.nan)
-  return {k: np.array(v, dtype=float) for k, v in out.items()}
+    sizes = [len(g) for g in groups.values()]
+    bad = sum(1 for sz in sizes if sz != 8)
+    if bad or len(groups) != 256 or n != 2048:
+      anomalies.append((step, n, len(groups), bad))
+    gs = list(groups.values())
+    def frac(pred):
+      return sum(1 for g in gs if pred(g)) / len(gs) if gs else np.nan
+    out["step"].append(step); out["n"].append(n)
+    out["acc"].append(acc / n); out["fmt"].append(fmt / n); out["chars"].append(chars / n)
+    out["n_groups"].append(len(gs)); out["bad_groups"].append(bad)
+    out["solve_all"].append(frac(lambda g: all(a >= 1.0 for a, _ in g)))
+    out["solve_none"].append(frac(lambda g: all(a < 1.0 for a, _ in g)))
+    out["zero_std_reward"].append(frac(lambda g: np.std([sc for _, sc in g]) == 0.0))
+    out["format_only"].append(frac(lambda g: len({a for a, _ in g}) == 1 and np.std([sc for _, sc in g]) > 0.0))
+    out["mv_timeout"].append(tmo / n); out["mv_exc"].append(exc / n); out["mv_lenrej"].append(lrj / n)
+  res = {k: np.array(v, dtype=float) for k, v in out.items()}
+  res["anomalies"] = anomalies
+  res["grouped_by"] = "qid" if any(k[0] == "qid" for k in groups) else "input"
+  return res
 
 
 # ------------------------------------------------------------------ helpers
@@ -240,25 +261,24 @@ def main():
   ax.legend(fontsize=8)
   ax.grid(alpha=0.3)
 
-  # ---- 3. solve_all / solve_none ----------------------------------------
+  # ---- 3. zero-advantage groups (three distinct quantities) ------------
   ax = axes[2]
-  if agg is not None and np.isfinite(agg["solve_all"]).any():
-    ax.plot(agg["step"], agg["solve_all"], color="#31a354", lw=1.5, label="solve_all (group all-correct)")
-    ax.plot(agg["step"], agg["solve_none"], color="#de2d26", lw=1.5, label="solve_none (group all-wrong)")
-    zero_std = agg["solve_all"] + agg["solve_none"]
-    ax.plot(agg["step"], zero_std, color="k", lw=1, ls=":", label="sum = frac_zero_std")
-    ax.plot(agg["step"], agg["fmt"], color="#756bb1", lw=1, ls="--", label="train fmt rate")
-    lo, hi = first_last(zero_std)
-    summary.append(f"frac_zero_std: first5={lo:.3f} last5={hi:.3f}")
-    lo, hi = first_last(agg["fmt"])
-    summary.append(f"train fmt    : first5={lo:.3f} last5={hi:.3f}")
+  if agg is not None and np.isfinite(agg["zero_std_reward"]).any():
+    ax.plot(agg["step"], agg["zero_std_reward"], color="k", lw=1.8, label="frac_zero_std (actual reward) = no gradient")
+    ax.plot(agg["step"], agg["solve_none"], color="#de2d26", lw=1.2, label="solve_none (acc all 0)")
+    ax.plot(agg["step"], agg["solve_all"], color="#31a354", lw=1.2, label="solve_all (acc all 1)")
+    ax.plot(agg["step"], agg["format_only"], color="#e6550d", lw=1.5, ls="--", label="format-only groups (acc same, reward differs)")
+    ax.plot(agg["step"], agg["fmt"], color="#756bb1", lw=1, ls=":", label="train fmt rate")
+    for name in ("zero_std_reward", "format_only", "fmt"):
+      lo, hi = first_last(agg[name])
+      summary.append(f"{name:<14}: first5={lo:.3f} last5={hi:.3f}")
     ax.set_ylim(0, 1)
-    ax.set_title("GRPO groups with zero advantage / fmt rate")
+    ax.set_title(f"zero-advantage groups (grouped by {agg['grouped_by']})")
   else:
     ax.text(0.5, 0.5, "no rollout dump\n(trainer.rollout_data_dir unset?)",
             ha="center", va="center", transform=ax.transAxes)
   ax.set_xlabel("training step")
-  ax.legend(fontsize=8)
+  ax.legend(fontsize=7)
   ax.grid(alpha=0.3)
 
   # ---- 4. response length ----------------------------------------------
@@ -285,8 +305,7 @@ def main():
   ax = axes[4]
   st, v = tb_get(tb, "actor/pg_clipfrac")
   if len(st):
-    ax.plot(st, v, color="#08519c", lw=1.5, label="actor/pg_clipfrac")
-    ax.axhspan(0.05, 0.15, color="green", alpha=0.08, label="healthy 5-15%")
+    ax.plot(st, v, color="#08519c", lw=1.5, label="actor/pg_clipfrac (~0 expected: 1 update/rollout)")
     ax.set_ylabel("clipfrac")
     lo, hi = first_last(v)
     summary.append(f"pg_clipfrac  : first5={lo:.3f} last5={hi:.3f}")
@@ -301,25 +320,31 @@ def main():
   ax.legend(loc="upper left", fontsize=8)
   ax.grid(alpha=0.3)
 
-  # ---- 6. rollout vs trainer logp --------------------------------------
+  # ---- 6. rollout vs trainer mismatch ---------------------------------
+  # verl's training/rollout_probs_diff_* is mean |exp(logp_trainer) - exp(logp_rollout)|
+  # -- a PROBABILITY-space MAE, not nats. The fork also logs log-domain
+  # quantities (rollout_corr/kl, rollout_corr/log_ppl_abs_diff); plot both,
+  # labelled honestly. Do not compare the probability MAE with nats numbers
+  # from other reports.
   ax = axes[5]
   got = False
-  for tag, c in (("training/rollout_probs_diff_mean", "#de2d26"),
-                 ("training/rollout_probs_diff_max", "#fd8d3c")):
+  for tag, c, lab in (("training/rollout_probs_diff_mean", "#de2d26", "mean |p_trainer - p_rollout|  (probability MAE)"),
+                      ("training/rollout_probs_diff_max", "#fd8d3c", "max |p_trainer - p_rollout|"),
+                      ("rollout_corr/kl", "#08519c", "rollout_corr/kl  (log domain)"),
+                      ("rollout_corr/log_ppl_abs_diff", "#6baed6", "rollout_corr/log_ppl_abs_diff  (log domain)")):
     st, v = tb_get(tb, tag)
     if len(st):
-      ax.plot(st, v, color=c, lw=1.5, label=tag.split("/")[-1])
+      ax.plot(st, v, color=c, lw=1.5, label=lab)
       got = True
-      if tag.endswith("mean"):
-        lo, hi = first_last(v)
-        summary.append(f"rollout/trainer |dlogp| mean: first5={lo:.4f} last5={hi:.4f}")
+      lo, hi = first_last(v)
+      summary.append(f"{tag:<34}: first5={lo:.4f} last5={hi:.4f}")
   if not got:
-    ax.text(0.5, 0.5, "no training/rollout_probs_diff_*\n(calculate_log_probs=False?)",
+    ax.text(0.5, 0.5, "no mismatch tags\n(calculate_log_probs=False?)",
             ha="center", va="center", transform=ax.transAxes)
   ax.set_yscale("log")
-  ax.set_title("trainer vs rollout log-prob mismatch (GPU floor)")
+  ax.set_title("trainer vs rollout mismatch (prob-space MAE and log-domain)")
   ax.set_xlabel("training step")
-  ax.legend(fontsize=8)
+  ax.legend(fontsize=7)
   ax.grid(alpha=0.3, which="both")
 
   fig.suptitle(args.title or os.path.basename(os.path.normpath(args.tb)), fontsize=13)
@@ -328,8 +353,12 @@ def main():
 
   print(f"saved {args.out}")
   if agg is not None:
-    print(f"rollout dump: {len(agg['step'])} steps, samples/step min={int(agg['n'].min())} "
-          f"max={int(agg['n'].max())} (expect 2048), groups/step ~{int(np.nanmedian(agg['n_groups']))} (expect 256)")
+    print(f"rollout dump: {len(agg['step'])} steps, grouped by {agg['grouped_by']}, samples/step "
+          f"min={int(agg['n'].min())} max={int(agg['n'].max())} (expect 2048), groups/step ~{int(np.nanmedian(agg['n_groups']))} (expect 256)")
+    if agg["anomalies"]:
+      print(f"  !! {len(agg['anomalies'])} steps with group anomalies (step, n, n_groups, groups!=8): {agg['anomalies'][:5]} ...")
+    print(f"  math_verify flags (rate over all samples): timeout={agg['mv_timeout'].mean():.5f} "
+          f"exc={agg['mv_exc'].mean():.5f} lenrej={agg['mv_lenrej'].mean():.5f}")
   print("\n".join(summary))
 
 
