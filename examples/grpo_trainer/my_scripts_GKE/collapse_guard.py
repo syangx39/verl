@@ -13,8 +13,9 @@ train accuracy) and STOPS the training driver only on the agreed joint rule:
                consecutive steps, evaluated only after WARMUP steps
   grad (warn)  actor/grad_norm > GRAD_MAX on >= GRAD_STEPS of the last 20 steps
 
-Only COMPLETE rollout dumps count (2048 rows, 256 uid x 8, valid acc), and all
-rules are evaluated on the same last fully-completed step (TB and dump aligned).
+Only COMPLETE rollout dumps count (2048 rows, 256 uid x 8, valid acc); all series
+are aligned on the INTERSECTION of their steps, and "consecutive" means step gaps
+of exactly 1 -- a skipped (incomplete) step breaks the run.
 baseline = mean of the first BASE_STEPS logged steps. No rule uses the training
 reward (it is signed once a length penalty is on). The guard never changes LR or
 rolls back; it only warns/stops. The stop is scoped to ONE driver: --pid (SIGTERM,
@@ -83,18 +84,29 @@ def rollout_acc(rollout_dir, max_files=40, expect_rows=2048, expect_groups=256, 
   return out
 
 
-def align(series_dict, last_step):
-  """Truncate every series to steps <= last_step so all rules see the same steps."""
-  return {k: [(st, v) for st, v in ser if st <= last_step] for k, ser in series_dict.items()}
+def align(series_dict):
+  """Restrict every series to the steps ALL of them have (intersection), ascending.
+
+  With the rollout dump gated on completeness, a step missing from the dump is
+  dropped from every series, so all rules see identical steps.
+  """
+  common = None
+  for ser in series_dict.values():
+    steps = {st for st, _ in ser}
+    common = steps if common is None else (common & steps)
+  common = common or set()
+  return {k: sorted([(st, v) for st, v in ser if st in common]) for k, ser in series_dict.items()}
 
 
 def tail_run(series, pred):
+  """Length of the trailing run of CONSECUTIVE steps (step gap exactly 1) satisfying pred."""
   n = 0
-  for _, v in reversed(series):
-    if pred(v):
-      n += 1
-    else:
+  prev = None
+  for st, v in reversed(series):
+    if not pred(v) or (prev is not None and prev - st != 1):
       break
+    n += 1
+    prev = st
   return n
 
 
@@ -165,21 +177,22 @@ def main():
       if args.once:
         return
       continue
-    # ---- align: judge every rule on the same, fully completed step
-    last = ent[-1][0]
+    # ---- align: every rule is judged on the same set of fully completed steps
+    series = {"ent": ent, "cap": cap, "gn": gn}
     if args.rollout:
       if not acc:
         if args.once:
           return
         continue
-      last = min(last, acc[-1][0])
-    al = align({"ent": ent, "cap": cap, "gn": gn, "acc": acc}, last)
-    ent, cap, gn, acc = al["ent"], al["cap"], al["gn"], al["acc"]
+      series["acc"] = acc
+    al = align(series)
+    ent, cap, gn = al["ent"], al["cap"], al["gn"]
+    acc = al.get("acc", [])
     if not ent:
       if args.once:
         return
       continue
-    step = last
+    step = ent[-1][0]
     for name, series in (("ent", ent), ("acc", acc)):
       if name not in base and len(series) >= args.base_steps:
         base[name] = sum(v for _, v in series[:args.base_steps]) / args.base_steps

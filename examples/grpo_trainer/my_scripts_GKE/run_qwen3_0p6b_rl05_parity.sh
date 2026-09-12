@@ -202,11 +202,14 @@ on_signal() {
   echo "[phase0] caught signal -- stopping driver ${DRIVER_PID:-<none>}"
   [ -n "${DRIVER_PID}" ] && kill -TERM "${DRIVER_PID}" 2>/dev/null || true
 }
-trap on_signal INT TERM
+# After forwarding, EXIT immediately so on_exit (time-bounded TERM->KILL) always runs,
+# even if the driver ignores TERM and `wait` would otherwise block forever.
+trap 'on_signal; exit 130' INT
+trap 'on_signal; exit 143' TERM
 on_exit() {
   if [ -n "${DRIVER_PID}" ] && kill -0 "${DRIVER_PID}" 2>/dev/null; then
     echo "[phase0] exit: driver ${DRIVER_PID} still alive -- sending TERM"; kill -TERM "${DRIVER_PID}" 2>/dev/null || true
-    for _ in $(seq 1 15); do kill -0 "${DRIVER_PID}" 2>/dev/null || break; sleep 2; done
+    for _ in $(seq 1 "$(( ${DRIVER_KILL_GRACE:-30} / 2 ))"); do kill -0 "${DRIVER_PID}" 2>/dev/null || break; sleep 2; done
     kill -0 "${DRIVER_PID}" 2>/dev/null && { echo "[phase0] exit: driver did not stop -- KILL"; kill -KILL "${DRIVER_PID}" 2>/dev/null || true; }
   fi
   kill ${TB_SYNC_PID} ${GUARD_PID} 2>/dev/null || true
