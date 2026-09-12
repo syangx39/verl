@@ -113,7 +113,7 @@ ROLLOUT_DUMP_DIR=${LOG_DIR}/${EXPERIMENT_NAME}/rollout_dump   # per-step train s
 mkdir -p "${TB_DIR}" "${TB_MIRROR}" "${VAL_DUMP_DIR}" "${ROLLOUT_DUMP_DIR}"
 
 ########################### [v4] pre-flight 0: the verl fork must carry the rollout-dump uid patch ####
-RT=$(python3 -c "import verl.trainer.ppo.ray_trainer as m; print(m.__file__)")
+RT=$(python3 -c "import verl.trainer.ppo.ray_trainer as m; print(m.__file__)" 2>/dev/null | tail -1)   # import prints banner lines; keep the path only
 grep -q "_DUMP_UID" "${RT}" || { echo "[phase0] ABORT: ${RT} lacks the uid dump patch. Run: python3 ${SCRIPTS_DIR:-.}/patch_verl_dump_uid.py ${RT}"; exit 2; }
 echo "[phase0] verl fork: ${RT} (uid dump patch present); git head $(git -C "$(dirname "${RT}")" rev-parse --short HEAD 2>/dev/null || echo n/a)"
 

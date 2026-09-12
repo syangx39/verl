@@ -59,7 +59,16 @@ import os
 import re
 
 from math_verify import parse, verify
+from math_verify.errors import TimeoutException  # NOTE: subclasses BaseException, not Exception
 from math_verify.parser import ExprExtractionConfig, LatexExtractionConfig
+
+# math_verify >= 0.7 exposes raise_on_error on parse()/verify(); without it internal
+# timeouts are silently turned into []/False and cannot be counted. Refuse to run
+# on an older version rather than under-report timeouts. Pin the same version on TPU.
+import inspect as _inspect
+if "raise_on_error" not in _inspect.signature(parse).parameters or \
+   "raise_on_error" not in _inspect.signature(verify).parameters:
+  raise ImportError("math_verify too old: parse()/verify() lack raise_on_error; pin the version used by the rulebook")
 
 EPSILON = 1e-6
 FALLBACK_ANSWER = "-1000000"
@@ -254,10 +263,10 @@ def extract_answer(response: str) -> str:
 # reward whose timeout semantics silently changed is worse than a dead run.
 # The only way to run without workers is the explicit REWARD_MV_POOL=0 (meant
 # for offline re-scoring in a main thread), and that is reported as mv_mode.
-# Workers return a structured status so exceptions inside math_verify are
-# counted (mv_exc) instead of being folded into "wrong answer"; a *Timeout*
-# exception raised by math_verify's own guard inside the worker counts as
-# mv_timeout (the outer watchdog at timeout+1 s is the backstop for true hangs).
+# Workers call math_verify with raise_on_error=True and return a structured
+# status: math_verify's own timeout (TimeoutException, a BaseException) counts
+# as mv_timeout, other errors as mv_exc; the outer watchdog at timeout+1 s is the
+# backstop for true hangs that even the signal guard cannot interrupt.
 #   REWARD_MV_POOL=1        use workers (0 -> in-process, no hang protection)
 #   REWARD_MV_PROCS=4       workers per reward process
 #   REWARD_MV_TIMEOUT=5     seconds per equivalence check (match MaxText's value)
@@ -287,17 +296,24 @@ class MathVerifyPoolError(RuntimeError):
 
 
 def _mv_check(gold_boxed_list, guess_boxed, t):
-  """The actual math_verify call. Returns ("ok", bool) or ("exc", <ExceptionName>).
+  """The actual math_verify call.
 
+  Returns ("ok", bool) | ("timeout", msg) | ("exc", <ExceptionName>).
   t = per-call timeout in seconds for math_verify's own signal-based guard
   (only legal in a main thread); t=None disables it (in-process mode).
+  raise_on_error=True so that math_verify's internal timeout and parse errors
+  surface as exceptions instead of being folded into []/False (default).
+  TimeoutException derives from BaseException, hence the explicit clause.
   """
   try:
-    guess = parse(guess_boxed, _MV_CFG, parsing_timeout=t)
-    golds = list(_chain.from_iterable(parse(g, _MV_CFG, parsing_timeout=t) for g in gold_boxed_list))
+    guess = parse(guess_boxed, _MV_CFG, parsing_timeout=t, raise_on_error=True)
+    golds = list(_chain.from_iterable(
+        parse(g, _MV_CFG, parsing_timeout=t, raise_on_error=True) for g in gold_boxed_list))
     if not guess or not golds:
       return ("ok", False)
-    return ("ok", bool(verify(golds, guess, timeout_seconds=t)))
+    return ("ok", bool(verify(golds, guess, timeout_seconds=t, raise_on_error=True)))
+  except TimeoutException as e:
+    return ("timeout", str(e)[:80])
   except Exception as e:  # noqa: BLE001 -- reported as status, not swallowed
     return ("exc", type(e).__name__)
 
@@ -365,9 +381,9 @@ def _math_verify_equal(gold_boxed_list, guess_boxed: str):
     return False, flags
   if not _MV_POOL_ENABLED:            # explicit opt-out only (REWARD_MV_POOL=0)
     status, val = _mv_check(gold_boxed_list, guess_boxed, None)
-    if status == "exc":
-      flags["mv_exc"] = 1.0
-      _mv_bump("exc")
+    if status in ("exc", "timeout"):
+      flags["mv_exc" if status == "exc" else "mv_timeout"] = 1.0
+      _mv_bump("exc" if status == "exc" else "timeout")
       return False, flags
     return bool(val), flags
   try:
@@ -380,16 +396,13 @@ def _math_verify_equal(gold_boxed_list, guess_boxed: str):
     if w.conn.poll(_MV_TIMEOUT + 1.0):
       status, val = w.conn.recv()
       _mv_idle.put(w)
+      if status == "timeout":       # math_verify's own guard fired inside the worker
+        flags["mv_timeout"] = 1.0
+        _mv_bump("timeout")
+        return False, flags
       if status == "exc":
-        # math_verify's own (signal-based) timeout fires inside the worker before
-        # the outer watchdog; it surfaces as an exception named *Timeout* -- count
-        # it as a timeout, not as a generic exception.
-        if "Timeout" in str(val):
-          flags["mv_timeout"] = 1.0
-          _mv_bump("timeout")
-        else:
-          flags["mv_exc"] = 1.0
-          _mv_bump("exc")
+        flags["mv_exc"] = 1.0
+        _mv_bump("exc")
         return False, flags
       return bool(val), flags
     flags["mv_timeout"] = 1.0
