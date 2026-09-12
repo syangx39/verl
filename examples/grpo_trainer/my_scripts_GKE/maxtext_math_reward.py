@@ -255,7 +255,9 @@ def extract_answer(response: str) -> str:
 # The only way to run without workers is the explicit REWARD_MV_POOL=0 (meant
 # for offline re-scoring in a main thread), and that is reported as mv_mode.
 # Workers return a structured status so exceptions inside math_verify are
-# counted (mv_exc) instead of being folded into "wrong answer".
+# counted (mv_exc) instead of being folded into "wrong answer"; a *Timeout*
+# exception raised by math_verify's own guard inside the worker counts as
+# mv_timeout (the outer watchdog at timeout+1 s is the backstop for true hangs).
 #   REWARD_MV_POOL=1        use workers (0 -> in-process, no hang protection)
 #   REWARD_MV_PROCS=4       workers per reward process
 #   REWARD_MV_TIMEOUT=5     seconds per equivalence check (match MaxText's value)
@@ -379,8 +381,15 @@ def _math_verify_equal(gold_boxed_list, guess_boxed: str):
       status, val = w.conn.recv()
       _mv_idle.put(w)
       if status == "exc":
-        flags["mv_exc"] = 1.0
-        _mv_bump("exc")
+        # math_verify's own (signal-based) timeout fires inside the worker before
+        # the outer watchdog; it surfaces as an exception named *Timeout* -- count
+        # it as a timeout, not as a generic exception.
+        if "Timeout" in str(val):
+          flags["mv_timeout"] = 1.0
+          _mv_bump("timeout")
+        else:
+          flags["mv_exc"] = 1.0
+          _mv_bump("exc")
         return False, flags
       return bool(val), flags
     flags["mv_timeout"] = 1.0

@@ -57,7 +57,7 @@ def load_tb(tb_dir):
   return out
 
 
-def load_rollout(rollout_dir):
+def load_rollout(rollout_dir, require_uid=True):
   """Per-step stats from trainer.rollout_data_dir (<step>.jsonl, one line per sample).
 
   Groups = the n=8 completions of one prompt. Grouped by the trainer's `uid`
@@ -101,6 +101,9 @@ def load_rollout(rollout_dir):
         fm = float(r.get("fmt", 0.0))
         if r.get("uid"):                                   # verl group uuid (fork patch)
           key = ("uid", r["uid"])
+        elif require_uid:
+          raise SystemExit(f"{fn}: rollout dump has no 'uid' field -- the verl fork is not patched "
+                           f"(patch_verl_dump_uid.py). Pass --allow_no_uid only for pre-patch pilot dumps.")
         elif r.get("qid") is not None and r["qid"] >= 0:    # unique row id from build v4
           key = ("qid", int(r["qid"]))
         else:
@@ -130,6 +133,10 @@ def load_rollout(rollout_dir):
     out["mv_timeout"].append(tmo / n); out["mv_exc"].append(exc / n); out["mv_lenrej"].append(lrj / n)
   res = {k: np.array(v, dtype=float) for k, v in out.items()}
   res["anomalies"] = anomalies
+  if len(res["step"]) == 0:
+    print(f"!! rollout dump: all {len(anomalies)} steps skipped (groups not 256x8) -- no group statistics. "
+          f"first anomalies: {anomalies[:5]}")
+    return None
   kinds = {k[0] for k in groups}
   res["grouped_by"] = "uid" if "uid" in kinds else ("qid" if "qid" in kinds else "input")
   return res
@@ -194,13 +201,15 @@ def main():
   ap = argparse.ArgumentParser()
   ap.add_argument("--tb", required=True)
   ap.add_argument("--rollout", default=None)
+  ap.add_argument("--allow_no_uid", action="store_true",
+                  help="permit grouping by qid/input for dumps written before the uid patch (pilot runs only)")
   ap.add_argument("--out", default="phase0.png")
   ap.add_argument("--ma", type=int, default=5)
   ap.add_argument("--title", default="")
   args = ap.parse_args()
 
   tb = load_tb(args.tb)
-  agg = load_rollout(args.rollout)
+  agg = load_rollout(args.rollout, require_uid=not args.allow_no_uid)
   if not tb:
     raise SystemExit(f"no scalar tags found under {args.tb}")
 

@@ -131,6 +131,7 @@ def main():
   g = pd.DataFrame(out)
   gleak = sum(norm_q(r["question"]) in tq for r in rows)
   print(f"gsm8k test questions also in train (normalized): {gleak}")
+  assert gleak == 0, f"GSM8K test leaks into train: {gleak}"
   g.to_parquet(f"{d}/gsm8k_test.parquet", index=False)
   print(f"gsm8k_test.parquet: {len(g)} rows; example gold={out[0]['reward_model']['ground_truth']}")
 

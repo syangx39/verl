@@ -95,6 +95,9 @@ RUN_TAG=${RUN_TAG:-v4}                      # [v4] + reward v4 (no silent fallba
 # [v4] reward worker knobs. They must reach the Ray actors that run the reward,
 # so they are forwarded through ray runtime_env below (shell exports alone do NOT
 # reach them). The pre-flight below prints the values it sees.
+# QUOTING: the values are passed as  "+key='${VAR}'"  -- the shell strips the outer
+# double quotes and Hydra sees +key='1', i.e. a STRING. Unquoted, Hydra parses 1/4/5/400
+# as ints and ray.init rejects runtime_env.env_vars with non-string values.
 export REWARD_MV_POOL=${REWARD_MV_POOL:-1}
 export REWARD_MV_PROCS=${REWARD_MV_PROCS:-4}
 export REWARD_MV_TIMEOUT=${REWARD_MV_TIMEOUT:-5}
@@ -109,7 +112,12 @@ VAL_DUMP_DIR=${LOG_DIR}/${EXPERIMENT_NAME}/val_dump
 ROLLOUT_DUMP_DIR=${LOG_DIR}/${EXPERIMENT_NAME}/rollout_dump   # per-step train samples (acc/fmt per sample)
 mkdir -p "${TB_DIR}" "${TB_MIRROR}" "${VAL_DUMP_DIR}" "${ROLLOUT_DUMP_DIR}"
 
-########################### [v4] pre-flight: reward must (a) start its worker pool, (b) score equivalences from a THREAD ####
+########################### [v4] pre-flight 0: the verl fork must carry the rollout-dump uid patch ####
+RT=$(python3 -c "import verl.trainer.ppo.ray_trainer as m; print(m.__file__)")
+grep -q "_DUMP_UID" "${RT}" || { echo "[phase0] ABORT: ${RT} lacks the uid dump patch. Run: python3 ${SCRIPTS_DIR:-.}/patch_verl_dump_uid.py ${RT}"; exit 2; }
+echo "[phase0] verl fork: ${RT} (uid dump patch present); git head $(git -C "$(dirname "${RT}")" rev-parse --short HEAD 2>/dev/null || echo n/a)"
+
+########################### [v4] pre-flight 1: reward must (a) start its worker pool, (b) score equivalences from a THREAD ####
 python3 - "${REWARD_FN_PATH}" <<'PYEOF'
 import importlib.metadata as md, importlib.util, json, os, sys, threading, warnings
 warnings.filterwarnings("ignore")
@@ -248,12 +256,12 @@ python3 -m verl.trainer.main_ppo \
     trainer.resume_mode=disable \
     trainer.total_epochs=100 \
     trainer.total_training_steps=${TOTAL_STEPS} \
-    +ray_kwargs.ray_init.runtime_env.env_vars.TENSORBOARD_DIR="${TB_DIR}" \
-    +ray_kwargs.ray_init.runtime_env.env_vars.EXPERIMENT_NAME="${EXPERIMENT_NAME}" \
-    +ray_kwargs.ray_init.runtime_env.env_vars.REWARD_MV_POOL="${REWARD_MV_POOL}" \
-    +ray_kwargs.ray_init.runtime_env.env_vars.REWARD_MV_PROCS="${REWARD_MV_PROCS}" \
-    +ray_kwargs.ray_init.runtime_env.env_vars.REWARD_MV_TIMEOUT="${REWARD_MV_TIMEOUT}" \
-    +ray_kwargs.ray_init.runtime_env.env_vars.REWARD_MATH_VERIFY_MAX_CHARS="${REWARD_MATH_VERIFY_MAX_CHARS}" \
+    "+ray_kwargs.ray_init.runtime_env.env_vars.TENSORBOARD_DIR='${TB_DIR}'" \
+    "+ray_kwargs.ray_init.runtime_env.env_vars.EXPERIMENT_NAME='${EXPERIMENT_NAME}'" \
+    "+ray_kwargs.ray_init.runtime_env.env_vars.REWARD_MV_POOL='${REWARD_MV_POOL}'" \
+    "+ray_kwargs.ray_init.runtime_env.env_vars.REWARD_MV_PROCS='${REWARD_MV_PROCS}'" \
+    "+ray_kwargs.ray_init.runtime_env.env_vars.REWARD_MV_TIMEOUT='${REWARD_MV_TIMEOUT}'" \
+    "+ray_kwargs.ray_init.runtime_env.env_vars.REWARD_MATH_VERIFY_MAX_CHARS='${REWARD_MATH_VERIFY_MAX_CHARS}'" \
     ${RAY_NUM_GPUS_ARG} \
     "$@"
 
