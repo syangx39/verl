@@ -85,6 +85,40 @@ REWARD_EXACT_FORMAT_MATCH = 0.1
 PENALTY_INCORRECT_FORMAT = 0.0
 PENALTY_INCORRECT_ANSWER = 0.0
 
+# --- stability-round knobs (v5). Defaults reproduce the MaxText parity reward
+# exactly; the GPU stability round overrides them via env (forwarded by the
+# launcher through ray runtime_env). Every deviation is a recipe change.
+#   REWARD_FMT_WEIGHT        weight of the format bonus (0.1 = MaxText; 0 = answer-only,
+#                            the fmt FLAG is still computed and logged either way)
+#   REWARD_OVERLONG_BUFFER   DAPO overlong soft penalty: buffer length in tokens
+#                            (0 = off = MaxText). Responses longer than
+#                            MAX_RESP_LEN - BUFFER are penalised linearly, reaching
+#                            -PENALTY at the cap:  r += min(0, -(L - (M-B))/B * P)
+#   REWARD_OVERLONG_PENALTY  P (default 1.0)
+#   REWARD_MAX_RESP_LEN      M, must equal rollout max_response_length (default 8192)
+# The penalty needs the response token length: extra_info["response_len"], which
+# the fork's reward-loop manager passes after patch_verl_reward_response_len.py.
+# If the buffer is on and the length is missing the reward RAISES (no silent no-op).
+_FMT_WEIGHT = float(os.environ.get("REWARD_FMT_WEIGHT", "0.1"))
+_OVERLONG_BUFFER = int(os.environ.get("REWARD_OVERLONG_BUFFER", "0"))
+_OVERLONG_PENALTY = float(os.environ.get("REWARD_OVERLONG_PENALTY", "1.0"))
+_MAX_RESP_LEN = int(os.environ.get("REWARD_MAX_RESP_LEN", "8192"))
+if _OVERLONG_BUFFER < 0 or _OVERLONG_BUFFER > _MAX_RESP_LEN:
+  raise ValueError(f"REWARD_OVERLONG_BUFFER={_OVERLONG_BUFFER} must be in [0, {_MAX_RESP_LEN}]")
+
+
+def _overlong_reward(extra_info):
+  """DAPO overlong soft penalty (<= 0). Returns (penalty, flags)."""
+  if _OVERLONG_BUFFER == 0:
+    return 0.0, {"overlong": 0.0}
+  n = extra_info.get("response_len") if isinstance(extra_info, dict) else None
+  if n is None:
+    raise RuntimeError("REWARD_OVERLONG_BUFFER>0 but extra_info has no 'response_len' -- "
+                       "apply patch_verl_reward_response_len.py to the fork")
+  expected = _MAX_RESP_LEN - _OVERLONG_BUFFER
+  pen = min(0.0, -(float(n) - expected) / _OVERLONG_BUFFER * _OVERLONG_PENALTY)
+  return pen, {"overlong": 1.0 if pen < 0 else 0.0}
+
 # --- regexes (utils_rl.get_match_format_regex / get_answer_fallback_regex) --
 MATCH_FORMAT = re.compile(
     rf"{REASONING_START}.+{REASONING_END}.*?{SOLUTION_START}(.+?){SOLUTION_END}",
@@ -501,15 +535,19 @@ def _run_dir() -> str:
 def compute_score(data_source, solution_str, ground_truth, extra_info=None, **kwargs):
   """verl custom reward entry point.
 
-  Returns {"score": fmt + ans, "acc", "fmt", "qid", "mv_used", "mv_timeout", "mv_exc", "mv_lenrej"}.
-  "score" is the training reward (identical to the original scalar return).
+  Returns {"score": fmt_w*fmt + ans + length_penalty, "acc", "fmt", "length_penalty", "overlong",
+           "qid", "mv_used", "mv_timeout", "mv_exc", "mv_lenrej"}.
+  With default knobs (fmt weight 0.1, overlong off) "score" equals the original
+  MaxText-parity scalar reward.
   """
   del kwargs
   completion = solution_str if isinstance(solution_str, str) else str(solution_str)
-  fmt = _format_score(completion)
+  fmt_raw = _format_score(completion)                  # 0.1 or 0 (MaxText match_format_exactly)
+  fmt_flag = 1.0 if fmt_raw > 0 else 0.0
+  fmt = fmt_flag * _FMT_WEIGHT                          # weight knob (0.1 = parity, 0 = answer-only)
   ans, mvf = _answer_score(completion, ground_truth)
   acc_flag = 1.0 if ans >= REWARD_EXACT_ANSWER else 0.0
-  fmt_flag = 1.0 if fmt > 0 else 0.0
+  ol, olf = _overlong_reward(extra_info)
   qid = float(extra_info.get("index", -1)) if isinstance(extra_info, dict) else -1.0
 
   if _DUMP_DIR:
@@ -532,7 +570,8 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, **kw
       pass
   # qid = extra_info["index"] (verl repeats it for the n=8 completions of a prompt)
   # so the rollout dump can be grouped exactly; mv_* are per-call outcome flags.
-  return {"score": fmt + ans, "acc": acc_flag, "fmt": fmt_flag, "qid": qid, **mvf}
+  return {"score": fmt + ans + ol, "acc": acc_flag, "fmt": fmt_flag, "length_penalty": ol,
+          "qid": qid, **olf, **mvf}
 
 
 # --------------------------- self-test -------------------------------------
@@ -550,5 +589,7 @@ if __name__ == "__main__":
   ]
   for completion, exp_score, exp_acc, note in cases:
     got = compute_score("x", completion, gt, extra_info={"index": 0})
-    ok = abs(got["score"] - exp_score) < 1e-9 and abs(got["acc"] - exp_acc) < 1e-9
-    print(f"{'OK ' if ok else 'FAIL'} {note}: got={got} expected score={exp_score} acc={exp_acc}")
+    exp = exp_acc + (0.1 if "<reasoning>" in completion and "</reasoning>" in completion and "<answer>" in completion else 0.0) * (_FMT_WEIGHT / 0.1)
+    ok = abs(got["score"] - exp) < 1e-9 and abs(got["acc"] - exp_acc) < 1e-9
+    print(f"{'OK ' if ok else 'FAIL'} {note}: got={got} expected score={exp} acc={exp_acc}")
+  print(f"knobs: fmt_weight={_FMT_WEIGHT} overlong_buffer={_OVERLONG_BUFFER} penalty={_OVERLONG_PENALTY} max_resp_len={_MAX_RESP_LEN}")

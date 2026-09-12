@@ -8,16 +8,18 @@ Inputs
   --ma   <int>   moving-average window in steps (default 5)
 
 Panels
-  1. train acc vs step        -- rollout dump (mean acc over the 2048 samples of each
-                                 step) + moving mean; TB critic/score/mean - 0.1*fmt
-                                 overlaid as a cross-check (score = acc + 0.1*fmt)
+  1. train acc vs step        -- rollout dump: acc (task signal), the ACTUAL reward
+                                 (dump mean score) and TB critic/score/mean as cross-check;
+                                 no assumption about reward composition
   2. eval vs step             -- val-core/<ds>/reward/mean@1 and val-aux/<ds>/acc/mean@1
-  3. zero-advantage groups    -- rollout dump, groups by qid: frac_zero_std of the ACTUAL
-                                 reward, solve_all/solve_none on acc, format-only groups
+  3. zero-advantage groups    -- rollout dump, groups by uid: frac_zero_std of the ACTUAL
+                                 reward, solve_all/solve_none on acc, non-acc-signal groups
+                                 (format and/or length penalty), mean length penalty
   4. response length          -- response_length/mean and response_length/clip_ratio
-  5. pg_clipfrac / grad_norm  -- actor/pg_clipfrac, actor/grad_norm
+  5. entropy / grad_norm      -- actor/entropy (log scale), actor/grad_norm; clipfrac in summary
   6. rollout-vs-trainer       -- probability-space MAE (training/rollout_probs_diff_*) and
-                                 log-domain rollout_corr/kl, log_ppl_abs_diff if logged
+                                 log-domain rollout_corr/kl, log_ppl_abs_diff if logged;
+                                 plus actor/kl_loss = policy-vs-reference KL when use_kl_loss
 
 Summary printed to stdout: first/last 5-step means and an OLS slope per 100 steps
 with a naive 95% CI for train acc and each eval series.
@@ -83,14 +85,15 @@ def load_rollout(rollout_dir, require_uid=True):
   if not files:
     return None
   files.sort()
-  keys = ["step", "n", "acc", "fmt", "chars", "n_groups", "bad_groups",
-          "solve_all", "solve_none", "zero_std_reward", "format_only",
+  keys = ["step", "n", "acc", "fmt", "score", "length_penalty", "chars", "n_groups", "bad_groups",
+          "solve_all", "solve_none", "zero_std_reward", "nonacc_signal",
           "mv_timeout", "mv_exc", "mv_lenrej"]
   out = {k: [] for k in keys}
   anomalies = []
   for step, fn in files:
     groups = defaultdict(list)     # key -> list of (acc, score)
     n = acc = fmt = chars = tmo = exc = lrj = 0
+    ssum = lpsum = 0.0
     with open(fn, encoding="utf-8") as f:
       for line in f:
         if not line.strip():
@@ -110,6 +113,7 @@ def load_rollout(rollout_dir, require_uid=True):
           key = ("input", r.get("input", ""))
         groups[key].append((a, sc))
         n += 1; acc += a; fmt += fm; chars += len(r.get("output", ""))
+        ssum += sc; lpsum += float(r.get("length_penalty", 0.0))
         tmo += float(r.get("mv_timeout", 0)); exc += float(r.get("mv_exc", 0)); lrj += float(r.get("mv_lenrej", 0))
     if n == 0:
       continue
@@ -125,11 +129,13 @@ def load_rollout(rollout_dir, require_uid=True):
       return sum(1 for g in gs if pred(g)) / len(gs) if gs else np.nan
     out["step"].append(step); out["n"].append(n)
     out["acc"].append(acc / n); out["fmt"].append(fmt / n); out["chars"].append(chars / n)
+    out["score"].append(ssum / n); out["length_penalty"].append(lpsum / n)
     out["n_groups"].append(len(gs)); out["bad_groups"].append(bad)
     out["solve_all"].append(frac(lambda g: all(a >= 1.0 for a, _ in g)))
     out["solve_none"].append(frac(lambda g: all(a < 1.0 for a, _ in g)))
     out["zero_std_reward"].append(frac(lambda g: np.std([sc for _, sc in g]) == 0.0))
-    out["format_only"].append(frac(lambda g: len({a for a, _ in g}) == 1 and np.std([sc for _, sc in g]) > 0.0))
+    # groups whose ONLY signal is non-accuracy (format bonus and/or length penalty)
+    out["nonacc_signal"].append(frac(lambda g: len({a for a, _ in g}) == 1 and np.std([sc for _, sc in g]) > 0.0))
     out["mv_timeout"].append(tmo / n); out["mv_exc"].append(exc / n); out["mv_lenrej"].append(lrj / n)
   res = {k: np.array(v, dtype=float) for k, v in out.items()}
   res["anomalies"] = anomalies
@@ -217,30 +223,34 @@ def main():
   axes = axes.ravel()
   summary = []
 
-  # ---- 1. train acc ------------------------------------------------------
+  # ---- 1. train acc + reward ---------------------------------------------
+  # acc is the task signal; the ACTUAL training reward (acc + fmt_w*fmt + length_penalty)
+  # is plotted separately from the dump and cross-checked against TB critic/score/mean.
+  # No assumption about reward composition is made here.
   ax = axes[0]
   s_step, s_val = tb_get(tb, "critic/score/mean")
   if agg is not None:
     x = agg["step"]
-    y = agg["acc"]
-    ax.plot(x, y, color="#9ecae1", lw=1, label="acc per step (rollout dump)")
-    ax.plot(x, moving_mean(y, args.ma), color="#08519c", lw=2, label=f"acc {args.ma}-step mean")
+    ax.plot(x, agg["acc"], color="#9ecae1", lw=1, label="acc per step (rollout dump)")
+    ax.plot(x, moving_mean(agg["acc"], args.ma), color="#08519c", lw=2, label=f"acc {args.ma}-step mean")
+    ax.plot(x, agg["score"], color="#e6550d", lw=1, ls="--", label="actual reward per step (dump mean score)")
     if len(s_step):
-      # score - 0.1*fmt should coincide with acc if windows align with steps
-      fmt_i = np.interp(s_step, x, agg["fmt"]) if len(x) else 0.0
-      ax.plot(s_step, s_val - 0.1 * fmt_i, color="#e6550d", lw=1, ls="--",
-              label="TB score - 0.1*fmt (cross-check)")
-    lo, hi = first_last(y)
-    sl, ci = ols_slope(x, y)
+      ax.plot(s_step, s_val, color="#fd8d3c", lw=1, ls=":", label="TB critic/score/mean (cross-check)")
+    lo, hi = first_last(agg["acc"])
+    sl, ci = ols_slope(x, agg["acc"])
     summary.append(f"train acc   : first5={lo:.3f} last5={hi:.3f}  slope/100steps={sl:+.4f} ±{ci:.4f}")
-    ax.set_title("train acc (fraction correct, 2048 samples/step)")
+    lo, hi = first_last(agg["score"])
+    summary.append(f"train reward: first5={lo:.3f} last5={hi:.3f}  (actual training reward)")
+    lo, hi = first_last(agg["length_penalty"])
+    summary.append(f"length_pen  : first5={lo:+.3f} last5={hi:+.3f}  (mean per sample, <= 0)")
+    ax.set_title("train acc vs actual reward (2048 samples/step)")
   elif len(s_step):
     ax.plot(s_step, s_val, color="#9ecae1", lw=1, label="critic/score/mean")
     ax.plot(s_step, moving_mean(s_val, args.ma), color="#08519c", lw=2, label=f"{args.ma}-step mean")
     lo, hi = first_last(s_val)
     sl, ci = ols_slope(s_step, s_val)
     summary.append(f"train score : first5={lo:.3f} last5={hi:.3f}  slope/100steps={sl:+.4f} ±{ci:.4f}")
-    ax.set_title("train score = acc + 0.1*fmt (no rollout dump found)")
+    ax.set_title("train reward (no rollout dump found)")
   ax.set_xlabel("training step")
   ax.legend(fontsize=8)
   ax.grid(alpha=0.3)
@@ -265,7 +275,7 @@ def main():
     summary.append(f"eval {ds:<8}: first={lo:.3f} last={hi:.3f}  slope/100steps={sl:+.4f} ±{ci:.4f}  (n_evals={len(st)})")
     plotted = True
   for ds, (st, vals) in sorted(rew_series.items()):
-    ax.plot(st, vals, marker="s", lw=1, ls="--", alpha=0.7, label=f"{ds} reward (=acc+0.1fmt)")
+    ax.plot(st, vals, marker="s", lw=1, ls="--", alpha=0.7, label=f"{ds} reward (actual score)")
     plotted = True
   for ds, (st, vals) in sorted(fmt_series.items()):
     ax.plot(st, vals, marker="^", lw=1, ls=":", alpha=0.7, label=f"{ds} fmt rate")
@@ -284,9 +294,11 @@ def main():
     ax.plot(agg["step"], agg["zero_std_reward"], color="k", lw=1.8, label="frac_zero_std (actual reward) = no gradient")
     ax.plot(agg["step"], agg["solve_none"], color="#de2d26", lw=1.2, label="solve_none (acc all 0)")
     ax.plot(agg["step"], agg["solve_all"], color="#31a354", lw=1.2, label="solve_all (acc all 1)")
-    ax.plot(agg["step"], agg["format_only"], color="#e6550d", lw=1.5, ls="--", label="format-only groups (acc same, reward differs)")
+    ax.plot(agg["step"], agg["nonacc_signal"], color="#e6550d", lw=1.5, ls="--",
+            label="non-acc-signal groups (acc same, reward differs: format/length)")
     ax.plot(agg["step"], agg["fmt"], color="#756bb1", lw=1, ls=":", label="train fmt rate")
-    for name in ("zero_std_reward", "format_only", "fmt"):
+    ax.plot(agg["step"], -agg["length_penalty"], color="#636363", lw=1, ls="-.", label="-mean length_penalty")
+    for name in ("zero_std_reward", "nonacc_signal", "fmt"):
       lo, hi = first_last(agg[name])
       summary.append(f"{name:<14}: first5={lo:.3f} last5={hi:.3f}")
     ax.set_ylim(0, 1)
@@ -318,24 +330,36 @@ def main():
   ax.legend(loc="upper left", fontsize=8)
   ax.grid(alpha=0.3)
 
-  # ---- 5. clipfrac / grad norm ------------------------------------------
+  # ---- 5. entropy / grad norm (clipfrac goes to the summary) ------------
+  # Entropy was the earliest collapse signal in the v4 pilot (rising from step ~30,
+  # exploding past step ~100), so it gets the panel; pg_clipfrac is 0 by design at
+  # mu=1 and only informative in multi-update ablations -> printed, not plotted.
   ax = axes[4]
-  st, v = tb_get(tb, "actor/pg_clipfrac")
+  st, v = tb_get(tb, "actor/entropy")
   if len(st):
-    ax.plot(st, v, color="#08519c", lw=1.5, label="actor/pg_clipfrac (~0 expected: 1 update/rollout)")
-    ax.set_ylabel("clipfrac")
+    ax.plot(st, v, color="#08519c", lw=1.5, label="actor/entropy")
+    ax.set_ylabel("entropy (nats/token)")
+    ax.set_yscale("log")
     lo, hi = first_last(v)
-    summary.append(f"pg_clipfrac  : first5={lo:.3f} last5={hi:.3f}")
+    summary.append(f"entropy      : first5={lo:.3f} last5={hi:.3f}  (x{hi / max(lo, 1e-9):.1f})  [trainer entropy at the rollout temperature; compare across runs only at equal T]")
+    if hi > 3 * lo:
+      summary.append("  !! entropy grew > 3x from the start -- collapse signature")
   st2, v2 = tb_get(tb, "actor/grad_norm")
   if len(st2):
     ax2 = ax.twinx()
     ax2.plot(st2, v2, color="#e6550d", lw=1, alpha=0.8, label="actor/grad_norm")
     ax2.set_ylabel("grad norm")
     ax2.legend(loc="upper right", fontsize=8)
-  ax.set_title("PPO clip fraction / gradient norm")
+    lo, hi = first_last(v2)
+    summary.append(f"grad_norm    : first5={lo:.3f} last5={hi:.3f}  max={np.nanmax(v2):.3f}")
+  st3, v3 = tb_get(tb, "actor/pg_clipfrac")
+  if len(st3):
+    lo, hi = first_last(v3)
+    summary.append(f"pg_clipfrac  : first5={lo:.3f} last5={hi:.3f}  (0 by design at mu=1)")
+  ax.set_title("policy entropy / gradient norm")
   ax.set_xlabel("training step")
   ax.legend(loc="upper left", fontsize=8)
-  ax.grid(alpha=0.3)
+  ax.grid(alpha=0.3, which="both")
 
   # ---- 6. rollout vs trainer mismatch ---------------------------------
   # verl's training/rollout_probs_diff_* is mean |exp(logp_trainer) - exp(logp_rollout)|
@@ -345,10 +369,15 @@ def main():
   # from other reports.
   ax = axes[5]
   got = False
+  # Two different KLs live here, deliberately labelled apart:
+  #   rollout_corr/kl  = TRAINER vs ROLLOUT engine on the same weights (numerics / sampling)
+  #   actor/kl_loss    = CURRENT POLICY vs REFERENCE model (k3 / low_var_kl), the term
+  #                      that use_kl_loss adds to the actor loss -- policy drift
   for tag, c, lab in (("training/rollout_probs_diff_mean", "#de2d26", "mean |p_trainer - p_rollout|  (probability MAE)"),
                       ("training/rollout_probs_diff_max", "#fd8d3c", "max |p_trainer - p_rollout|"),
-                      ("rollout_corr/kl", "#08519c", "rollout_corr/kl  (log domain)"),
-                      ("rollout_corr/log_ppl_abs_diff", "#6baed6", "rollout_corr/log_ppl_abs_diff  (log domain)")):
+                      ("rollout_corr/kl", "#08519c", "rollout_corr/kl  = trainer vs rollout (log domain)"),
+                      ("rollout_corr/log_ppl_abs_diff", "#6baed6", "rollout_corr/log_ppl_abs_diff  (log domain)"),
+                      ("actor/kl_loss", "#31a354", "actor/kl_loss  = policy vs REFERENCE (k3), drift from init")):
     st, v = tb_get(tb, tag)
     if len(st):
       ax.plot(st, v, color=c, lw=1.5, label=lab)
@@ -359,7 +388,7 @@ def main():
     ax.text(0.5, 0.5, "no mismatch tags\n(calculate_log_probs=False?)",
             ha="center", va="center", transform=ax.transAxes)
   ax.set_yscale("log")
-  ax.set_title("trainer vs rollout mismatch (prob-space MAE and log-domain)")
+  ax.set_title("trainer-vs-rollout mismatch  |  policy-vs-reference KL (actor/kl_loss)")
   ax.set_xlabel("training step")
   ax.legend(fontsize=7)
   ax.grid(alpha=0.3, which="both")

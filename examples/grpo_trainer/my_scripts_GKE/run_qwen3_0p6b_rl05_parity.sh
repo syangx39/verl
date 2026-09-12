@@ -45,6 +45,18 @@
 #      leakage) and GSM8K test are REQUIRED; the launcher aborts if missing.
 #  13. [v3] reward v3: killable math_verify worker processes with timeout;
 #      returns qid + mv_timeout/mv_exc/mv_lenrej flags (val-aux + rollout dump).
+#  15. [v5] GPU STABILITY ROUND. The v4 pilot (fp32, rl05 recipe) collapsed at
+#      ~step 100 (entropy blow-up). Recipe knobs are now env-overridable with the
+#      rl05 values as DEFAULTS, so one launcher serves the ablation ladder:
+#        KL_COEF (0 = rl05, no ref model) KL_TYPE (low_var_kl)
+#        ROLLOUT_TEMPERATURE / ROLLOUT_TOP_P / ROLLOUT_TOP_K (0.8/0.95/50 = rl05)
+#        PPO_MINI_BATCH (256 = rl05, one update per rollout; 64 -> mu=4)
+#        REWARD_FMT_WEIGHT (0.1 = parity; 0 = answer-only)
+#        REWARD_OVERLONG_BUFFER / REWARD_OVERLONG_PENALTY (0/1.0 = off = parity)
+#        FILTER_OVERLONG_PROMPTS (False = rl05), TEST_FREQ (now 10)
+#      Every deviation from the defaults is a recipe change -> set RUN_TAG.
+#      A collapse guard (collapse_guard.py) runs alongside and kills the driver
+#      on the v4 signature (entropy x3, cap-hit > 0.9, score < 0.5x, grad spikes).
 #  14. [v4] reward v4: no silent fallback (import raises if workers cannot start),
 #      structured worker status (exceptions counted as mv_exc), REWARD_MV_* forwarded
 #      to the Ray actors via runtime_env. Rollout dump carries the trainer's uid
@@ -88,10 +100,10 @@ mkdir -p "${LOG_DIR}" "${CKPT_DIR}" "${TB_ROOT}"
 NNODES=${NNODES:-1}
 NGPUS_PER_NODE=${NGPUS_PER_NODE:-4}         # [GB200] A4X: 4 GPUs/node
 TOTAL_STEPS=${TOTAL_STEPS:-300}             # [PHASE0] 20 -> 300
-TEST_FREQ=${TEST_FREQ:-50}                  # [PHASE0] eval every N steps
+TEST_FREQ=${TEST_FREQ:-10}                  # [v5] eval every 10 steps (was 50) to see inflection points
 SAVE_FREQ=${SAVE_FREQ:-50}                  # [PHASE0] checkpoint every N steps
 SEED=${SEED:-1}                             # [PHASE0] data order seed (frozen in Level 0)
-RUN_TAG=${RUN_TAG:-v4}                      # [v4] + reward v4 (no silent fallback), uid in dump, normalized split
+RUN_TAG=${RUN_TAG:-v5}                      # [v5] set per ablation (e.g. kl001_T1_ansonly_ol1024)
 # [v4] reward worker knobs. They must reach the Ray actors that run the reward,
 # so they are forwarded through ray runtime_env below (shell exports alone do NOT
 # reach them). The pre-flight below prints the values it sees.
@@ -102,6 +114,10 @@ export REWARD_MV_POOL=${REWARD_MV_POOL:-1}
 export REWARD_MV_PROCS=${REWARD_MV_PROCS:-4}
 export REWARD_MV_TIMEOUT=${REWARD_MV_TIMEOUT:-5}
 export REWARD_MATH_VERIFY_MAX_CHARS=${REWARD_MATH_VERIFY_MAX_CHARS:-400}
+export REWARD_FMT_WEIGHT=${REWARD_FMT_WEIGHT:-0.1}            # [v5] 0.1 = parity, 0 = answer-only
+export REWARD_OVERLONG_BUFFER=${REWARD_OVERLONG_BUFFER:-0}    # [v5] 0 = off (parity); e.g. 1024
+export REWARD_OVERLONG_PENALTY=${REWARD_OVERLONG_PENALTY:-1.0}
+export REWARD_MAX_RESP_LEN=8192                               # must equal max_response_length
 
 PROJECT_NAME=${PROJECT_NAME:-trackA_phase0}
 W=$(( NNODES * NGPUS_PER_NODE ))
@@ -111,6 +127,23 @@ TB_MIRROR=${TB_MIRROR_ROOT}/${PROJECT_NAME}/${EXPERIMENT_NAME}
 VAL_DUMP_DIR=${LOG_DIR}/${EXPERIMENT_NAME}/val_dump
 ROLLOUT_DUMP_DIR=${LOG_DIR}/${EXPERIMENT_NAME}/rollout_dump   # per-step train samples (acc/fmt per sample)
 mkdir -p "${TB_DIR}" "${TB_MIRROR}" "${VAL_DUMP_DIR}" "${ROLLOUT_DUMP_DIR}"
+
+########################### [v4] pre-flight -1: cluster must be idle (no leftover vLLM/verl actors) ####
+if [ "${SKIP_IDLE_CHECK:-0}" != "1" ] && command -v ray >/dev/null 2>&1; then   # SKIP_IDLE_CHECK=1 when launching a 2nd run in parallel
+  GPU_USE=$(ray status 2>/dev/null | awk '/GPU/ && /\// {print $1; exit}')     # e.g. 0.0/64.0
+  if [ -n "${GPU_USE}" ] && [ "${GPU_USE%%/*}" != "0.0" ]; then
+    echo "[phase0] ABORT: Ray reports GPUs in use (${GPU_USE}) -- leftover actors from a previous run. Clean them first."
+    exit 2
+  fi
+  echo "[phase0] ray GPU usage before launch: ${GPU_USE:-unknown}"
+fi
+
+########################### [v5] pre-flight 0b: length-aware reward needs the response_len patch ####
+if [ "${REWARD_OVERLONG_BUFFER}" != "0" ]; then
+  RM=$(python3 -c "import verl.experimental.reward_loop.reward_manager.naive as m; print(m.__file__)" 2>/dev/null | tail -1)
+  grep -q "_RESP_LEN" "${RM}" || { echo "[phase0] ABORT: ${RM} lacks the response_len patch. Run: python3 ${SCRIPTS_DIR:-.}/patch_verl_reward_response_len.py ${RM}"; exit 2; }
+  echo "[phase0] reward manager: ${RM} (response_len patch present)"
+fi
 
 ########################### [v4] pre-flight 0: the verl fork must carry the rollout-dump uid patch ####
 RT=$(python3 -c "import verl.trainer.ppo.ray_trainer as m; print(m.__file__)" 2>/dev/null | tail -1)   # import prints banner lines; keep the path only
@@ -141,26 +174,38 @@ PYEOF
 ########################### [v2] TB mirror loop: local -> gcsfuse every 5 min, and once at exit ####
 ( while true; do sleep 300; cp -r "${TB_DIR}/." "${TB_MIRROR}/" 2>/dev/null || true; done ) &
 TB_SYNC_PID=$!
-trap 'kill ${TB_SYNC_PID} 2>/dev/null; cp -r "${TB_DIR}/." "${TB_MIRROR}/" 2>/dev/null || true' EXIT
+# [v5] collapse guard: kills the driver on the v4 collapse signature (see collapse_guard.py)
+GUARD_LOG=${LOG_DIR}/${EXPERIMENT_NAME}/collapse_guard.log; mkdir -p "$(dirname "${GUARD_LOG}")"
+if [ "${COLLAPSE_GUARD:-1}" = "1" ]; then
+  python3 "${SCRIPTS_DIR:-$(dirname "$0")}/collapse_guard.py" --tb "${TB_DIR}" --rollout "${ROLLOUT_DUMP_DIR}" --poll 60 > "${GUARD_LOG}" 2>&1 &
+  GUARD_PID=$!
+  echo "[phase0] collapse guard pid ${GUARD_PID} -> ${GUARD_LOG}"
+else
+  GUARD_PID=""
+fi
+trap 'kill ${TB_SYNC_PID} ${GUARD_PID} 2>/dev/null; cp -r "${TB_DIR}/." "${TB_MIRROR}/" 2>/dev/null || true; test -f "${TB_DIR}/COLLAPSE_ABORT.txt" && { echo "[phase0] RUN ABORTED BY COLLAPSE GUARD:"; cat "${TB_DIR}/COLLAPSE_ABORT.txt"; }' EXIT
 
 ########################### frozen invariants -- do not tune ################
 # BYTE-IDENTICAL to run_qwen3_0p6b_rl05_parity.sh. Any change here = new recipe.
 # [v3] Precision/optimizer are ALSO frozen semantics now (see launch args):
 #   master weights fp32, Adam moments fp32, compute bf16 (FSDP mixed precision),
 #   AdamW betas (0.9,0.999) eps 1e-8 wd 0.01, clip_grad 1.0, constant LR, no warmup.
-train_batch_size=256          # [RL05] batch_size=256
-ppo_mini_batch_size=256       # [RL05] mu=1: one optimizer update per rollout
-max_prompt_length=8192        # [MAXTEXT] max_prefill_predict_length=8192
-max_response_length=8192      # [MAXTEXT] max_target_length(16384) - prefill(8192)
-rollout_n=8                   # [MAXTEXT] rl.num_generations=8
-kl_loss_coef=0.0              # [RL05] rl.grpo_beta=0.0 -> NO KL, NO ref
-clip_ratio_low=0.2            # [RL05] rl.grpo_epsilon=0.2
-clip_ratio_high=0.28          # [RL05] rl.epsilon_high=0.28 (DAPO clip-higher)
-temperature=0.8               # [MAXTEXT] decode_sampling_temperature=0.8
-top_p=0.95                    # [MAXTEXT] decode_sampling_nucleus_p=0.95
-top_k=50                      # [MAXTEXT] decode_sampling_top_k=50
-max_num_batched_tokens=32768  # [MAXTEXT] max_num_batched_tokens=32768
-actor_lr=1e-6                 # [MAXTEXT] learning_rate=1e-6
+train_batch_size=256                          # [RL05] batch_size=256
+ppo_mini_batch_size=${PPO_MINI_BATCH:-256}    # [RL05] 256 = one update per rollout (mu=1); 64 -> mu=4
+max_prompt_length=8192                        # [MAXTEXT] max_prefill_predict_length=8192
+max_response_length=8192                      # [MAXTEXT] max_target_length(16384) - prefill(8192)
+rollout_n=8                                   # [MAXTEXT] rl.num_generations=8
+kl_loss_coef=${KL_COEF:-0.0}                  # [RL05] 0.0 = no KL, no ref model; >0 -> use_kl_loss + ref
+kl_loss_type=${KL_TYPE:-low_var_kl}           # verl estimator when KL_COEF>0 (must match the TPU side later)
+clip_ratio_low=0.2                            # [RL05] rl.grpo_epsilon=0.2
+clip_ratio_high=0.28                          # [RL05] rl.epsilon_high=0.28 (DAPO clip-higher)
+temperature=${ROLLOUT_TEMPERATURE:-0.8}       # [MAXTEXT] 0.8 ; stability round: 1.0
+top_p=${ROLLOUT_TOP_P:-0.95}                  # [MAXTEXT] 0.95; stability round: 1.0
+top_k=${ROLLOUT_TOP_K:-50}                    # [MAXTEXT] 50  ; stability round: -1
+max_num_batched_tokens=32768                  # [MAXTEXT] max_num_batched_tokens=32768
+actor_lr=${ACTOR_LR:-1e-6}                    # [MAXTEXT] learning_rate=1e-6
+filter_overlong_prompts=${FILTER_OVERLONG_PROMPTS:-False}
+if awk "BEGIN{exit !(${kl_loss_coef} > 0)}"; then use_kl_loss=True; else use_kl_loss=False; fi
 
 ########################### system adaptations ############################
 rollout_tp=${ROLLOUT_TP:-1}   # [SYS] free variable; not a timing run
@@ -168,7 +213,10 @@ rollout_gpu_mem_util=0.30     # [SYS]
 ppo_max_token_len_per_gpu=32768  # [SYS] dynamic-bsz packing budget
 
 ########################### launch ########################################
-echo "[accounting] W=${W}  batch=256x8=2048  updates/rollout=1 (mini=256)  beta=0  clip=0.2/0.28  rollout_tp=${rollout_tp}  seed=${SEED}"
+echo "[accounting] W=${W}  batch=${train_batch_size}x${rollout_n}  updates/rollout=$((train_batch_size/ppo_mini_batch_size)) (mini=${ppo_mini_batch_size})  rollout_tp=${rollout_tp}  seed=${SEED}"
+########################### [v5] recipe fingerprint (everything that is frozen semantics) ####
+echo "[recipe] lr=${actor_lr} kl_coef=${kl_loss_coef}(${kl_loss_type},use_kl=${use_kl_loss}) mini=${ppo_mini_batch_size} (mu=$((train_batch_size/ppo_mini_batch_size))) clip=${clip_ratio_low}/${clip_ratio_high} T=${temperature} top_p=${top_p} top_k=${top_k} cap=${max_response_length} n=${rollout_n} fmt_w=${REWARD_FMT_WEIGHT} overlong=${REWARD_OVERLONG_BUFFER}/${REWARD_OVERLONG_PENALTY} filter_overlong_prompts=${filter_overlong_prompts} fp32-master"
+
 echo "[phase0] steps=${TOTAL_STEPS} test_freq=${TEST_FREQ} save_freq=${SAVE_FREQ}"
 echo "[phase0] tensorboard -> ${TB_DIR}"
 echo "[phase0] tb mirror   -> ${TB_MIRROR}"
@@ -190,7 +238,7 @@ python3 -m verl.trainer.main_ppo \
     data.train_batch_size=${train_batch_size} \
     data.max_prompt_length=${max_prompt_length} \
     data.max_response_length=${max_response_length} \
-    data.filter_overlong_prompts=False \
+    data.filter_overlong_prompts=${filter_overlong_prompts} \
     data.truncation='error' \
     data.shuffle=True \
     data.seed=${SEED} \
@@ -208,8 +256,9 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.ppo_mini_batch_size=${ppo_mini_batch_size} \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=${ppo_max_token_len_per_gpu} \
-    actor_rollout_ref.actor.use_kl_loss=False \
+    actor_rollout_ref.actor.use_kl_loss=${use_kl_loss} \
     actor_rollout_ref.actor.kl_loss_coef=${kl_loss_coef} \
+    actor_rollout_ref.actor.kl_loss_type=${kl_loss_type} \
     actor_rollout_ref.actor.clip_ratio_low=${clip_ratio_low} \
     actor_rollout_ref.actor.clip_ratio_high=${clip_ratio_high} \
     actor_rollout_ref.actor.entropy_coeff=0 \
@@ -219,7 +268,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.checkpoint.save_contents='["model","optimizer","extra","hf_model"]' \
     actor_rollout_ref.ref.log_prob_use_dynamic_bsz=True \
     actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=${ppo_max_token_len_per_gpu} \
-    actor_rollout_ref.ref.fsdp_config.param_offload=False \
+    actor_rollout_ref.ref.fsdp_config.param_offload=True \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.tensor_model_parallel_size=${rollout_tp} \
     actor_rollout_ref.rollout.gpu_memory_utilization=${rollout_gpu_mem_util} \
@@ -262,6 +311,10 @@ python3 -m verl.trainer.main_ppo \
     "+ray_kwargs.ray_init.runtime_env.env_vars.REWARD_MV_PROCS='${REWARD_MV_PROCS}'" \
     "+ray_kwargs.ray_init.runtime_env.env_vars.REWARD_MV_TIMEOUT='${REWARD_MV_TIMEOUT}'" \
     "+ray_kwargs.ray_init.runtime_env.env_vars.REWARD_MATH_VERIFY_MAX_CHARS='${REWARD_MATH_VERIFY_MAX_CHARS}'" \
+    "+ray_kwargs.ray_init.runtime_env.env_vars.REWARD_FMT_WEIGHT='${REWARD_FMT_WEIGHT}'" \
+    "+ray_kwargs.ray_init.runtime_env.env_vars.REWARD_OVERLONG_BUFFER='${REWARD_OVERLONG_BUFFER}'" \
+    "+ray_kwargs.ray_init.runtime_env.env_vars.REWARD_OVERLONG_PENALTY='${REWARD_OVERLONG_PENALTY}'" \
+    "+ray_kwargs.ray_init.runtime_env.env_vars.REWARD_MAX_RESP_LEN='${REWARD_MAX_RESP_LEN}'" \
     ${RAY_NUM_GPUS_ARG} \
     "$@"
 
@@ -283,4 +336,9 @@ python3 -m verl.trainer.main_ppo \
 #       - ${ROLLOUT_DUMP_DIR}/1.jsonl exists with 2048 lines, acc/fmt/qid/uid keys, 256 distinct uid
 #       - one checkpoint written, actor/huggingface/ present inside it, write time noted
 #       - val-aux/<ds>/mv_timeout|mv_exc|mv_lenrej/mean@1 ~ 0 (reward workers healthy)
+#       - [v5] with REWARD_OVERLONG_BUFFER>0: val-aux/<ds>/length_penalty/mean@1 <= 0 and, per dump row,
+#         score == acc + fmt_w*fmt + length_penalty; long responses (>7168 tok) carry a negative penalty
+#       - [v5] with FILTER_OVERLONG_PROMPTS=True: grep "dataset len" in the log for train/val sizes,
+#         and val_dump/0.jsonl must still have 2319 rows (1000 omi2 + 1319 gsm8k)
+#       - [v5] collapse guard: <exp>/collapse_guard.log shows a heartbeat line per poll
 # =============================================================================
