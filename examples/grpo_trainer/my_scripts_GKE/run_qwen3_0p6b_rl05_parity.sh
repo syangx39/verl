@@ -45,6 +45,11 @@
 #      leakage) and GSM8K test are REQUIRED; the launcher aborts if missing.
 #  13. [v3] reward v3: killable math_verify worker processes with timeout;
 #      returns qid + mv_timeout/mv_exc/mv_lenrej flags (val-aux + rollout dump).
+#  14. [v4] reward v4: no silent fallback (import raises if workers cannot start),
+#      structured worker status (exceptions counted as mv_exc), REWARD_MV_* forwarded
+#      to the Ray actors via runtime_env. Rollout dump carries the trainer's uid
+#      (apply patch_verl_dump_uid.py to the fork ONCE). Data from build v4
+#      (normalized question identity, unique extra_info.index).
 #
 # Usage (inside the head pod, after `source /workspace/setup_env.sh`):
 #   # smoke (5 steps, eval at 2 and 4, one checkpoint):
@@ -86,7 +91,14 @@ TOTAL_STEPS=${TOTAL_STEPS:-300}             # [PHASE0] 20 -> 300
 TEST_FREQ=${TEST_FREQ:-50}                  # [PHASE0] eval every N steps
 SAVE_FREQ=${SAVE_FREQ:-50}                  # [PHASE0] checkpoint every N steps
 SEED=${SEED:-1}                             # [PHASE0] data order seed (frozen in Level 0)
-RUN_TAG=${RUN_TAG:-v3}                      # [v3] fp32-master + qsplit + gsm8k + reward v3; bump when the recipe changes
+RUN_TAG=${RUN_TAG:-v4}                      # [v4] + reward v4 (no silent fallback), uid in dump, normalized split
+# [v4] reward worker knobs. They must reach the Ray actors that run the reward,
+# so they are forwarded through ray runtime_env below (shell exports alone do NOT
+# reach them). The pre-flight below prints the values it sees.
+export REWARD_MV_POOL=${REWARD_MV_POOL:-1}
+export REWARD_MV_PROCS=${REWARD_MV_PROCS:-4}
+export REWARD_MV_TIMEOUT=${REWARD_MV_TIMEOUT:-5}
+export REWARD_MATH_VERIFY_MAX_CHARS=${REWARD_MATH_VERIFY_MAX_CHARS:-400}
 
 PROJECT_NAME=${PROJECT_NAME:-trackA_phase0}
 W=$(( NNODES * NGPUS_PER_NODE ))
@@ -97,17 +109,25 @@ VAL_DUMP_DIR=${LOG_DIR}/${EXPERIMENT_NAME}/val_dump
 ROLLOUT_DUMP_DIR=${LOG_DIR}/${EXPERIMENT_NAME}/rollout_dump   # per-step train samples (acc/fmt per sample)
 mkdir -p "${TB_DIR}" "${TB_MIRROR}" "${VAL_DUMP_DIR}" "${ROLLOUT_DUMP_DIR}"
 
-########################### [v2] pre-flight: reward must score equivalences from a THREAD ####
+########################### [v4] pre-flight: reward must (a) start its worker pool, (b) score equivalences from a THREAD ####
 python3 - "${REWARD_FN_PATH}" <<'PYEOF'
-import importlib.metadata as md, importlib.util, json, sys, threading, warnings
+import importlib.metadata as md, importlib.util, json, os, sys, threading, warnings
 warnings.filterwarnings("ignore")
-spec = importlib.util.spec_from_file_location("r", sys.argv[1]); r = importlib.util.module_from_spec(spec); spec.loader.exec_module(r)
+spec = importlib.util.spec_from_file_location("r", sys.argv[1]); r = importlib.util.module_from_spec(spec)
+try:
+  spec.loader.exec_module(r)              # raises MathVerifyPoolError if workers cannot start
+except Exception as e:
+  sys.exit(f"[phase0] ABORT: reward import failed: {type(e).__name__}: {e}")
 res = {}
-t = threading.Thread(target=lambda: res.__setitem__("s", r.compute_score("x", "<reasoning>x</reasoning><answer>1/2</answer>", json.dumps(["\\frac{1}{2}", "\\frac{1}{2}"]))["score"]))
+t = threading.Thread(target=lambda: res.__setitem__("s", r.compute_score("x", "<reasoning>x</reasoning><answer>1/2</answer>", json.dumps(["\\frac{1}{2}", "\\frac{1}{2}"]))))
 t.start(); t.join()
-print(f"[phase0] math-verify version = {md.version('math-verify')}; worker-thread equivalence score = {res.get('s')}")
-if res.get("s") != 1.1:
+st = r.mv_stats()
+print(f"[phase0] math-verify version = {md.version('math-verify')}; reward workers = {st['idle']}/{st['cfg_procs']} idle, "
+      f"pool={st['pool']}, timeout={st['cfg_timeout_s']}s, max_chars={st['cfg_max_chars']}; worker-thread equivalence = {res.get('s',{}).get('score')}")
+if res.get("s", {}).get("score") != 1.1:
   sys.exit("[phase0] ABORT: reward does not award symbolic equivalence from a worker thread -- wrong reward file?")
+if os.environ.get("REWARD_MV_POOL", "1") == "1" and (not st["pool"] or st["idle"] != st["cfg_procs"]):
+  sys.exit("[phase0] ABORT: math_verify worker pool not healthy")
 PYEOF
 
 ########################### [v2] TB mirror loop: local -> gcsfuse every 5 min, and once at exit ####
@@ -230,6 +250,10 @@ python3 -m verl.trainer.main_ppo \
     trainer.total_training_steps=${TOTAL_STEPS} \
     +ray_kwargs.ray_init.runtime_env.env_vars.TENSORBOARD_DIR="${TB_DIR}" \
     +ray_kwargs.ray_init.runtime_env.env_vars.EXPERIMENT_NAME="${EXPERIMENT_NAME}" \
+    +ray_kwargs.ray_init.runtime_env.env_vars.REWARD_MV_POOL="${REWARD_MV_POOL}" \
+    +ray_kwargs.ray_init.runtime_env.env_vars.REWARD_MV_PROCS="${REWARD_MV_PROCS}" \
+    +ray_kwargs.ray_init.runtime_env.env_vars.REWARD_MV_TIMEOUT="${REWARD_MV_TIMEOUT}" \
+    +ray_kwargs.ray_init.runtime_env.env_vars.REWARD_MATH_VERIFY_MAX_CHARS="${REWARD_MATH_VERIFY_MAX_CHARS}" \
     ${RAY_NUM_GPUS_ARG} \
     "$@"
 
@@ -248,7 +272,7 @@ python3 -m verl.trainer.main_ppo \
 #   * Smoke-test checklist before the real run:
 #       - TB tags present: critic/score/mean, val-core/*/reward/mean@1,
 #         val-aux/*/acc/mean@1, training/rollout_probs_diff_mean, actor/pg_clipfrac
-#       - ${ROLLOUT_DUMP_DIR}/1.jsonl exists with 2048 lines and acc/fmt keys
+#       - ${ROLLOUT_DUMP_DIR}/1.jsonl exists with 2048 lines, acc/fmt/qid/uid keys, 256 distinct uid
 #       - one checkpoint written, actor/huggingface/ present inside it, write time noted
 #       - val-aux/<ds>/mv_timeout|mv_exc|mv_lenrej/mean@1 ~ 0 (reward workers healthy)
 # =============================================================================

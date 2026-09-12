@@ -248,12 +248,22 @@ def extract_answer(response: str) -> str:
 # however verl loaded this file). A call = send -> poll(timeout) -> recv; on
 # timeout that ONE worker is killed and replaced. Inside a worker (its main
 # thread) math_verify's signal timeouts are legal again and act as a 2nd guard.
+#
+# Failure policy (v4, per review): there is NO silent fallback. If the workers
+# cannot be started, or a replacement cannot be forked, the reward RAISES -- a
+# reward whose timeout semantics silently changed is worse than a dead run.
+# The only way to run without workers is the explicit REWARD_MV_POOL=0 (meant
+# for offline re-scoring in a main thread), and that is reported as mv_mode.
+# Workers return a structured status so exceptions inside math_verify are
+# counted (mv_exc) instead of being folded into "wrong answer".
 #   REWARD_MV_POOL=1        use workers (0 -> in-process, no hang protection)
 #   REWARD_MV_PROCS=4       workers per reward process
 #   REWARD_MV_TIMEOUT=5     seconds per equivalence check (match MaxText's value)
 #   REWARD_MATH_VERIFY_MAX_CHARS=400   length guard (counted as lenrej, scored 0)
-# Per-call outcome flags are returned in the reward dict (mv_timeout / mv_exc /
-# mv_lenrej) so they show up in val-aux metrics and in the rollout dump.
+# NOTE: these are read from the environment of the process that runs the reward
+# (a Ray actor) -- the launcher forwards them via ray runtime_env.
+# Per-call flags returned in the reward dict: mv_used (math_verify was needed),
+# mv_timeout, mv_exc, mv_lenrej. They land in val-aux metrics and in the rollout dump.
 import multiprocessing as _mp
 import queue as _queue
 import threading as _threading
@@ -266,22 +276,32 @@ _MV_MAX_CHARS = int(os.environ.get("REWARD_MATH_VERIFY_MAX_CHARS", "400"))
 _MV_CFG = (ExprExtractionConfig(), LatexExtractionConfig())
 _mv_ctx = _mp.get_context("fork")
 _mv_idle = _queue.Queue()      # idle _MVWorker objects; bounded by _MV_PROCS
+_mv_stats = {"calls": 0, "timeout": 0, "exc": 0, "lenrej": 0, "replaced": 0}
+_mv_stats_lock = _threading.Lock()
+
+
+class MathVerifyPoolError(RuntimeError):
+  """Raised when the killable worker pool cannot be (re)built. Never swallowed."""
 
 
 def _mv_check(gold_boxed_list, guess_boxed, t):
-  """The actual math_verify call. t=None -> no timeouts (thread-safe fallback)."""
+  """The actual math_verify call. Returns ("ok", bool) or ("exc", <ExceptionName>).
+
+  t = per-call timeout in seconds for math_verify's own signal-based guard
+  (only legal in a main thread); t=None disables it (in-process mode).
+  """
   try:
     guess = parse(guess_boxed, _MV_CFG, parsing_timeout=t)
     golds = list(_chain.from_iterable(parse(g, _MV_CFG, parsing_timeout=t) for g in gold_boxed_list))
     if not guess or not golds:
-      return False
-    return bool(verify(golds, guess, timeout_seconds=t))
-  except Exception:
-    return False
+      return ("ok", False)
+    return ("ok", bool(verify(golds, guess, timeout_seconds=t)))
+  except Exception as e:  # noqa: BLE001 -- reported as status, not swallowed
+    return ("exc", type(e).__name__)
 
 
 def _mv_server(conn):
-  """Worker process loop: recv (golds, guess) -> send bool. Runs in the child's main thread."""
+  """Worker process loop: recv (golds, guess) -> send status tuple."""
   t = max(1, int(_MV_TIMEOUT))
   while True:
     try:
@@ -313,49 +333,77 @@ class _MVWorker:
       pass
 
 
+def _mv_spawn_worker():
+  try:
+    return _MVWorker()
+  except Exception as e:
+    raise MathVerifyPoolError(f"cannot fork math_verify worker: {type(e).__name__}: {e}") from e
+
+
 def _mv_init():
-  global _MV_POOL_ENABLED
+  """Start the workers at import. Raises if REWARD_MV_POOL=1 and they cannot start."""
   if not _MV_POOL_ENABLED:
     return
-  try:
-    for _ in range(_MV_PROCS):
-      _mv_idle.put(_MVWorker())
-  except Exception:      # e.g. daemonic parent cannot fork -> fall back
-    _MV_POOL_ENABLED = False
+  for _ in range(_MV_PROCS):
+    _mv_idle.put(_mv_spawn_worker())
+
+
+def _mv_bump(key):
+  with _mv_stats_lock:
+    _mv_stats[key] += 1
 
 
 def _math_verify_equal(gold_boxed_list, guess_boxed: str):
-  """Returns (is_equal, flags) with flags = {"mv_timeout","mv_exc","mv_lenrej"} in {0,1}."""
-  flags = {"mv_timeout": 0.0, "mv_exc": 0.0, "mv_lenrej": 0.0}
+  """Returns (is_equal, flags). flags keys: mv_used, mv_timeout, mv_exc, mv_lenrej (0/1)."""
+  flags = {"mv_used": 1.0, "mv_timeout": 0.0, "mv_exc": 0.0, "mv_lenrej": 0.0}
+  _mv_bump("calls")
   if len(guess_boxed) > _MV_MAX_CHARS or any(len(g) > _MV_MAX_CHARS for g in gold_boxed_list):
     flags["mv_lenrej"] = 1.0
+    _mv_bump("lenrej")
     return False, flags
-  if not _MV_POOL_ENABLED:
-    return _mv_check(gold_boxed_list, guess_boxed, None), flags
+  if not _MV_POOL_ENABLED:            # explicit opt-out only (REWARD_MV_POOL=0)
+    status, val = _mv_check(gold_boxed_list, guess_boxed, None)
+    if status == "exc":
+      flags["mv_exc"] = 1.0
+      _mv_bump("exc")
+      return False, flags
+    return bool(val), flags
   try:
     w = _mv_idle.get(timeout=_MV_TIMEOUT * 4)
   except _queue.Empty:
-    flags["mv_exc"] = 1.0
-    return False, flags
+    raise MathVerifyPoolError("no idle math_verify worker within 4x timeout -- pool starved or dead")
+  status = None
   try:
     w.conn.send((list(gold_boxed_list), guess_boxed))
     if w.conn.poll(_MV_TIMEOUT + 1.0):
-      ok = bool(w.conn.recv())
+      status, val = w.conn.recv()
       _mv_idle.put(w)
-      return ok, flags
+      if status == "exc":
+        flags["mv_exc"] = 1.0
+        _mv_bump("exc")
+        return False, flags
+      return bool(val), flags
     flags["mv_timeout"] = 1.0
-  except Exception:
+    _mv_bump("timeout")
+  except MathVerifyPoolError:
+    raise
+  except Exception:                    # broken pipe / dead worker: counted, worker replaced
     flags["mv_exc"] = 1.0
-  # timeout or broken pipe: kill this worker only, replace it
+    _mv_bump("exc")
   w.kill()
-  try:
-    _mv_idle.put(_MVWorker())
-  except Exception:
-    pass
+  _mv_idle.put(_mv_spawn_worker())     # raises MathVerifyPoolError if it cannot
+  _mv_bump("replaced")
   return False, flags
 
 
-_mv_init()   # fork early, at import, before verl's reward threads exist
+def mv_stats():
+  """Snapshot of per-process counters (for tests / the launcher pre-flight)."""
+  with _mv_stats_lock:
+    return dict(_mv_stats, pool=_MV_POOL_ENABLED, cfg_procs=_MV_PROCS, cfg_timeout_s=_MV_TIMEOUT,
+                cfg_max_chars=_MV_MAX_CHARS, idle=_mv_idle.qsize())
+
+
+_mv_init()   # fork early, at import, before verl's reward threads exist; raises on failure
 
 
 def _format_score(completion: str) -> float:
@@ -363,7 +411,7 @@ def _format_score(completion: str) -> float:
   return REWARD_EXACT_FORMAT_MATCH if MATCH_FORMAT.search(completion) else 0.0
 
 
-_NOFLAGS = {"mv_timeout": 0.0, "mv_exc": 0.0, "mv_lenrej": 0.0}
+_NOFLAGS = {"mv_used": 0.0, "mv_timeout": 0.0, "mv_exc": 0.0, "mv_lenrej": 0.0}
 
 
 def _answer_score(completion: str, ground_truth_json: str):
@@ -431,7 +479,7 @@ def _run_dir() -> str:
 def compute_score(data_source, solution_str, ground_truth, extra_info=None, **kwargs):
   """verl custom reward entry point.
 
-  Returns {"score": fmt + ans, "acc", "fmt", "qid", "mv_timeout", "mv_exc", "mv_lenrej"}.
+  Returns {"score": fmt + ans, "acc", "fmt", "qid", "mv_used", "mv_timeout", "mv_exc", "mv_lenrej"}.
   "score" is the training reward (identical to the original scalar return).
   """
   del kwargs

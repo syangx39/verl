@@ -60,10 +60,10 @@ def load_tb(tb_dir):
 def load_rollout(rollout_dir):
   """Per-step stats from trainer.rollout_data_dir (<step>.jsonl, one line per sample).
 
-  Groups = the n=8 completions of one prompt. Grouped by the reward's `qid`
-  (= extra_info.index, unique per dataset row) when present; falls back to the
-  input string (which can merge two rows of the same question). Every step is
-  checked for 256 groups x 8 samples and anomalies are reported, not hidden.
+  Groups = the n=8 completions of one prompt. Grouped by the trainer's `uid`
+  (verl uuid per prompt; needs patch_verl_dump_uid.py), else by the reward's
+  `qid` (unique row id from build v4), else by input string. A step whose
+  groups are not exactly 256 x 8 is skipped for group stats and listed.
 
   Three distinct "zero-advantage" quantities (Henry's point 4):
     solve_all / solve_none   : group's ANSWER correctness all 1 / all 0
@@ -99,8 +99,12 @@ def load_rollout(rollout_dir):
         sc = float(r.get("score", 0.0))
         a = float(r.get("acc", 1.0 if sc >= 1.0 else 0.0))
         fm = float(r.get("fmt", 0.0))
-        key = r.get("qid", None)
-        key = ("qid", int(key)) if key is not None and key >= 0 else ("input", r.get("input", ""))
+        if r.get("uid"):                                   # verl group uuid (fork patch)
+          key = ("uid", r["uid"])
+        elif r.get("qid") is not None and r["qid"] >= 0:    # unique row id from build v4
+          key = ("qid", int(r["qid"]))
+        else:
+          key = ("input", r.get("input", ""))
         groups[key].append((a, sc))
         n += 1; acc += a; fmt += fm; chars += len(r.get("output", ""))
         tmo += float(r.get("mv_timeout", 0)); exc += float(r.get("mv_exc", 0)); lrj += float(r.get("mv_lenrej", 0))
@@ -109,7 +113,10 @@ def load_rollout(rollout_dir):
     sizes = [len(g) for g in groups.values()]
     bad = sum(1 for sz in sizes if sz != 8)
     if bad or len(groups) != 256 or n != 2048:
+      # per review: a step whose groups are not exactly 256 x 8 is SKIPPED for the
+      # group statistics (not silently included); it is listed in the summary.
       anomalies.append((step, n, len(groups), bad))
+      continue
     gs = list(groups.values())
     def frac(pred):
       return sum(1 for g in gs if pred(g)) / len(gs) if gs else np.nan
@@ -123,7 +130,8 @@ def load_rollout(rollout_dir):
     out["mv_timeout"].append(tmo / n); out["mv_exc"].append(exc / n); out["mv_lenrej"].append(lrj / n)
   res = {k: np.array(v, dtype=float) for k, v in out.items()}
   res["anomalies"] = anomalies
-  res["grouped_by"] = "qid" if any(k[0] == "qid" for k in groups) else "input"
+  kinds = {k[0] for k in groups}
+  res["grouped_by"] = "uid" if "uid" in kinds else ("qid" if "qid" in kinds else "input")
   return res
 
 
@@ -356,7 +364,9 @@ def main():
     print(f"rollout dump: {len(agg['step'])} steps, grouped by {agg['grouped_by']}, samples/step "
           f"min={int(agg['n'].min())} max={int(agg['n'].max())} (expect 2048), groups/step ~{int(np.nanmedian(agg['n_groups']))} (expect 256)")
     if agg["anomalies"]:
-      print(f"  !! {len(agg['anomalies'])} steps with group anomalies (step, n, n_groups, groups!=8): {agg['anomalies'][:5]} ...")
+      print(f"  !! {len(agg['anomalies'])} steps SKIPPED (groups not 256x8) (step, n, n_groups, groups!=8): {agg['anomalies'][:5]} ...")
+    if agg["grouped_by"] != "uid":
+      print("  !! grouped by", agg["grouped_by"], "-- apply patch_verl_dump_uid.py so dumps carry the trainer uid")
     print(f"  math_verify flags (rate over all samples): timeout={agg['mv_timeout'].mean():.5f} "
           f"exc={agg['mv_exc'].mean():.5f} lenrej={agg['mv_lenrej'].mean():.5f}")
   print("\n".join(summary))

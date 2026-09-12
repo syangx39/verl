@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Rebuild eval/train parquets for Track A Phase 0 (v3).
+"""Rebuild eval/train parquets for Track A Phase 0 (v4).
+
+v4 changes (review): question identity is WHITESPACE-NORMALIZED everywhere
+(holdout membership, leak checks, holdout list) -- the raw-string version let a
+question with different spacing slip through. extra_info.index is re-assigned
+to a unique global row id after concatenation (the old train/val files were
+numbered independently, so indices collided). A sha256 MANIFEST is written.
 
 Fixes two problems found in the pilot:
   1. val_1k was a random ROW split of train_1M, but OpenMathInstruct-2 has ~1.6
@@ -31,8 +37,20 @@ import re
 import pandas as pd
 
 
+_WS = re.compile(r"\s+")
+
+
+def norm_q(text):
+  """Question identity: collapse all whitespace runs, strip."""
+  return _WS.sub(" ", text).strip()
+
+
 def question_of(row):
   return row["extra_info"]["question"]
+
+
+def qkey_of(row):
+  return norm_q(row["extra_info"]["question"])
 
 
 def build_prompt_template(df):
@@ -65,9 +83,11 @@ def main():
   tr = pd.read_parquet(f"{d}/train.parquet")
   va = pd.read_parquet(f"{d}/val.parquet")
   full = pd.concat([tr, va], ignore_index=True)
-  full["_q"] = [question_of(r) for _, r in full.iterrows()]
+  # unique global row id (old files were numbered independently -> collisions)
+  full["extra_info"] = [dict(e, index=i, orig_index=e.get("index")) for i, e in enumerate(full["extra_info"])]
+  full["_q"] = [qkey_of(r) for _, r in full.iterrows()]          # normalized identity
   uniq = full["_q"].drop_duplicates()
-  print(f"rows={len(full)}  unique questions={len(uniq)}")
+  print(f"rows={len(full)}  unique questions (normalized)={len(uniq)}")
 
   holdout = uniq.sample(n=args.n_holdout, random_state=args.seed)
   hold = set(holdout)
@@ -76,10 +96,12 @@ def main():
   val_q = val_rows.sample(n=args.n_val, random_state=args.seed).drop(columns=["_q"]).reset_index(drop=True)
   val_q["data_source"] = "omi2_val1k"
 
-  # re-verify no leakage
-  tq = set(question_of(r) for _, r in train_q.iterrows())
-  leak = sum(question_of(r) in tq for _, r in val_q.iterrows())
+  # re-verify no leakage (normalized) and index uniqueness
+  tq = set(qkey_of(r) for _, r in train_q.iterrows())
+  leak = sum(qkey_of(r) in tq for _, r in val_q.iterrows())
   assert leak == 0, f"leak: {leak}"
+  idx = [e["index"] for e in train_q["extra_info"]]
+  assert len(idx) == len(set(idx)), "extra_info.index not unique in train"
 
   train_q.to_parquet(f"{d}/train_qsplit.parquet", index=False)
   val_q.to_parquet(f"{d}/val_1k_qsplit.parquet", index=False)
@@ -107,8 +129,18 @@ def main():
                        "eval_id": hashlib.md5(r["question"].encode()).hexdigest()[:12]},
     })
   g = pd.DataFrame(out)
+  gleak = sum(norm_q(r["question"]) in tq for r in rows)
+  print(f"gsm8k test questions also in train (normalized): {gleak}")
   g.to_parquet(f"{d}/gsm8k_test.parquet", index=False)
   print(f"gsm8k_test.parquet: {len(g)} rows; example gold={out[0]['reward_model']['ground_truth']}")
+
+  # ---- manifest ------------------------------------------------------------
+  names = ["train_qsplit.parquet", "val_1k_qsplit.parquet", "gsm8k_test.parquet", "holdout_questions.json"]
+  with open(f"{d}/MANIFEST.sha256", "w") as f:
+    for nme in names:
+      h = hashlib.sha256(open(f"{d}/{nme}", "rb").read()).hexdigest()
+      f.write(f"{h}  {nme}\n")
+      print(f"  {h[:16]}...  {nme}")
 
 
 if __name__ == "__main__":
