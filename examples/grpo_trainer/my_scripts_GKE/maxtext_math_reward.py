@@ -44,9 +44,10 @@ Porting notes / deltas:
     normalize_final_answer, extract_answer) copied verbatim -- these define which
     answers count as correct; any drift breaks curve overlay.
   * math_verify: MaxText runs it in a kill-able spawn pool (hung sympy). Here we
-    call in-process with try/except. Pathological hangs are rarer than crashes;
-    if a hang is observed, add signal.alarm or a pebble pool. Pin the SAME
-    math-verify version as the TPU image (record in the rulebook version table).
+    call in-process from verl's reward THREADS, so the signal-based timeouts must
+    be off (parsing_timeout=None / timeout_seconds=None) -- see _math_verify_equal.
+    Hang guard = REWARD_MATH_VERIFY_MAX_CHARS. Pin the SAME math-verify version as
+    the TPU image (record in the rulebook version table).
   * debug logging / MCQ path / gsm8k hash path dropped (not exercised by
     OpenMathInstruct-2 default question_type).
 """
@@ -237,18 +238,33 @@ def extract_answer(response: str) -> str:
   return FALLBACK_ANSWER
 
 
+# math_verify's default timeout uses signal.alarm(), which only works in the MAIN
+# thread. verl calls compute_score from worker threads inside AgentLoopWorker, so
+# with the defaults parse() raises ValueError, the except below swallowed it, and
+# every answer that needed symbolic equivalence (1/2 vs \frac{1}{2}, 0.5 vs 1/2,
+# 36*2 vs 72) scored 0 on GPU -- while MaxText runs the same check in a spawn pool
+# (main thread of each worker) and scores it 1.0. Found in Phase 0 seed 1.
+# Fix: disable the signal-based timeouts. Hang protection is a length guard
+# (pathological sympy hangs come from long expressions); MaxText's killable pool
+# is the remaining known delta (only matters if a hang actually occurs).
+_MV_MAX_CHARS = int(os.environ.get("REWARD_MATH_VERIFY_MAX_CHARS", "400"))
+_MV_CFG = (ExprExtractionConfig(), LatexExtractionConfig())
+
+
 def _math_verify_equal(gold_boxed_list, guess_boxed: str) -> bool:
-  """In-process equivalent of MaxText verify_math_worker (spawn pool dropped).
+  """Thread-safe equivalent of MaxText verify_math_worker.
 
   math_verify.verify(gold, target): order matters (gold first).
   """
+  if len(guess_boxed) > _MV_MAX_CHARS or any(len(g) > _MV_MAX_CHARS for g in gold_boxed_list):
+    return False
   try:
-    guess_parsed = parse(guess_boxed, (ExprExtractionConfig(), LatexExtractionConfig()))
+    guess_parsed = parse(guess_boxed, _MV_CFG, parsing_timeout=None)
     golds_parsed = list(itertools.chain.from_iterable(
-        parse(g, (ExprExtractionConfig(), LatexExtractionConfig())) for g in gold_boxed_list))
+        parse(g, _MV_CFG, parsing_timeout=None) for g in gold_boxed_list))
     if not guess_parsed or not golds_parsed:
       return False
-    return bool(verify(golds_parsed, guess_parsed))
+    return bool(verify(golds_parsed, guess_parsed, timeout_seconds=None))
   except Exception:
     return False
 

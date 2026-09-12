@@ -24,12 +24,21 @@
 #      files are mixed together there. The per-run override below fixes it.
 #   7. reward: maxtext_math_reward.py (Phase-0 version) returns
 #      {score, acc, fmt}; score is unchanged, acc/fmt are logging only.
+#   8. [v2] TensorBoard writes to NODE-LOCAL disk (TB_ROOT=/tmp/tb_local) and a
+#      background loop mirrors it to gcsfuse every 5 min (+ once at exit).
+#      Writing TB events straight onto gcsfuse cost ~40 s/step of blocking
+#      (torch's async writer queue is 10 deep; gcsfuse appends are ~0.4 s each).
+#   9. [v2] reward: math_verify signal-timeouts disabled (thread-safe); launcher
+#      asserts from a worker thread that equivalence scoring works, and logs
+#      the math-verify version for the rulebook.
 #
 # Usage (inside the head pod, after `source /workspace/setup_env.sh`):
 #   # smoke (5 steps, eval at 2 and 4, one checkpoint):
 #   TOTAL_STEPS=5 TEST_FREQ=2 SAVE_FREQ=4 NNODES=4 bash $SCRIPTS_DIR/run_qwen3_0p6b_phase0_precheck.sh
 #   # real run, one seed, under tmux:
-#   SEED=1 NNODES=4 bash $SCRIPTS_DIR/run_qwen3_0p6b_phase0_precheck.sh 2>&1 | tee $LOG_DIR/phase0_seed1.log
+#   VAL_FILE=$DATA_DIR/val_1k.parquet SEED=1 NNODES=16 bash $SCRIPTS_DIR/run_qwen3_0p6b_phase0_precheck.sh 2>&1 | tee $LOG_DIR/phase0_rfix_seed1.log
+#   # TensorBoard while running (on the head pod): tensorboard --logdir /tmp/tb_local --bind_all
+#   # plot:  python3 plot_phase0.py --tb $TB_DIR --rollout $ROLLOUT_DUMP_DIR --out ...
 # =============================================================================
 
 set -xeuo pipefail
@@ -55,7 +64,8 @@ MODEL_PATH=${MODEL_PATH:-Qwen/Qwen3-0.6B}   # [MAXTEXT] model_name=qwen3-0.6b
 
 LOG_DIR=${LOG_DIR:-$HOME/meta-RL/logs}
 CKPT_DIR=${CKPT_DIR:-$HOME/meta-RL/ckpt}
-TB_ROOT=${TB_ROOT:-$HOME/meta-RL/.home/tensorboard_log}
+TB_ROOT=${TB_ROOT:-/tmp/tb_local}                     # [v2] node-local; NEVER a gcsfuse path
+TB_MIRROR_ROOT=${TB_MIRROR_ROOT:-/workspace/meta-RL/.home/tensorboard_log}   # gcsfuse copy for laptop/TensorBoard
 mkdir -p "${LOG_DIR}" "${CKPT_DIR}" "${TB_ROOT}"
 
 ########################### scale knobs (only these vary between runs) ######
@@ -65,14 +75,34 @@ TOTAL_STEPS=${TOTAL_STEPS:-300}             # [PHASE0] 20 -> 300
 TEST_FREQ=${TEST_FREQ:-50}                  # [PHASE0] eval every N steps
 SAVE_FREQ=${SAVE_FREQ:-50}                  # [PHASE0] checkpoint every N steps
 SEED=${SEED:-1}                             # [PHASE0] data order seed (frozen in Level 0)
+RUN_TAG=${RUN_TAG:-rfix}                    # [v2] marks the reward-fixed recipe; bump when the recipe changes
 
 PROJECT_NAME=${PROJECT_NAME:-trackA_phase0}
 W=$(( NNODES * NGPUS_PER_NODE ))
-EXPERIMENT_NAME=${EXPERIMENT_NAME:-qwen3_0p6b_phase0_seed${SEED}_${NNODES}n${W}g_$(date +%Y%m%d_%H%M)}
+EXPERIMENT_NAME=${EXPERIMENT_NAME:-qwen3_0p6b_phase0_${RUN_TAG}_seed${SEED}_${NNODES}n${W}g_$(date +%Y%m%d_%H%M)}
 TB_DIR=${TB_ROOT}/${PROJECT_NAME}/${EXPERIMENT_NAME}
+TB_MIRROR=${TB_MIRROR_ROOT}/${PROJECT_NAME}/${EXPERIMENT_NAME}
 VAL_DUMP_DIR=${LOG_DIR}/${EXPERIMENT_NAME}/val_dump
 ROLLOUT_DUMP_DIR=${LOG_DIR}/${EXPERIMENT_NAME}/rollout_dump   # per-step train samples (acc/fmt per sample)
-mkdir -p "${TB_DIR}" "${VAL_DUMP_DIR}" "${ROLLOUT_DUMP_DIR}"
+mkdir -p "${TB_DIR}" "${TB_MIRROR}" "${VAL_DUMP_DIR}" "${ROLLOUT_DUMP_DIR}"
+
+########################### [v2] pre-flight: reward must score equivalences from a THREAD ####
+python3 - "${REWARD_FN_PATH}" <<'PYEOF'
+import importlib.metadata as md, importlib.util, json, sys, threading, warnings
+warnings.filterwarnings("ignore")
+spec = importlib.util.spec_from_file_location("r", sys.argv[1]); r = importlib.util.module_from_spec(spec); spec.loader.exec_module(r)
+res = {}
+t = threading.Thread(target=lambda: res.__setitem__("s", r.compute_score("x", "<reasoning>x</reasoning><answer>1/2</answer>", json.dumps(["\\frac{1}{2}", "\\frac{1}{2}"]))["score"]))
+t.start(); t.join()
+print(f"[phase0] math-verify version = {md.version('math-verify')}; worker-thread equivalence score = {res.get('s')}")
+if res.get("s") != 1.1:
+  sys.exit("[phase0] ABORT: reward does not award symbolic equivalence from a worker thread -- wrong reward file?")
+PYEOF
+
+########################### [v2] TB mirror loop: local -> gcsfuse every 5 min, and once at exit ####
+( while true; do sleep 300; cp -r "${TB_DIR}/." "${TB_MIRROR}/" 2>/dev/null || true; done ) &
+TB_SYNC_PID=$!
+trap 'kill ${TB_SYNC_PID} 2>/dev/null; cp -r "${TB_DIR}/." "${TB_MIRROR}/" 2>/dev/null || true' EXIT
 
 ########################### frozen invariants -- do not tune ################
 # BYTE-IDENTICAL to run_qwen3_0p6b_rl05_parity.sh. Any change here = new recipe.
@@ -99,6 +129,7 @@ ppo_max_token_len_per_gpu=32768  # [SYS] dynamic-bsz packing budget
 echo "[accounting] W=${W}  batch=256x8=2048  updates/rollout=1 (mini=256)  beta=0  clip=0.2/0.28  rollout_tp=${rollout_tp}  seed=${SEED}"
 echo "[phase0] steps=${TOTAL_STEPS} test_freq=${TEST_FREQ} save_freq=${SAVE_FREQ}"
 echo "[phase0] tensorboard -> ${TB_DIR}"
+echo "[phase0] tb mirror   -> ${TB_MIRROR}"
 echo "[phase0] checkpoints -> ${CKPT_DIR}/${EXPERIMENT_NAME}"
 echo "[phase0] val dumps   -> ${VAL_DUMP_DIR}"
 echo "[phase0] train dumps -> ${ROLLOUT_DUMP_DIR}"
