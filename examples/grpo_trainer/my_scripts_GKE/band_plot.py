@@ -7,14 +7,18 @@ computes, at every eval step, min / max / mean across seeds. Produces:
   <out>.json  the band per checkpoint (for the parity package / TPU comparison)
   stdout      per-checkpoint table and band-width statistics
 
-The band is DESCRIPTIVE (a range over 3 seeds, not a confidence interval); the
-parity criterion is stated separately in the rulebook (e.g. TPU inside
-[min - delta, max + delta] at every checkpoint, with delta from the seed-to-seed
-spread below).
+The band is DESCRIPTIVE: the range over the seeds at each checkpoint, not a
+confidence interval and not an acceptance rule. "inside band" counts printed for
+overlays are for reading the plot; the parity criterion lives in the rulebook.
+
+Completeness: by default every seed must have BOTH accuracy metrics at every
+required step (--steps, default 0..300 every 10) with finite values, otherwise
+the script exits with an error -- a missing checkpoint must not silently shrink
+the band. --allow_partial overrides that for exploratory use (loudly).
 
 Usage:
-  python3 band_plot.py --tb <tb_dir_seed1> <tb_dir_seed2> <tb_dir_seed3> --out <path_without_ext>
-  optional: --extra <tb_dir> ... (e.g. a TPU run or an ablation) drawn on top for comparison
+  python3 band_plot.py --tb <tb_seed1> <tb_seed2> <tb_seed3> [--labels a b c] --out <path_without_ext>
+  optional: --extra <tb_dir> ... [--extra_labels ...]  overlays (e.g. a TPU run), not part of the band
 """
 
 import argparse
@@ -51,18 +55,47 @@ def main():
   ap.add_argument("--extra", nargs="*", default=[], help="TB dirs to overlay (not part of the band)")
   ap.add_argument("--extra_labels", nargs="*", default=None)
   ap.add_argument("--out", required=True)
+  ap.add_argument("--steps", default="0:300:10", help="required eval steps as start:stop:stride (inclusive)")
+  ap.add_argument("--allow_partial", action="store_true", help="do not fail on missing checkpoints (exploratory only)")
   args = ap.parse_args()
+
+  # ---- argument validation (labels must match directories exactly)
+  if args.labels is not None and len(args.labels) != len(args.tb):
+    raise SystemExit(f"--labels has {len(args.labels)} entries for {len(args.tb)} --tb dirs")
+  if args.extra_labels is not None and len(args.extra_labels) != len(args.extra):
+    raise SystemExit(f"--extra_labels has {len(args.extra_labels)} entries for {len(args.extra)} --extra dirs")
+  a0, a1, st = (int(x) for x in args.steps.split(":"))
+  required = list(range(a0, a1 + 1, st))
 
   runs = [load(p) for p in args.tb]
   labels = args.labels or [f"seed{i + 1}" for i in range(len(runs))]
   extras = [load(p) for p in args.extra]
   extra_labels = args.extra_labels or [os.path.basename(p.rstrip("/"))[:40] for p in args.extra]
 
+  # ---- completeness check: every seed, both accuracy metrics, every required step, finite
+  problems = []
+  for lab, r in zip(labels, runs):
+    for tag, _ in METRICS:
+      ser = r.get(key(tag), {})
+      missing = [s for s in required if s not in ser]
+      bad = [s for s in required if s in ser and not np.isfinite(ser[s])]
+      if missing:
+        problems.append(f"{lab}: {tag} missing steps {missing[:6]}{'...' if len(missing) > 6 else ''}")
+      if bad:
+        problems.append(f"{lab}: {tag} non-finite at steps {bad[:6]}")
+  if problems:
+    msg = "band completeness check FAILED:\n  " + "\n  ".join(problems)
+    if not args.allow_partial:
+      raise SystemExit(msg + "\n(use --allow_partial only for exploratory plots; the exported band must be complete)")
+    print("!! " + msg + "\n!! continuing with --allow_partial: the band below is PARTIAL and must not be exported")
+
   band = {}
   fig, axes = plt.subplots(1, len(METRICS), figsize=(7 * len(METRICS), 5))
   for ax, (tag, title) in zip(axes, METRICS):
     k = key(tag)
     steps = sorted(set.intersection(*[set(r.get(k, {})) for r in runs]))
+    if not args.allow_partial:
+      steps = required                                   # guaranteed present by the check above
     if not steps:
       ax.set_title(f"{title}: no data")
       continue
@@ -91,13 +124,13 @@ def main():
       print(f"  {row['step']:>5} {row['min']:7.3f} {row['max']:7.3f} {row['mean']:7.3f} {row['max'] - row['min']:7.3f}   "
             + " ".join(f"{v:.3f}" for v in row["per_seed"]))
     print(f"  band width: median {np.median(width):.3f}, p90 {np.percentile(width, 90):.3f}, max {width.max():.3f}  "
-          f"| final mean {mean[-1]:.3f} [{lo[-1]:.3f}, {hi[-1]:.3f}]  | gain 0->{steps[-1]} per seed: "
+          f"| final (step {steps[-1]}) mean {mean[-1]:.3f} [{lo[-1]:.3f}, {hi[-1]:.3f}]  | gain {steps[0]}->{steps[-1]} per seed: "
           + ", ".join(f"{M[i, -1] - M[i, 0]:+.3f}" for i in range(len(runs))))
     for e, lab in zip(extras, extra_labels):
       es = [s for s in steps if s in e.get(k, {})]
-      if es:
-        inside = sum(1 for s in es if lo[steps.index(s)] <= e[k][s] <= hi[steps.index(s)])
-        print(f"  overlay {lab}: inside band at {inside}/{len(es)} checkpoints")
+      inside = sum(1 for s in es if lo[steps.index(s)] <= e[k][s] <= hi[steps.index(s)])
+      print(f"  overlay {lab}: matched {len(es)}/{len(steps)} checkpoints; inside band at {inside}/{len(es) if es else 0} of the matched "
+            f"(descriptive -- not the parity criterion)")
 
   # aux: seed-to-seed spread of training diagnostics (for the rulebook)
   print("\ntraining diagnostics, seed-to-seed spread (mean over steps of max-min across seeds):")
