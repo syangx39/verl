@@ -109,8 +109,8 @@ RUN_TAG=${RUN_TAG:-${PRESET:-v5}}           # [v5] set per ablation; defaults to
 if [ "${PRESET:-}" = "stab" ]; then
   : "${ROLLOUT_TEMPERATURE:=1.0}" "${ROLLOUT_TOP_P:=1.0}" "${ROLLOUT_TOP_K:=-1}"
   : "${REWARD_FMT_WEIGHT:=0}" "${REWARD_OVERLONG_BUFFER:=1024}" "${REWARD_OVERLONG_PENALTY:=1.0}"
-  : "${FILTER_OVERLONG_PROMPTS:=True}" "${KL_COEF:=0.001}" "${KL_TYPE:=low_var_kl}" "${TEST_FREQ:=10}"
-  echo "[phase0] PRESET=stab: T=1 top_p=1 top_k=-1 fmt_w=0 overlong=1024/1.0 filter_overlong_prompts=True KL=0.001(low_var_kl) test_freq=10"
+  : "${FILTER_OVERLONG_PROMPTS:=True}" "${KL_COEF:=0}" "${KL_TYPE:=low_var_kl}" "${TEST_FREQ:=10}"
+  echo "[phase0] PRESET=stab: T=1 top_p=1 top_k=-1 fmt_w=0 overlong=1024/1.0 filter_overlong_prompts=True KL=0 (no reference model) test_freq=10"
 fi
 # [v4] reward worker knobs. They must reach the Ray actors that run the reward,
 # so they are forwarded through ray runtime_env below (shell exports alone do NOT
