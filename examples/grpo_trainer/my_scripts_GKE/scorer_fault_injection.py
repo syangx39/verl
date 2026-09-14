@@ -84,28 +84,33 @@ check("timeout: length penalty retained at cap", abs(o["length_penalty"] - expec
 
 # 3. TRUE hang: a verifier that blocks. The patched parse() is not wrapped by math_verify's own
 #    signal timeout, so only the outer watchdog (poll timeout) can end it: expect mv_timeout=1,
-#    the hung worker killed and replaced, score at cap == -1, and later calls healthy.
+#    the hung worker killed and AUTOMATICALLY replaced, score at cap == -1, and -- the point of the
+#    recovery check -- the auto-replaced worker itself serving the next call correctly.
 import time as _time
 def hanging_parse(*a, **k):
   _time.sleep(120)
 saved_timeout = r._MV_TIMEOUT
 r._MV_TIMEOUT = 1.0                     # parent poll window = 1 s + 1 s grace; keeps the test short
 r.parse = hanging_parse
-respawn_all()                           # workers inherit the hanging parse and the short timeout
+respawn_all()                           # all workers now carry the hanging parse
+r.parse = real_parse                    # restore in the PARENT only: any auto-replacement forks a healthy worker
+others = [r._mv_idle.get() for _ in range(r._MV_PROCS - 1)]   # park the rest; exactly one hanging worker is idle
 before = r.mv_stats()
 t0 = _time.time()
-o = score(CAP)
+o = score(CAP)                          # served by the hanging worker -> watchdog -> auto replacement
 elapsed = _time.time() - t0
 after = r.mv_stats()
 check("hang: watchdog fired (call returned within ~5 s)", elapsed < 5.0, f"{elapsed:.1f}s")
 check("hang: acc == 0, mv_timeout == 1, mv_exc == 0", o["acc"] == 0.0 and o["mv_timeout"] == 1.0 and o["mv_exc"] == 0.0, str(o))
 check("hang: length penalty retained at cap -> score == -1 (with fmt_w=0)", abs(o["length_penalty"] - expected_pen_at_cap) < 1e-9 and abs(o["score"] - (FMT_W * o["fmt"] + expected_pen_at_cap)) < 1e-9, str(o["score"]))
-check("hang: hung worker replaced (replaced +1, idle back to full)", after["replaced"] == before["replaced"] + 1 and after["idle"] == r._MV_PROCS, str(after))
+check("hang: hung worker auto-replaced (replaced +1, exactly one idle)", after["replaced"] == before["replaced"] + 1 and after["idle"] == 1, str(after))
+o = score(100)                          # the only idle worker is the auto-replacement -> it must be healthy
+check("hang: recovery -- the AUTO-REPLACED worker serves the next call correctly", o["acc"] == 1.0 and o["mv_timeout"] == 0.0 and o["mv_exc"] == 0.0, str(o))
+for x in others:                        # return the parked (still hanging-parse) workers, then rebuild the pool cleanly
+  r._mv_idle.put(x)
 r._MV_TIMEOUT = saved_timeout
-r.parse = real_parse
-respawn_all()                           # drop the hanging-parse workers
-o = score(100)
-check("hang: recovery -- next call with the real verifier is healthy", o["acc"] == 1.0 and o["mv_timeout"] == 0.0, str(o))
+respawn_all()
+check("hang: pool rebuilt", r.mv_stats()["idle"] == r._MV_PROCS and score(100)["acc"] == 1.0)
 
 # 4. dead worker: malformed message kills one worker; next call on it must count mv_exc and replace it
 r.parse = real_parse
