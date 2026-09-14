@@ -70,7 +70,8 @@ check("exception: mv_exc == 1, mv_timeout == 0", o["mv_exc"] == 1.0 and o["mv_ti
 check("exception: length penalty retained at cap", abs(o["length_penalty"] - expected_pen_at_cap) < 1e-9, f"{o['length_penalty']} vs {expected_pen_at_cap}")
 check("exception: score == fmt_w*fmt + 0 + penalty", abs(o["score"] - (FMT_W * o["fmt"] + expected_pen_at_cap)) < 1e-9, str(o["score"]))
 
-# 2. injected verifier timeout (math_verify's own TimeoutException, a BaseException)
+# 2. injected verifier timeout exception (math_verify's own TimeoutException, a BaseException) -- exercises
+#    the exception-classification path only; the real watchdog is exercised in test 3
 from math_verify.errors import TimeoutException
 def slow_parse(*a, **k):
   raise TimeoutException("injected verifier timeout")
@@ -81,12 +82,37 @@ check("timeout: acc == 0", o["acc"] == 0.0, str(o))
 check("timeout: mv_timeout == 1, mv_exc == 0", o["mv_timeout"] == 1.0 and o["mv_exc"] == 0.0)
 check("timeout: length penalty retained at cap", abs(o["length_penalty"] - expected_pen_at_cap) < 1e-9)
 
-# 3. dead worker: malformed message kills one worker; next call on it must count mv_exc and replace it
+# 3. TRUE hang: a verifier that blocks. The patched parse() is not wrapped by math_verify's own
+#    signal timeout, so only the outer watchdog (poll timeout) can end it: expect mv_timeout=1,
+#    the hung worker killed and replaced, score at cap == -1, and later calls healthy.
+import time as _time
+def hanging_parse(*a, **k):
+  _time.sleep(120)
+saved_timeout = r._MV_TIMEOUT
+r._MV_TIMEOUT = 1.0                     # parent poll window = 1 s + 1 s grace; keeps the test short
+r.parse = hanging_parse
+respawn_all()                           # workers inherit the hanging parse and the short timeout
+before = r.mv_stats()
+t0 = _time.time()
+o = score(CAP)
+elapsed = _time.time() - t0
+after = r.mv_stats()
+check("hang: watchdog fired (call returned within ~5 s)", elapsed < 5.0, f"{elapsed:.1f}s")
+check("hang: acc == 0, mv_timeout == 1, mv_exc == 0", o["acc"] == 0.0 and o["mv_timeout"] == 1.0 and o["mv_exc"] == 0.0, str(o))
+check("hang: length penalty retained at cap -> score == -1 (with fmt_w=0)", abs(o["length_penalty"] - expected_pen_at_cap) < 1e-9 and abs(o["score"] - (FMT_W * o["fmt"] + expected_pen_at_cap)) < 1e-9, str(o["score"]))
+check("hang: hung worker replaced (replaced +1, idle back to full)", after["replaced"] == before["replaced"] + 1 and after["idle"] == r._MV_PROCS, str(after))
+r._MV_TIMEOUT = saved_timeout
+r.parse = real_parse
+respawn_all()                           # drop the hanging-parse workers
+o = score(100)
+check("hang: recovery -- next call with the real verifier is healthy", o["acc"] == 1.0 and o["mv_timeout"] == 0.0, str(o))
+
+# 4. dead worker: malformed message kills one worker; next call on it must count mv_exc and replace it
 r.parse = real_parse
 respawn_all()
 w = r._mv_idle.get()
 w.conn.send((1, 2, 3))
-import time; time.sleep(0.3)
+w.proc.join(timeout=5)
 check("dead worker: process exited after malformed message", not w.proc.is_alive())
 r._mv_idle.put(w)
 others = [r._mv_idle.get() for _ in range(r._MV_PROCS - 1)]
