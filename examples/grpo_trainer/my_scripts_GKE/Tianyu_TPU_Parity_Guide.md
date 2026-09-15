@@ -93,7 +93,7 @@ GPU run 名称与 seed 对应如下；下文的 `<GPU_EXP>` 用这里的完整�
 
 | 文件 | 用途 |
 | --- | --- |
-| `fixtures/scorer_fixture.jsonl` | 797 条 `output`、`gts`、`response_len` 及 GPU `expected` |
+| `fixtures/scorer_fixture.jsonl` | 797 条 `output`、`gts`、`response_len` 及 GPU `expected`；验收版需含全部 `mv_*` 实测 flags，补齐方式见下文 |
 | `code/maxtext_math_reward.py` | 冻结的共享评分实现 |
 | `fixtures/scorer_fault_injection.py`、`scorer_controlled_tests.md` | 可执行故障测试及预期行为 |
 | `fixtures/scorer_fault_injection.log` | 已有 GPU 故障测试记录 |
@@ -113,6 +113,10 @@ export REWARD_MATH_VERIFY_MAX_CHARS=400
 ```
 
 当前训练 reward 是 `acc + length_penalty`，`fmt` 只记录。长度 ≤7168 时惩罚为 0，7168–8192 之间线性下降，8192 时为 −1。例如正确回答在指定长度 7680 时应为 `acc=1, length_penalty=-0.5, score=0.5`。
+
+**GPU 交付准备：补齐 expected flags。** 保留原 797 条的 `output / gts / response_len` 和顺序，用上述固定配置重新执行共享 scorer；确认原有 `acc / fmt / length_penalty / score / mv_used` 仍匹配，再将实测 `mv_timeout / mv_exc / mv_lenrej` 补进每条 `expected`。若原评分发生变化，先排查，不覆盖旧结果来消除差异，也不重新抽样删除失败行。
+
+正常 fixture 的 `mv_timeout`、`mv_exc` 应为 0；`mv_lenrej` 按实测保存，提取答案过长导致的 `mv_lenrej=1` 可以是确定性结果，不能直接将三个 flags 全填成 0。保留逐条检查日志、配置和新旧文件哈希；发布更新后的 fixture，重新生成/验证 package manifest。**flags 补齐的执行结果尚待 GPU 侧提供；本指南的更新不代表 bucket 中 fixture 已经重生成。**
 
 **B. 重放全部正常评分输入。** 逐行调用 TPU 正式训练准备使用的 scorer。若直接复用共享模块，`scorer` 即加载后的 `code/maxtext_math_reward.py`：
 
@@ -144,14 +148,16 @@ echo "fault-injection exit=$test_rc"
 
 该脚本针对共享 scorer 的 worker 实现；若 TPU 更换了 scorer/worker 实现，应做等效故障注入，不能只测试一个未接入正式训练的模块。
 
-**D. 检查正式接入路径。** Tunix 调用 scorer 时传入有效生成 token 数，按冻结的 EOS/mask 规则计算，不能用字符数或去掉 EOS 后重新 tokenize 的长度替代。
+**D. 检查正式接入路径。** 本单轮任务的 `response_len` 定义为 response 区间有效 mask 的和，对应 verl 的 `valid_response_length`：**包含实际生成且有效的终止 EOS/stop token，不含 prompt 和 padding。** 即使解码后的 `output` 文本去掉了特殊 token，长度仍按原始 token/mask 计算，不能用字符数或重新 tokenize 的长度替代。
+
+达到长度上限时 `response_len=8192`，不人为追加或用 EOS 替换最后一个 token。若第 8192 个 token 恰好是有效 EOS，它仍计入长度；所以长度等于 8192 不必然表示“没有 EOS”。`151643` 也可能用于 padding，必须依据 mask 区分，不能按 token ID 把它全部删除。两边记录实际最后一个有效 token 和停止原因，区分“长度达到 cap”与“因长度上限截断”。长度定义同样用于 reward、loss mask 和第四步 log-prob 统计。
 
 **返回材料：** 全部 797 条 expected/got 比较结果、完整 `mv_*`、实际配置、fault-injection 日志和退出码，以及正式路径传入长度的核对记录。
 
 ### 4.3 通过标准
 
-- **797/797 条全部 expected 字段匹配**；数值使用 `rtol=0, atol=1e-9`，离散 flags 完全相同。必须检查总条数，不能仅断言“至少有一条通过”。
-- 每条正常样本实际 `mv_timeout=0`、`mv_exc=0`，并保存 `mv_used / mv_timeout / mv_exc / mv_lenrej`。若旧 expected 缺少 flags，GPU 侧补同配置正常评分检查记录，不能仅凭“deterministic”标签认定基线已验证。
+- **797/797 条全部 expected 字段匹配**；数值使用 `rtol=0, atol=1e-9`，离散 flags 完全相同。expected 至少包含 `acc / fmt / length_penalty / score / mv_used / mv_timeout / mv_exc / mv_lenrej`。必须检查总条数和字段完整性，不能仅断言“至少有一条通过”。
+- 每条正常样本 GPU expected 和 TPU 实测的 `mv_timeout=0`、`mv_exc=0`；`mv_lenrej` 与 GPU 实测 expected 一致，不一概要求为 0。保存全部 flags。若 expected 未补齐，记录正常 fixture 验收为 `INCOMPLETE`，不能用默认 0 补缺失字段或只凭“deterministic”标签宣告通过。
 - 故障测试全部通过，日志为 `RESULT: PASS`、退出码为 0；包含真实 hang/watchdog 和恢复检查，不能只抛出 TimeoutException。
 - TPU 正式调用传入正确的有效生成长度。正常评分与故障处理两部分均通过，才记录 `STEP 2: PASS`。
 
@@ -164,6 +170,7 @@ echo "fault-injection exit=$test_rc"
 | 文件 | 用途 |
 | --- | --- |
 | `model/Qwen3-0.6B/`、`model/SHA256` | 同一份初始权重和配置 |
+| `model/Qwen3-0.6B/generation_config.json`、`tokenizer_config.json` 及 `runs/<GPU_EXP>/` 的实际引擎配置/日志 | 核对 token ID 映射、最终生效的 stop 集合和 EOS 处理，不只看模型默认值 |
 | `data/gsm8k_test.parquet` | 完整 GSM8K test，1,319 题 |
 | `data/val_1k_qsplit.parquet` | OMI2 held-out evaluation，1,000 题 |
 | `code/maxtext_math_reward.py` | 第二步已验证的 scorer |
@@ -173,15 +180,30 @@ echo "fault-injection exit=$test_rc"
 ### 5.2 具体做法
 
 1. 从交付的初始模型加载权重；如需转换成 MaxText 格式，记录来源哈希和参数映射。评估按 rollout 路径使用 BF16 权重。此步骤不用 step-1 或 step-300 checkpoint。
-2. 对两个完整数据集各题生成 **一个 greedy 回答**：`do_sample=False, n=1`，response cap 8192。使用第一步对齐的 prompt、tokenizer、thinking 设置和 GPU 相同的 EOS/stop 行为。
+2. 对两个完整数据集各题生成 **一个 greedy 回答**：`do_sample=False, n=1`，response cap 8192。使用第一步对齐的 prompt、tokenizer、thinking 设置，并按下方显式 EOS/stop 约定配置引擎。
 3. 用第二步已验证的 scorer 评分，分别计算 GSM8K 和 OMI2 的平均 `acc`。`score` 包含长度惩罚，不能用它代替 accuracy。
 4. 导出逐题结果，按数据来源及稳定题目身份与 GPU 配对；不能只靠 JSONL 行号。GPU 的 `val_dump/0.jsonl` 是训练前结果，后面的 `10.jsonl`、`20.jsonl` 等是对应更新完成后的评估。
 
-**返回材料：** 两个数据集的 accuracy、逐题输出/评分、与 GPU 各 seed 的逐题正确性一致率、模型哈希和实际评估配置。逐题记录至少保留 `data_source`、可稳定配对的题目身份、`input / output / gts / acc / fmt / score / length_penalty / mv_*`。
+**EOS/stop 约定及运行证据。** Qwen3-0.6B 的预期 EOS/stop 集合为：
+
+```text
+<|im_end|>    = 151645
+<|endoftext|> = 151643
+```
+
+配置语义是遇到任一有效生成的终止 token 即停止；不忽略 EOS，不在 response cap 8192 后追加 EOS，也不强制把最后一个生成 token 改成 EOS。长度及有效 EOS 的计数按 §4.2 D 执行。单纯达到 8192 与因上限截断分别记录；若 EOS 恰好出现在最后一个位置，仍保留它。
+
+**实际 GPU stop 集合的确认状态：待补运行证据。** 上述 ID 与 [Qwen 官方 generation config](https://huggingface.co/Qwen/Qwen3-0.6B/blob/main/generation_config.json) 及 [tokenizer config](https://huggingface.co/Qwen/Qwen3-0.6B/blob/main/tokenizer_config.json) 对应；正式冻结前，GPU 侧需核对交付模型文件及三个参考 run 的实际引擎参数，确认训练采样和 greedy eval 均采用该集合，记录 `ignore_eos`、额外 stop 字符串/IDs、强制 EOS 等是否生效。若部署覆盖了默认值，应按实际参考 run 补正文档并排查，不能把官网默认值视为运行事实。此前 OSL 差异只能作为排查线索，不能据此确定 stop 设置就是原因。
+
+**可选诊断：HF → MaxText → HF 往返转换。** 当 Step-0 存在无法解释的差异时，可在同一 vLLM-TPU 版本、同 dtype、同评估输入和协议下，分别评估原始 HF 权重及往返转换后的 HF 权重，保留逐题差异。先比较正确参数映射下的权重；如有需要，再比较固定 tokens 的 teacher-forced log-prob。
+
+这用于定位转换链路对结果的影响，不把 accuracy 差直接称作“转换保真度”：accuracy 相同不证明权重无损，往返转换也可能抵消错误，不能验证原生 MaxText forward。本诊断保持可选，不替代实验第四步的实际 trainer 比较，也不新增 Step-0 数值门槛。
+
+**返回材料：** 两个数据集的 accuracy、逐题输出/评分、与 GPU 各 seed 的逐题正确性一致率、模型哈希和实际评估配置，包括最终生效的 stop 集合及来源。逐题记录至少保留 `data_source`、可稳定配对的题目身份、`input / output / gts / acc / fmt / score / length_penalty / mv_*`，并保存原始有效 response 长度、末 token 和停止原因以便核查。
 
 ### 5.3 通过标准
 
-- 初始模型身份正确，未经 optimizer update；评估配置已对齐。
+- 初始模型身份正确，未经 optimizer update；评估配置已对齐，最终生效的 stop 集合及 EOS/长度处理有实际运行证据，不能只引用默认配置。
 - 完整覆盖 **1,319 个 GSM8K 唯一题目和 1,000 个 OMI2 唯一题目**，无漏题、重复或跨数据集错配。
 - 两个数据集分别满足下式，使用交付结果中的未四舍五入数值计算：
 
@@ -230,10 +252,16 @@ logp[k] = log P(response_ids[k] | prompt_ids, response_ids[:k])
 
 1. 使用 `train_order_seed1.parquet` 前 256 行，即**训练 step 1**，核对 manifest；不是第一步 Prompt fixture 的 15 条输入。
 2. 初始模型按 `T=1, top_p=1, top_k=disabled, n=8, response cap=8192` 生成，共 2,048 条。
-3. 保存 sampler 对实际生成 tokens 返回的 log-prob。
+3. 保存 sampler 对实际生成 tokens 返回的 **raw log-prob**：由原始模型 logits 在完整模型词表上归一化得到、未经过 sampling logits processors 的自然对数概率。显式使用/核对 `logprobs_mode=raw_logprobs` 或引擎的等效实现；不要返回 `raw_logits`，也不要把 top-k/top-p 截断后重新归一化的概率当作原始概率。
 4. 保持同一 policy checkpoint，**任何 optimizer update 之前**，由 TPU trainer 对这批相同 tokens 重算 log-prob，按同一 mask 比较。
 
 TPU 无需生成与 GPU 完全相同的随机回答。A 固定跨硬件输入；B 固定 TPU 内部两条路径的输入。
+
+**确认返回模式，不只确认 T/top-k/top-p。** T=1、top_p=1、top_k disabled，且所有 logits processors 均不改变分布时，raw 与 processed 的概率才在数学上相同。仍需检查 repetition/presence/frequency penalties、min-tokens EOS 屏蔽、logit bias、bad-words/allowed-token 限制及 grammar 等。记录两边最终生效的返回模式和 processor 设置，并用实际返回结果确认；不能因为配置接口存在就认定实现已生效。模式含义可参见 [vLLM ModelConfig 文档](https://docs.vllm.ai/en/latest/api/vllm/config/model/#vllm.config.model.ModelConfig.logprobs_mode)，GPU fixture 的实际模式仍须由采集配置/部署源码核实。
+
+“完整词表归一化”描述概率的计算方式；只需保存实际生成 token 的 log-prob，无需导出每个位置的整个词表概率。
+
+若发现有效的分布修改，先记录并排查其是否属于冻结 recipe。不能为了降低 log-prob 差异而静默修改 GPU 参考语义或 TPU 采样配置。
 
 **C. 统一统计口径。** A 中令 `d = logp_TPU_trainer − logp_GPU_trainer`；B 中令 `d = logp_TPU_trainer − logp_TPU_sampler`。
 
@@ -258,11 +286,11 @@ GPU 的 **96 条固定 fixture** 共 429,638 个有效 response tokens，trainer
 
 300 步训练日志中 probability MAE 约为 0.0057、`rollout_corr/kl` 约为 0.0007；上述绝对误差及尾部统计来自固定 fixture，不能描述为“在 300 步中一直平稳”。`rollout_corr/kl` 不等于 mean abs(Δlogp)，也不是 reference-model KL。分层抽取的 96 条与 TPU 随机 rollout 的长度分布可能不同，需要结合分层结果解读。
 
-**返回材料：** A 的按 `batch_row` 对齐的 TPU per-token log-prob 和重复结果；B 的 tokens/masks/UID、两套 per-token log-prob；两项统计、长度分布、模型哈希、代码和实际精度配置。HF FP32 辅助锚点未计算，仅在出现差异时按需补充，不是必需项。
+**返回材料：** A 的按 `batch_row` 对齐的 TPU per-token log-prob 和重复结果；B 的 tokens/masks/UID、两套 per-token log-prob；两项统计、长度分布、模型哈希、代码和实际精度配置；sampler 实际 `logprobs_mode`、有效 processor 列表和配置证据。HF FP32 辅助锚点未计算，仅在出现差异时按需补充，不是必需项。
 
 ### 6.3 通过标准
 
-先满足输入和执行条件：A 覆盖原 **96/96 条、429,638 个有效 response tokens**，无缺失或重复；B 为 **256 UID × 8 = 2,048 条**，sampler/trainer tokens、mask、checkpoint 和更新时点一致。所有有效 log-prob 和比较统计均为有限值，报告采用上述口径。
+先满足输入和执行条件：A 覆盖原 **96/96 条、429,638 个有效 response tokens**，无缺失或重复；B 为 **256 UID × 8 = 2,048 条**，sampler/trainer tokens、mask、checkpoint 和更新时点一致。已核实 sampler 返回完整词表归一化的 raw log-prob，GPU fixture 的返回语义及两边 processor 设置有记录。所有有效 log-prob 和比较统计均为有限值，报告采用上述口径；返回模式或归一化语义未核实时，协议检查记录为 `INCOMPLETE`。
 
 随后按事前冻结的数值预算验收：
 
@@ -393,6 +421,8 @@ relative_update_error = norm(Δθ_TPU − Δθ_GPU) / norm(Δθ_GPU)
 | Reward | Answer accuracy + overlong soft penalty；buffer 1024、penalty 1.0、cap 8192；fmt_w=0，保留 fmt 日志 |
 | 长度 | Prompt limit 8192，过滤超长 prompts；response cap 8192 |
 
+**训练 rollout 和 greedy eval 共同沿用 §5.2 中经运行证据确认的 EOS/stop 约定。** 预期 token IDs 为 `[151645, 151643]`，任一有效生成即停；不忽略 EOS、不因 cap 追加或强制替换 EOS。GPU 实际 stop 集合确认完成后，将它写入 TPU resolved config；不能仅依赖模型默认值。`response_len` 含有效 EOS、不含 prompt/padding；sampler 的 log-prob 返回模式及 processors 沿用 §6.2 B 已核实的配置。
+
 GRPO advantage、ratio clipping、old-policy log-prob、loss mask 和全局 token-mean 分母沿用冻结 Rulebook 及已对齐实现。保留截断回答和零 advantage 组的有效 tokens；不能额外加 truncated-sample masking、重采样或训练目标。
 
 **B. 按 GPU 的逐步 prompt 成员训练。** Seed k 顺序读取 `train_order_seed{k}.parquet`，关闭所有额外 shuffle。第 s 步读取第 `(s−1)×256` 到 `s×256−1` 行，并核对全局 row-ID 集合与 manifest 一致，防止 filtering/sharding 改变 batch。
@@ -419,7 +449,7 @@ response_length/clip_ratio
 
 **D. 保留训练诊断。** 每步记录 train acc、实际 reward、fmt、length penalty；按 UID 和实际 reward 算的 `frac_zero_std`；response length、cap-hit、有效 token 数；entropy、clip 前 global grad norm、实际 LR、policy loss；第四步定义的 trainer/sampler 误差；`mv_timeout / mv_exc / mv_lenrej`；各阶段和完整 step time。
 
-`frac_zero_std` 不能用 solve_all + solve_none 代替，因为长度惩罚也会产生组内差异。保留逐步 rollout dump，含 UID、row ID、回答、有效生成长度、各评分字段和 flags；每步可验证 2,048 条、256 UID × 8。运行约定的 collapse guard，保存触发原因和退出状态。
+`frac_zero_std` 不能用 solve_all + solve_none 代替，因为长度惩罚也会产生组内差异。保留逐步 rollout dump，含 UID、row ID、回答、有效生成长度、最后一个有效 token、停止原因、各评分字段和 flags；每步可验证 2,048 条、256 UID × 8。`response_length/clip_ratio` 继续按长度达到 cap 的既有口径比较，另外记录因长度限制终止的比例，不能把两者自动等同；EOS 恰在第 8192 位时需保留这一边界情况。运行约定的 collapse guard，保存触发原因和退出状态。
 
 **E. 记录可比的性能。** 在查看性能结果前约定双方使用的训练 step 窗口和计时边界；当前具体窗口尚待确定。记录 steady-state end-to-end step time，排除 warmup/compilation、evaluation、checkpoint save；包含关键路径上的生成、必要 log-prob、reward、训练、weight sync 和协调开销。
 
