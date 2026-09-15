@@ -70,10 +70,46 @@ METHOD_INSERT = '''    def _dump_logprob_fixture(self, batch: DataProto):  # _LO
         skipped = []
         for k, v in batch.non_tensor_batch.items():
             a = np.asarray(v)
+            if a.dtype.kind == "O":                      # verl stores uid (and other strings) as dtype=object
+                try:
+                    a = a.astype(str)
+                except Exception:  # noqa: BLE001
+                    skipped.append(k)
+                    continue
             if a.dtype.kind in "biufUS" and a.ndim == 1 and a.shape[0] == len(batch):
                 arrays[f"nt__{k}"] = a
             else:
                 skipped.append(k)
+        # integrity: full batch must be 256 uid groups x 8 completions, one qid per uid
+        if "nt__uid" not in arrays:
+            raise RuntimeError("_LOGPROB_FIXTURE: uid missing from non_tensor_batch")
+        uids = arrays["nt__uid"]
+        groups = {}
+        for i, u in enumerate(uids):
+            groups.setdefault(u, []).append(i)
+        n_rep = self.config.actor_rollout_ref.rollout.n
+        bad_size = [u for u, idx in groups.items() if len(idx) != n_rep]
+        if bad_size:
+            raise RuntimeError(f"_LOGPROB_FIXTURE: {len(bad_size)} uid groups do not have {n_rep} completions")
+        if "nt__qid" in arrays:
+            mixed = [u for u, idx in groups.items() if len(set(arrays["nt__qid"][idx].tolist())) != 1]
+            if mixed:
+                raise RuntimeError(f"_LOGPROB_FIXTURE: {len(mixed)} uid groups carry more than one qid")
+        # provenance: checkpoint / tokenizer / config hashes and versions of the environment that produced the dump
+        import hashlib
+        import importlib.metadata as md
+        model_path = self.config.actor_rollout_ref.model.path
+
+        def _sha(fn):
+            fp = os.path.join(model_path, fn)
+            return hashlib.sha256(open(fp, "rb").read()).hexdigest() if os.path.exists(fp) else None
+
+        def _ver(pkg):
+            try:
+                return md.version(pkg)
+            except md.PackageNotFoundError:
+                return None
+
         step = self.global_steps
         np.savez_compressed(os.path.join(out_dir, f"fixture_step{step}.npz"), **arrays)
         meta = {
@@ -90,6 +126,11 @@ METHOD_INSERT = '''    def _dump_logprob_fixture(self, batch: DataProto):  # _LO
                       "strategy": self.config.actor_rollout_ref.actor.strategy,
                       "use_dynamic_bsz": self.config.actor_rollout_ref.actor.use_dynamic_bsz},
             "non_tensor_keys_skipped": skipped,
+            "uid_groups": len(groups),
+            "model_path": model_path,
+            "sha256": {"model.safetensors": _sha("model.safetensors"), "tokenizer.json": _sha("tokenizer.json"),
+                       "config.json": _sha("config.json"), "generation_config.json": _sha("generation_config.json")},
+            "collect_env": {pkg: _ver(pkg) for pkg in ("torch", "vllm", "verl", "transformers", "numpy", "math-verify")},
             "note": ("old_log_probs = trainer log-probs before this step's update; old_log_probs_repeat = the same pass "
                      "run again (repeatability); rollout_log_probs = sampler log-probs of the sampled tokens; all "
                      "response-position tensors are aligned with responses/response_mask (right-padded)."),

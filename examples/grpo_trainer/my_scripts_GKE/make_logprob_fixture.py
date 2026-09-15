@@ -59,21 +59,42 @@ def main():
   LS, LT, LR = z["rollout_log_probs"], z["old_log_probs"], z["old_log_probs_repeat"]
   B, Lp = P.shape
   Lr = R.shape[1]
+  # ---- shape checks: the three log-prob arrays and the mask must match the responses exactly
+  for name, arr in (("response_mask", RM), ("rollout_log_probs", LS), ("old_log_probs", LT), ("old_log_probs_repeat", LR)):
+    if arr.shape != R.shape:
+      raise SystemExit(f"{name} shape {arr.shape} != responses shape {R.shape}")
+  if AM.shape != (B, Lp + Lr):
+    raise SystemExit(f"attention_mask shape {AM.shape} != (B, Lp+Lr) = {(B, Lp + Lr)}")
   resp_len = RM.sum(1).astype(int)
+  # ---- the response mask must be a contiguous prefix (ones then zeros) so that [:resp_len] is the valid region
+  pos_idx = np.arange(Lr)[None, :]
+  if not np.array_equal(RM.astype(bool), pos_idx < resp_len[:, None]):
+    raise SystemExit("response_mask is not a contiguous valid prefix for every row")
   prompt_len = AM[:, :Lp].sum(1).astype(int)
+  if not np.array_equal(AM[:, :Lp].astype(bool), np.arange(Lp)[None, :] >= (Lp - prompt_len)[:, None]):
+    raise SystemExit("prompt attention_mask is not a contiguous left-padded suffix for every row")
+  if (resp_len == 0).any() or (prompt_len == 0).any():
+    raise SystemExit("rows with empty prompt or empty response in the dump")
   cap = Lr
   nt = {k[4:]: z[k] for k in z.files if k.startswith("nt__")}
+  if "uid" not in nt:
+    raise SystemExit("dump has no uid (patch must export uid as a string array)")
 
   # ---- selection: stratified by response length
+  if not (0 < args.n <= B):
+    raise SystemExit(f"--n must be in 1..{B} (batch size), got {args.n}")
+  if args.n_trunc + args.n_long > args.n:
+    raise SystemExit(f"quotas n_trunc + n_long = {args.n_trunc + args.n_long} exceed --n = {args.n}")
   rng = random.Random(args.seed)
   idx_all = list(range(B))
   trunc = [i for i in idx_all if resp_len[i] >= cap]
   q75 = np.percentile(resp_len, 75)
-  longs = [i for i in idx_all if resp_len[i] >= q75 and i not in trunc]
-  rest = [i for i in idx_all if i not in trunc and i not in longs]
+  longs = [i for i in idx_all if resp_len[i] >= q75 and i not in set(trunc)]
   pick = rng.sample(trunc, min(args.n_trunc, len(trunc))) + rng.sample(longs, min(args.n_long, len(longs)))
-  pick += rng.sample(rest, max(0, args.n - len(pick)))
+  unselected = [i for i in idx_all if i not in set(pick)]        # fill from EVERYTHING not yet chosen
+  pick += rng.sample(unselected, args.n - len(pick))
   pick = sorted(pick)
+  assert len(pick) == args.n and len(set(pick)) == args.n, "selection size/uniqueness"
 
   hf = None
   if args.hf_model:
@@ -104,7 +125,7 @@ def main():
            "logp_sampler": ls.tolist(), "logp_trainer": lt.tolist(), "logp_trainer_repeat": lr.tolist()}
     for k, v in nt.items():
       val = v[i]
-      row[k] = val.item() if hasattr(val, "item") else str(val)
+      row[k] = val.item() if hasattr(val, "item") and v.dtype.kind in "biuf" else str(val)
     if "advantages" in z.files:
       row["advantage"] = float(z["advantages"][i, 0])
     if "token_level_scores" in z.files:
@@ -118,6 +139,16 @@ def main():
       row["logp_hf_fp32_aux"] = tl.tolist()
       stats["hf_abs"].extend(np.abs(tl - lt).tolist())
     seqs.append(row)
+
+  # ---- post-export consistency: every per-token list has exactly n_response_tokens entries
+  for r in seqs:
+    n_r = r["n_response_tokens"]
+    for k in ("response_ids", "response_mask", "position_ids_response", "logp_sampler", "logp_trainer", "logp_trainer_repeat") + \
+             (("logp_hf_fp32_aux",) if "logp_hf_fp32_aux" in r else ()):
+      if len(r[k]) != n_r:
+        raise SystemExit(f"row {r['batch_row']}: {k} has {len(r[k])} entries, expected {n_r}")
+    if len(r["prompt_ids"]) != r["n_prompt_tokens"] or any(m != 1 for m in r["response_mask"]):
+      raise SystemExit(f"row {r['batch_row']}: prompt length or response mask inconsistent")
 
   def summ(x):
     x = np.asarray(x)
@@ -134,8 +165,10 @@ def main():
       "trainer_vs_sampler_signed_dlogp_nats (trainer - sampler)": summ(stats["signed_dlogp"]),
       "trainer_repeat_error_nats (|trainer - trainer_repeat|, same weights/inputs)": summ(stats["repeat_abs"]),
       "hf_fp32_aux_vs_trainer_nats (precision reference only)": summ(stats["hf_abs"]) if stats["hf_abs"] else "not computed",
-      "versions": {"python": platform.python_version(),
-                   **{p: (md.version(p) if _has(p) else None) for p in ("torch", "vllm", "verl", "transformers", "numpy")}},
+      "provenance_from_dump": {k: meta.get(k) for k in ("model_path", "sha256", "collect_env", "rollout", "actor", "uid_groups")},
+      "builder_env (this conversion script, NOT the collection environment)": {
+          "python": platform.python_version(),
+          **{p: (md.version(p) if _has(p) else None) for p in ("torch", "transformers", "numpy")}},
       "units": "log-probs in nats; probability MAE dimensionless; GPU 300-step run-level references: prob MAE 0.0057, log-domain 0.0007",
       "how_to_compare": "TPU trainer log-probs on the SAME prompt_ids+response_ids (teacher forced, response_mask, position_ids_response, "
                         "T=1) vs logp_trainer; TPU sampler-vs-trainer on TPU's own rollouts vs the trainer_vs_sampler stats here.",

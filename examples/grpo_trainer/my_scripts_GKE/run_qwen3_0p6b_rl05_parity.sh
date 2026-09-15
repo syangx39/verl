@@ -57,6 +57,10 @@
 #      Every deviation from the defaults is a recipe change -> set RUN_TAG.
 #      A collapse guard (collapse_guard.py) runs alongside and kills the driver
 #      on the v4 signature (entropy x3, cap-hit > 0.9, score < 0.5x, grad spikes).
+#  16. [v5.1] Parity-fixture support: DATA_SHUFFLE=False reads the train file in order (used with
+#      train_order_seed<k>.parquet); LOGPROB_FIXTURE_DIR=<dir> (+ LOGPROB_FIXTURE_STEP, default 1)
+#      makes the patched trainer (patch_verl_logprob_fixture.py) dump the pre-update batch tensors,
+#      sampler/trainer log-probs and a repeated trainer pass at that step. Unset = no effect.
 #  14. [v4] reward v4: no silent fallback (import raises if workers cannot start),
 #      structured worker status (exceptions counted as mv_exc), REWARD_MV_* forwarded
 #      to the Ray actors via runtime_env. Rollout dump carries the trainer's uid
@@ -103,14 +107,14 @@ TOTAL_STEPS=${TOTAL_STEPS:-300}             # [PHASE0] 20 -> 300
 TEST_FREQ=${TEST_FREQ:-10}                  # [v5] eval every 10 steps (was 50) to see inflection points
 SAVE_FREQ=${SAVE_FREQ:-50}                  # [PHASE0] checkpoint every N steps
 SEED=${SEED:-1}                             # [PHASE0] data order seed (frozen in Level 0)
-RUN_TAG=${RUN_TAG:-${PRESET:-v5}}           # [v5] set per ablation; defaults to the preset name
+RUN_TAG=${RUN_TAG:-${PRESET:-v5}}           # set per run; defaults to the preset name
 # [v5] PRESET=stab sets the whole agreed stability-round recipe in one place
 # (individual env vars still override). Without PRESET every knob defaults to rl05.
 if [ "${PRESET:-}" = "stab" ]; then
   : "${ROLLOUT_TEMPERATURE:=1.0}" "${ROLLOUT_TOP_P:=1.0}" "${ROLLOUT_TOP_K:=-1}"
   : "${REWARD_FMT_WEIGHT:=0}" "${REWARD_OVERLONG_BUFFER:=1024}" "${REWARD_OVERLONG_PENALTY:=1.0}"
   : "${FILTER_OVERLONG_PROMPTS:=True}" "${KL_COEF:=0}" "${KL_TYPE:=low_var_kl}" "${TEST_FREQ:=10}"
-  echo "[phase0] PRESET=stab: T=1 top_p=1 top_k=-1 fmt_w=0 overlong=1024/1.0 filter_overlong_prompts=True KL=0 (no reference model) test_freq=10"
+  echo "[phase0] PRESET=stab: T=1 top_p=1 top_k=-1 fmt_w=0 overlong=1024/1.0 filter_overlong_prompts=True KL=0 (frozen: no reference model) test_freq=10"
 fi
 # [v4] reward worker knobs. They must reach the Ray actors that run the reward,
 # so they are forwarded through ray runtime_env below (shell exports alone do NOT
@@ -275,7 +279,7 @@ python3 -m verl.trainer.main_ppo \
     data.max_response_length=${max_response_length} \
     data.filter_overlong_prompts=${filter_overlong_prompts} \
     data.truncation='error' \
-    data.shuffle=True \
+    data.shuffle=${DATA_SHUFFLE:-True} \
     data.seed=${SEED} \
     data.dataloader_num_workers=8 \
     actor_rollout_ref.model.path="${MODEL_PATH}" \
@@ -350,6 +354,8 @@ python3 -m verl.trainer.main_ppo \
     "+ray_kwargs.ray_init.runtime_env.env_vars.REWARD_OVERLONG_BUFFER='${REWARD_OVERLONG_BUFFER}'" \
     "+ray_kwargs.ray_init.runtime_env.env_vars.REWARD_OVERLONG_PENALTY='${REWARD_OVERLONG_PENALTY}'" \
     "+ray_kwargs.ray_init.runtime_env.env_vars.REWARD_MAX_RESP_LEN='${REWARD_MAX_RESP_LEN}'" \
+    "+ray_kwargs.ray_init.runtime_env.env_vars.LOGPROB_FIXTURE_DIR='${LOGPROB_FIXTURE_DIR:-}'" \
+    "+ray_kwargs.ray_init.runtime_env.env_vars.LOGPROB_FIXTURE_STEP='${LOGPROB_FIXTURE_STEP:-1}'" \
     ${RAY_NUM_GPUS_ARG} \
     "$@" &
 DRIVER_PID=$!
