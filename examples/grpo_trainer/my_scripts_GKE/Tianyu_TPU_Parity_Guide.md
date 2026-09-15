@@ -175,6 +175,7 @@ echo "fault-injection exit=$test_rc"
 | `model/Qwen3-0.6B/`、`model/SHA256` | 同一份初始权重和配置 |
 | `model/Qwen3-0.6B/generation_config.json`、`tokenizer_config.json` 及 `runs/<GPU_EXP>/` 的实际引擎配置/日志 | 核对 token ID 映射、最终生效的 stop 集合和 EOS 处理，不只看模型默认值 |
 | `fixtures/stop_token_evidence.txt` | 固定 batch 的末 token 统计、seed1 的 `ignore_eos` 及交付模型 EOS 配置 |
+| `fixtures/logprobs_mode_evidence.txt` | 四个 GPU job 的模式记录，以及部署源码、参数继承、vLLM 默认值和共用 rollout manager 的证据 |
 | `data/gsm8k_test.parquet` | 完整 GSM8K test，1,319 题 |
 | `data/val_1k_qsplit.parquet` | OMI2 held-out evaluation，1,000 题 |
 | `code/maxtext_math_reward.py` | 第二步已验证的 scorer |
@@ -210,7 +211,19 @@ echo "fault-injection exit=$test_rc"
 
 **已核实的范围已覆盖交付模型、三个参考 run、fixture job 和上述 greedy eval 参数。** 两个 EOS ID 为 `[151645,151643]`，四个 job 均不忽略 EOS；固定 batch 的短回答以这两个 ID 结束，全部 588 条达到 cap 的回答末 token 均不是 EOS，因此本 batch 未观察到 cap 位置追加或替换为 EOS 的行为。保留通用边界规则：其他 batch 仍可能恰好在第 8192 位生成 EOS。
 
-`val_kwargs` 证明评估参数，不单独证明训练与评估使用同一个物理引擎实例；grep 未输出 `stop` 或 `min_tokens` 也不能证明不存在默认值或请求级覆盖。若要断言无额外 stop、无强制 EOS 及完整参数继承关系，应由部署源码或最终请求参数佐证。TPU 按上述明确的 EOS/长度约定实现并记录实际配置，不以“共用实例”作为额外硬性要求。此前 OSL 差异仍只作为排查线索，不能据此断定 stop 设置就是原因。
+**GPU 参数继承与额外 stop/processor 的静态检查已完成。** `fixtures/logprobs_mode_evidence.txt` 第 1–6 段记录以下五层证据，结合已交付的单轮 vLLM 调用路径核对：
+
+| 层次 | 检查结果 |
+| --- | --- |
+| 请求构造：`agent_loop.py:496–513` → 单轮 agent → `vllm_async_server.py:504–505` | 训练请求显式传入 rollout config 的 temperature/top_p/top_k、`repetition_penalty=1.0` 和 logprobs 设置；验证请求以 `val_kwargs` 覆盖 temperature/top_p/top_k，冻结值为 `0 / 1 / -1`。单轮路径未添加工具调用使用的额外 stop tokens |
+| Resolved config | 使用 `grep -E`，以命中的 temperature 0/1.0 为正对照；未发现 repetition/presence/frequency penalty、min_p、stop、stop_token_ids、min_tokens、logit_bias、bad_words 或用户配置的 override_generation_config 键。此项与其他层共同解释，不能单靠缺失字段推断最终默认值 |
+| 交付模型 `generation_config.json` | 模型文件中的 temperature/top_k/top_p 为 `0.6 / 20 / 0.95`，EOS 为 `[151645,151643]`；无 repetition_penalty 或强制 EOS 设置。模型文件的三个采样值被下述引擎 override 和请求显式参数覆盖 |
+| 引擎 override：`vllm_async_server.py:839–848` | `_get_override_generation_config()` 动态构造 temperature/top_k/top_p（取 rollout config）、`repetition_penalty=1.0`、`max_new_tokens=8192`，由引擎初始化代码传入 vLLM。Resolved config 没有同名键，不代表这个动态 override 不存在 |
+| 部署版本 `SamplingParams` 默认值 | vLLM `0.20.2rc1.dev49+g9b4e83934` 实测 repetition_penalty=1.0；presence_penalty/frequency_penalty/min_p/min_tokens=0；stop/stop_token_ids/bad_words=[]；logit_bias=None；ignore_eos=False。请求没有覆盖的这些惩罚或过滤参数为中性值；额外 stop 列表为空不取消模型的两个 EOS ID |
+
+据此，**已检查的冻结 GPU 单轮路径没有额外 stop、强制 EOS 设置或改变训练采样分布的额外惩罚/过滤操作**；停止仍遵循模型 EOS 与 response cap。该结论来自部署源码、配置及默认值的静态核对，并有固定 batch 的 EOS/cap 统计佐证。**本次未取得引擎级 override 的运行时打印；此项以部署源码与已记录的 resolved config 为据。**
+
+**训练与验证共用同一个 `async_rollout_manager` 已由部署源码确认：** `ray_trainer.py:1561` 为训练调用，`:648` 为验证调用；验证采样参数仍由 `val_kwargs` 覆盖。TPU 按上述明确的 EOS/长度约定实现并记录实际配置，不以“同一个物理引擎实例”作为额外硬性要求。此前 OSL 差异仍只作为排查线索，不能据此断定 stop 设置就是原因。
 
 **可选诊断：HF → MaxText → HF 往返转换。** 当 Step-0 存在无法解释的差异时，可在同一 vLLM-TPU 版本、同 dtype、同评估输入和协议下，分别评估原始 HF 权重及往返转换后的 HF 权重，保留逐题差异。先比较正确参数映射下的权重；如有需要，再比较固定 tokens 的 teacher-forced log-prob。
 
@@ -246,7 +259,7 @@ abs(acc_TPU − mean(acc_GPU_seed1, acc_GPU_seed2, acc_GPU_seed3)) <= 0.01
 | `fixtures/logprob_fixture.json` | 96 条固定序列，GPU 每 token `logp_trainer / logp_sampler / logp_trainer_repeat` 和统计值 |
 | `fixtures/raw/fixture_step1.npz`、`.json` | 完整 2,048 条 batch、完整 masks/positions，以及采集配置、模型哈希和环境 |
 | `fixtures/raw/fixture_seed1_official.log` | GPU fixture 采集过程和实际配置 |
-| `fixtures/logprobs_mode_evidence.txt` | 引擎默认值 `raw_logprobs` 与 seed1/2/3、fixture job 的运行配置记录；四者均为 `processed_logprobs` |
+| `fixtures/logprobs_mode_evidence.txt` | 引擎默认值 `raw_logprobs` 与 seed1/2/3、fixture job 的 processed 模式记录；另含 §5.2 的五层静态参数检查及共用 rollout manager 证据 |
 | `model/Qwen3-0.6B/`、`model/SHA256` | 同一初始模型 |
 | `data/train_order_seed1.parquet`、`data/step_manifest_seed1.json` | TPU 内部 rollout 检查使用的训练 step-1 prompts |
 
@@ -279,9 +292,9 @@ TPU 无需生成与 GPU 完全相同的随机回答。A 固定跨硬件输入；
 
 当前 vLLM `0.20.2rc1.dev49+g9b4e83934` 的 ModelConfig 默认虽为 `raw_logprobs`，实际 run 配置已显式选择 processed。0.0057 等历史基线和 96 条 fixture 的测量值继续保留，并注明 sampler 返回模式为 processed；不能以框架默认值改写这些记录。
 
-**等价条件：确认所有有效 processors，而不只确认 T/top-k/top-p。** T=1、top_p=1、top_k disabled，且所有 logits processors 均不改变分布时，raw 与 processed 在数学上对应相同概率；这不保证不同计算路径的数值逐位相同。核对 repetition/presence/frequency penalties、min-tokens EOS 屏蔽、logit bias、bad-words/allowed-token 限制及 grammar 等，保存最终生效配置和实际返回行为的验证记录。模式含义可参见 [vLLM ModelConfig 文档](https://docs.vllm.ai/en/latest/api/vllm/config/model/#vllm.config.model.ModelConfig.logprobs_mode)。
+**GPU 训练采样的概率语义已按 §5.2 的五层静态检查核实。** 在冻结的 `T=1, top_p=1, top_k=disabled` 设置下，已检查的 GPU 路径没有额外的惩罚或过滤操作改变分布；因此 processed log-prob 与 trainer 在相同权重和前缀下计算的全词表概率具有相同数学语义。**这不要求不同计算路径的数值逐位相同，也不把这个 raw/processed 等价结论直接套到 T=0 的 greedy eval。** GPU 的该项静态协议检查不再是待核实项，跨硬件误差仍按 §6.3 另行验收。
 
-模式一致已由上述日志确认；“没有任何有效 processor 改变分布”是另一项语义条件，不能仅由 `processed_logprobs`、T=1 或 grep 未命中其他字段推导。以最终配置和部署路径为依据核对该条件后，再据此解释 processed 与 trainer 原始全词表概率的对应关系。
+**TPU 提供同等范围的参数证据。** 核对请求构造、实际配置、模型 generation_config、引擎级默认/override 和返回的 log-prob 模式；确认 repetition/presence/frequency penalties、min-tokens EOS 屏蔽、logit bias、bad-words/allowed-token 限制及 grammar 等没有额外改变冻结训练分布。可以使用部署源码与 resolved config 的完整核对，或最终生效参数的记录；不强制使用与 GPU 相同的日志形式。模式含义可参见 [vLLM ModelConfig 文档](https://docs.vllm.ai/en/latest/api/vllm/config/model/#vllm.config.model.ModelConfig.logprobs_mode)。
 
 “完整词表归一化”描述概率的计算方式；只需保存实际生成 token 的 log-prob，无需导出每个位置的整个词表概率。
 
@@ -314,7 +327,7 @@ GPU 的 **96 条固定 fixture** 共 429,638 个有效 response tokens，trainer
 
 ### 6.3 通过标准
 
-先满足输入和执行条件：A 覆盖原 **96/96 条、429,638 个有效 response tokens**，无缺失或重复；B 为 **256 UID × 8 = 2,048 条**，sampler/trainer tokens、mask、checkpoint 和更新时点一致。核实 sampler 返回实际采样分布的 log-prob；在本 recipe 下，完整词表归一化且无有效 processor 改变分布，两边 processor 设置有对应证据。**GPU fixture 的 processed 模式已确认；TPU 的模式标签可为 raw 或 processed，按实际概率语义验收。** 所有有效 log-prob 和比较统计均为有限值，报告采用上述口径；TPU 返回模式或两边归一化/processor 语义未核实时，相关协议检查记录为 `INCOMPLETE`。
+先满足输入和执行条件：A 覆盖原 **96/96 条、429,638 个有效 response tokens**，无缺失或重复；B 为 **256 UID × 8 = 2,048 条**，sampler/trainer tokens、mask、checkpoint 和更新时点一致。核实 sampler 返回实际采样分布的 log-prob；在本 recipe 下，完整词表归一化且无额外有效 processor 改变训练分布。**GPU fixture 的 processed 模式及上述静态参数检查已确认；TPU 的模式标签可为 raw 或 processed，按实际概率语义验收。** TPU 提供自己的参数与返回模式证据；所有有效 log-prob 和比较统计均为有限值，报告采用上述口径。TPU 返回模式或归一化/processor 语义未核实时，相关协议检查记录为 `INCOMPLETE`。GPU 静态检查完成不代表 TPU 已通过数值验收。
 
 随后按事前冻结的数值预算验收：
 
@@ -445,7 +458,7 @@ relative_update_error = norm(Δθ_TPU − Δθ_GPU) / norm(Δθ_GPU)
 | Reward | Answer accuracy + overlong soft penalty；buffer 1024、penalty 1.0、cap 8192；fmt_w=0，保留 fmt 日志 |
 | 长度 | Prompt limit 8192，过滤超长 prompts；response cap 8192 |
 
-**训练 rollout 和 greedy eval 使用同一份明确记录的 EOS/stop 约定。** 交付模型 EOS IDs 为 `[151645,151643]`，三个参考 run 及 fixture job 均记录 `ignore_eos=False`，固定 batch 的末 token 和 cap 样本检查见 §5.2。任一有效生成的 EOS 即停；不因 cap 追加或强制替换 EOS；将最终生效集合写入 TPU resolved config。`response_len` 含有效 EOS、不含 prompt/padding。GPU 三个参考 run 及 fixture job 均记录为 processed（见 §6.2 B），不强制 TPU 使用 raw 标签；两边核对有效 processors，TPU 记录自己实际生效的模式及采样配置。
+**训练 rollout 和 greedy eval 使用同一份明确记录的 EOS/stop 约定。** 交付模型 EOS IDs 为 `[151645,151643]`，三个参考 run 及 fixture job 均记录 `ignore_eos=False`；固定 batch 的末 token/cap 检查，以及已完成的 GPU 参数继承和额外 stop 静态检查见 §5.2。任一有效生成的 EOS 即停；不因 cap 追加或强制替换 EOS；将最终生效集合写入 TPU resolved config。`response_len` 含有效 EOS、不含 prompt/padding。GPU 三个参考 run 及 fixture job 均记录为 processed，冻结训练采样的 raw/processed 数学等价条件已核实（见 §6.2 B）；不强制 TPU 使用 raw 标签，TPU 记录自己实际生效的模式及采样配置，并提供对应参数证据。
 
 GRPO advantage、ratio clipping、old-policy log-prob、loss mask 和全局 token-mean 分母沿用冻结 Rulebook 及已对齐实现。保留截断回答和零 advantage 组的有效 tokens；不能额外加 truncated-sample masking、重采样或训练目标。
 
