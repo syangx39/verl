@@ -1,39 +1,46 @@
 #!/usr/bin/env python3
-"""Meta `boxed_math` reward -- PROVISIONAL port for the GSM8K-boxed reproduction.
+"""Meta `boxed_math` reward + overlong penalty, ported from REPRODUCTION.md v1.0 (2026-09-18).
 
-STATUS: the extraction / normalization rules below are our reading of Meta's config and README notes
-("format_score: 0.1 -- partial credit for a well-formed \\boxed{} with a wrong value"; gold shipped
-verbatim incl. thousands separators, "the reward function's own normalization is what decides whether
-\\boxed{1080} matches gold 1,080"). They MUST be replaced by a verbatim port of Meta's boxed_math once
-they send the source, and validated on a shared completion fixture. Every rule that is a guess is
-marked GUESS.
-
-Score (Meta semantics, weight 1.0):
-    correct boxed answer                          -> 1.0
-    well-formed \\boxed{...} with a wrong value    -> format_score (0.1)      [GUESS: "well-formed" = non-empty box]
-    no \\boxed{}                                  -> 0.0
-  + overlong soft penalty (DAPO):  buffer 512 tokens, cap 2048, penalty 1.0
-        r += min(0, -(L - (2048-512)) / 512 * 1.0)   -- needs extra_info["response_len"] (fork patch)
+Scoring is a three-way EXCLUSIVE branch (a correct answer scores 1.0, not 1.1):
+    pred = last \\boxed{...} (rfind of the literal "\\boxed{", then forward brace matching; unbalanced -> None)
+    if pred is None or pred == "":      reward = 0.0      # no parseable box (truncation lands here)
+    elif normalize(pred) == gold_norm:  reward = 1.0      # score
+    else:                               reward = 0.1      # format_score
+    normalize(v) = v.strip().rstrip(".").replace(",", "").replace("$", "").strip()   -- deliberately minimal:
+        no decimal/integer equivalence (18.0 vs 18 -> 0.1), no \\text{} unwrapping, no LaTeX parsing.
+    gold: REPRODUCTION.md says the gold is NOT normalized, but its own fixture scores \\boxed{1080} vs gold "1,080"
+    as 1.0, which is only possible if the gold's thousands separator is also removed. We follow the FIXTURES
+    (gold gets the same minimal normalize) and have asked Meta to resolve the contradiction.  [PENDING]
+Overlong penalty (TRAINING ONLY -- Meta evaluates with the raw reward):
+    penalty = min(0, -(completion_len - (2048 - 512)) / 512 * 1.0)      # added to the reward; can go below -1 in fixtures
 verl interface: compute_score(data_source, solution_str, ground_truth, extra_info=None) -> dict
-Returned keys: score, acc, fmt(=boxed present), format_credit, length_penalty, overlong, qid.
-Knobs (env): REWARD_FORMAT_SCORE (0.1), REWARD_OVERLONG_BUFFER (512; 0=off), REWARD_OVERLONG_PENALTY (1.0),
-             REWARD_MAX_RESP_LEN (2048). No math_verify, no sympy -> deterministic, thread-safe, no timeouts.
+    score          training reward (raw + penalty) for sources listed in REWARD_PENALTY_SOURCES; raw reward otherwise (eval)
+    reward_raw     boxed_math reward without penalty (== Meta eval/mean_reward semantics)
+    acc            1 if reward_raw == 1.0 (Meta eval/accuracy semantics), fmt: 1 if a box was parsed
+    format_credit, length_penalty, overlong, qid
+Knobs (env): REWARD_FORMAT_SCORE 0.1, REWARD_OVERLONG_BUFFER 512 (0 = off), REWARD_OVERLONG_PENALTY 1.0,
+             REWARD_MAX_RESP_LEN 2048, REWARD_PENALTY_SOURCES "gsm8k_boxed_train" (comma list).
+Self-test: `python3 boxed_math_reward.py [--fixtures reference/reward_fixtures.json]` runs Meta's 15 reward + 6
+overlong fixtures (embedded copy by default); non-zero exit on any mismatch.
 """
+import json
 import os
-import re
+import sys
 
 _FORMAT_SCORE = float(os.environ.get("REWARD_FORMAT_SCORE", "0.1"))
+_SCORE = 1.0
 _OVERLONG_BUFFER = int(os.environ.get("REWARD_OVERLONG_BUFFER", "512"))
 _OVERLONG_PENALTY = float(os.environ.get("REWARD_OVERLONG_PENALTY", "1.0"))
 _MAX_RESP_LEN = int(os.environ.get("REWARD_MAX_RESP_LEN", "2048"))
+_PENALTY_SOURCES = {s.strip() for s in os.environ.get("REWARD_PENALTY_SOURCES", "gsm8k_boxed_train").split(",") if s.strip()}
 
 
-def last_boxed(text: str):
-  """Content of the LAST \\boxed{...} with balanced braces; None if absent.  [GUESS: last, not first]"""
-  idx = text.rfind("\\boxed{")                 # strict: the literal token \boxed{ (GUESS: no whitespace, no \boxed[...]{ } variants)
+def extract_boxed(text: str):
+  """Content of the LAST \\boxed{...}; None if absent or if the braces never balance (truncated)."""
+  idx = text.rfind("\\boxed{")
   if idx < 0:
     return None
-  i = idx + len("\\boxed")
+  i = idx + len("\\boxed")            # position of '{'
   depth = 0
   for j in range(i, len(text)):
     if text[j] == "{":
@@ -42,79 +49,96 @@ def last_boxed(text: str):
       depth -= 1
       if depth == 0:
         return text[i + 1:j]
-  return None                                   # unbalanced -> treat as not well-formed
+  return None
 
 
-def normalize(s: str) -> str:
-  """GUESS at Meta's normalization: strip, drop $ and thousands separators, \\text{} wrappers,
-  trailing period, surrounding whitespace; keep sign and decimal point."""
-  s = s.strip()
-  s = re.sub(r"\\text\{([^}]*)\}", r"\1", s)
-  s = s.replace("\\$", "").replace("$", "").replace(",", "").replace(" ", "")   # \$ (escaped) and bare $
-  s = s.rstrip(".")
-  s = re.sub(r"^\\?\((.*)\\?\)$", r"\1", s)
-  return s
+def normalize(v: str) -> str:
+  return v.strip().rstrip(".").replace(",", "").replace("$", "").strip()
 
 
-def numeric_equal(a: str, b: str) -> bool:
-  try:
-    return abs(float(a) - float(b)) < 1e-6
-  except ValueError:
-    return False
+def boxed_math(response: str, gold: str):
+  """Returns (reward, acc, fmt, format_credit)."""
+  pred = extract_boxed(response)
+  if pred is None or pred == "":
+    return 0.0, 0.0, 0.0, 0.0
+  if normalize(pred) == normalize(str(gold)):      # gold normalized per the fixtures (see docstring, PENDING)
+    return _SCORE, 1.0, 1.0, 0.0
+  return _FORMAT_SCORE, 0.0, 1.0, _FORMAT_SCORE
 
 
-def _overlong(extra_info):
+def overlong_penalty(completion_len: int) -> float:
   if _OVERLONG_BUFFER == 0:
-    return 0.0, 0.0
-  n = extra_info.get("response_len") if isinstance(extra_info, dict) else None
-  if n is None:
-    raise RuntimeError("REWARD_OVERLONG_BUFFER>0 but extra_info has no 'response_len' (apply patch_verl_reward_response_len.py)")
-  pen = min(0.0, -(float(n) - (_MAX_RESP_LEN - _OVERLONG_BUFFER)) / _OVERLONG_BUFFER * _OVERLONG_PENALTY)
-  return pen, (1.0 if pen < 0 else 0.0)
+    return 0.0
+  return min(0.0, -(float(completion_len) - (_MAX_RESP_LEN - _OVERLONG_BUFFER)) / _OVERLONG_BUFFER * _OVERLONG_PENALTY)
 
 
 def compute_score(data_source, solution_str, ground_truth, extra_info=None, **kwargs):
-  boxed = last_boxed(solution_str)
-  gold = str(ground_truth)
-  if boxed is None or boxed.strip() == "":
-    acc, credit, fmt = 0.0, 0.0, 0.0
-  else:
-    fmt = 1.0
-    ng, ga = normalize(boxed), normalize(gold)
-    acc = 1.0 if (ng == ga or numeric_equal(ng, ga)) else 0.0
-    credit = 0.0 if acc else _FORMAT_SCORE
-  pen, overlong = _overlong(extra_info)
+  reward, acc, fmt, credit = boxed_math(solution_str, ground_truth)
+  pen = 0.0
+  if data_source in _PENALTY_SOURCES and _OVERLONG_BUFFER > 0:
+    n = extra_info.get("response_len") if isinstance(extra_info, dict) else None
+    if n is None:
+      raise RuntimeError("overlong penalty enabled but extra_info has no 'response_len' (apply patch_verl_reward_response_len.py)")
+    pen = overlong_penalty(int(n))
   qid = float(extra_info.get("index", -1)) if isinstance(extra_info, dict) else -1.0
-  return {"score": acc + credit + pen, "acc": acc, "fmt": fmt, "format_credit": credit,
-          "length_penalty": pen, "overlong": overlong, "qid": qid}
+  return {"score": reward + pen, "reward_raw": reward, "acc": acc, "fmt": fmt, "format_credit": credit,
+          "length_penalty": pen, "overlong": 1.0 if pen < 0 else 0.0, "qid": qid}
+
+
+# ---- Meta's fixtures (reference/reward_fixtures.json, copied verbatim; --fixtures overrides with the file)
+META_FIXTURES = {
+    "reward_fixtures": [
+        {"case": "exact match", "response": "The answer is \\boxed{18}", "gold": "18", "reward": 1.0},
+        {"case": "gold has thousands separator", "response": "So \\boxed{1080}", "gold": "1,080", "reward": 1.0},
+        {"case": "prediction has separator", "response": "So \\boxed{1,080}", "gold": "1080", "reward": 1.0},
+        {"case": "dollar sign in prediction", "response": "\\boxed{$42}", "gold": "42", "reward": 1.0},
+        {"case": "trailing period", "response": "\\boxed{18.}", "gold": "18", "reward": 1.0},
+        {"case": "surrounding whitespace", "response": "\\boxed{  18  }", "gold": "18", "reward": 1.0},
+        {"case": "nested braces", "response": "\\boxed{\\frac{1}{2}}", "gold": "\\frac{1}{2}", "reward": 1.0},
+        {"case": "multiple boxed -> LAST wins", "response": "first \\boxed{7} then \\boxed{18}", "gold": "18", "reward": 1.0},
+        {"case": "multiple boxed, last is wrong", "response": "first \\boxed{18} then \\boxed{7}", "gold": "18", "reward": 0.1},
+        {"case": "well-formed but wrong value", "response": "\\boxed{17}", "gold": "18", "reward": 0.1},
+        {"case": "no boxed at all", "response": "The answer is 18.", "gold": "18", "reward": 0.0},
+        {"case": "TRUNCATED: unclosed brace", "response": "... so the answer is \\boxed{18", "gold": "18", "reward": 0.0},
+        {"case": "TRUNCATED: unclosed nested", "response": "\\boxed{\\frac{1}{2", "gold": "\\frac{1}{2}", "reward": 0.0},
+        {"case": "empty boxed", "response": "\\boxed{}", "gold": "18", "reward": 0.0},
+        {"case": "decimal vs integer gold", "response": "\\boxed{18.0}", "gold": "18", "reward": 0.1},
+    ],
+    "overlong_fixtures": [
+        {"completion_tokens": 100, "penalty": 0.0}, {"completion_tokens": 1536, "penalty": 0.0},
+        {"completion_tokens": 1537, "penalty": -0.001953}, {"completion_tokens": 1792, "penalty": -0.5},
+        {"completion_tokens": 2048, "penalty": -1.0}, {"completion_tokens": 2560, "penalty": -2.0},
+    ],
+}
+
+
+def run_fixtures(fx):
+  fails = []
+  for c in fx["reward_fixtures"]:
+    r, *_ = boxed_math(c["response"], c["gold"])
+    ok = abs(r - c["reward"]) < 1e-9
+    print(f"{'OK ' if ok else 'FAIL'} {c['case']:<36} -> {r} (expected {c['reward']})")
+    fails += [] if ok else [c["case"]]
+  for c in fx["overlong_fixtures"]:
+    p = overlong_penalty(c["completion_tokens"])
+    ok = abs(p - c["penalty"]) < 1e-5
+    print(f"{'OK ' if ok else 'FAIL'} overlong {c['completion_tokens']:>5} tokens -> {p:+.6f} (expected {c['penalty']:+})")
+    fails += [] if ok else [f"overlong {c['completion_tokens']}"]
+  # eval vs train semantics
+  tr = compute_score("gsm8k_boxed_train", "\\boxed{18}", "18", extra_info={"index": 0, "response_len": 2048})
+  ev = compute_score("gsm8k_boxed_test512", "\\boxed{18}", "18", extra_info={"index": 0, "response_len": 2048})
+  ok = tr["score"] == 0.0 and tr["reward_raw"] == 1.0 and ev["score"] == 1.0 and ev["length_penalty"] == 0.0 and ev["acc"] == 1.0
+  print(f"{'OK ' if ok else 'FAIL'} penalty applies to train source only: train score {tr['score']} (raw 1.0, pen -1.0); eval score {ev['score']} (no penalty)")
+  fails += [] if ok else ["penalty scope"]
+  return fails
 
 
 if __name__ == "__main__":
-  cases = [
-      ("... so the answer is \\boxed{72}.", "72", 1.0, 1.0, "exact"),
-      ("\\boxed{1080}", "1,080", 1.0, 1.0, "thousands separator in gold (GUESS: dropped)"),
-      ("\\boxed{1,080}", "1080", 1.0, 1.0, "thousands separator in answer"),
-      ("\\boxed{\\$18}", "18", 1.0, 1.0, "dollar sign"),
-      ("\\boxed{18.0}", "18", 1.0, 1.0, "numeric equality (GUESS)"),
-      ("\\boxed{7}", "72", 0.1, 0.0, "boxed but wrong -> format_score"),
-      ("the answer is 72", "72", 0.0, 0.0, "no box -> 0 even if correct"),
-      ("\\boxed{}", "72", 0.0, 0.0, "empty box -> not well-formed (GUESS)"),
-      ("\\boxed{5} ... \\boxed{72}", "72", 1.0, 1.0, "last box wins (GUESS)"),
-      ("\\boxed{\\text{72}}", "72", 1.0, 1.0, "\\text wrapper (GUESS)"),
-      ("\\boxedgarbage{72}", "72", 0.0, 0.0, "not the literal \\boxed{ -> no box"),
-      ("\\boxed {72}", "72", 0.0, 0.0, "space before brace -> no box (GUESS: strict)"),
-  ]
-  ok_all = True
-  for comp, gt, exp_score, exp_acc, note in cases:
-    o = compute_score("gsm8k", comp, gt, extra_info={"index": 0, "response_len": 100})
-    ok = abs(o["score"] - exp_score) < 1e-9 and o["acc"] == exp_acc
-    ok_all &= ok
-    print(f"{'OK ' if ok else 'FAIL'} {note}: score={o['score']} acc={o['acc']} fmt={o['fmt']}")
-  for n, exp in ((1536, 0.0), (1792, -0.5), (2048, -1.0)):
-    o = compute_score("gsm8k", "\\boxed{72}", "72", extra_info={"index": 0, "response_len": n})
-    ok = abs(o["length_penalty"] - exp) < 1e-9 and abs(o["score"] - (1.0 + exp)) < 1e-9
-    ok_all &= ok
-    print(f"{'OK ' if ok else 'FAIL'} length {n}: penalty={o['length_penalty']:+.2f} score={o['score']:+.2f}")
-  print("knobs:", dict(format_score=_FORMAT_SCORE, buffer=_OVERLONG_BUFFER, penalty=_OVERLONG_PENALTY, cap=_MAX_RESP_LEN))
-  print("RESULT:", "PASS" if ok_all else "FAIL", "-- PROVISIONAL rules; replace with Meta's verbatim boxed_math")
-  raise SystemExit(0 if ok_all else 1)
+  fx = META_FIXTURES
+  if len(sys.argv) > 2 and sys.argv[1] == "--fixtures":
+    fx = json.load(open(sys.argv[2]))
+    print(f"using fixtures from {sys.argv[2]}")
+  fails = run_fixtures(fx)
+  print("knobs:", dict(format_score=_FORMAT_SCORE, buffer=_OVERLONG_BUFFER, penalty=_OVERLONG_PENALTY, cap=_MAX_RESP_LEN, penalty_sources=sorted(_PENALTY_SOURCES)))
+  print("RESULT:", "PASS" if not fails else f"FAIL {fails}")
+  raise SystemExit(0 if not fails else 1)

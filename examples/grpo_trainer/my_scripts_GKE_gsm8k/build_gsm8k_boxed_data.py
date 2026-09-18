@@ -59,6 +59,8 @@ def main():
   ap.add_argument("--model_out", required=True, help="where to write the stop-set-patched copy")
   ap.add_argument("--n_eval", type=int, default=512)
   ap.add_argument("--overwrite", action="store_true", help="replace an existing --model_out")
+  ap.add_argument("--prompt_example", default=None,
+                  help="Meta's reference/prompt_example.json: row 0 of test.jsonl must render to exactly its token ids (99 for row 0)")
   args = ap.parse_args()
   os.makedirs(args.out, exist_ok=True)
 
@@ -124,6 +126,28 @@ def main():
              "rows": fx}, open(f"{args.out}/prompt_fixture.json", "w"), ensure_ascii=False, indent=1)
   print("fixture n_tokens:", [r["n_tokens"] for r in fx], "| head", fx[0]["token_ids"][:3], "tail", fx[0]["token_ids"][-3:])
   print("rendered example:\n" + fx[0]["rendered_text"][:400])
+
+  # ---- gate: Meta's rendered prompt for test row 0 must be reproduced token for token
+  if args.prompt_example:
+    import transformers
+    ref = json.load(open(args.prompt_example))
+    msgs = [dict(m) for m in dte.iloc[0]["prompt"]]
+    text = tok.apply_chat_template(msgs, add_generation_prompt=True, tokenize=False)
+    ids = tok(text, add_special_tokens=False)["input_ids"]
+    same_msgs = msgs == ref["messages"]
+    same_text = text == ref["rendered_prompt"]
+    same_ids = ids == ref["prompt_token_ids"]
+    print(f"prompt_example check (transformers {transformers.__version__}, Meta rendered with {ref.get('transformers_version_used_to_render')}): "
+          f"messages {'match' if same_msgs else 'DIFFER'} | rendered text {'match' if same_text else 'DIFFER'} | "
+          f"token ids {'match' if same_ids else 'DIFFER'} ({len(ids)} vs {len(ref['prompt_token_ids'])})")
+    if not same_ids:
+      k = next((i for i, (x, y) in enumerate(zip(ids, ref["prompt_token_ids"])) if x != y), min(len(ids), len(ref["prompt_token_ids"])))
+      print(f"  first divergence at position {k}: ours {ids[max(0,k-3):k+3]} vs meta {ref['prompt_token_ids'][max(0,k-3):k+3]}")
+      if not same_text:
+        import difflib
+        print("  text diff:\n" + "\n".join(difflib.unified_diff(ref["rendered_prompt"].splitlines(), text.splitlines(), "meta", "ours", lineterm="", n=1)))
+      raise SystemExit("prompt fixture mismatch -- fix the template/tokenizer before building anything else")
+    print(f"  stop set in the model copy: {gcfg['eos_token_id']} (Meta: 151645 stop + native EOS 151643 both terminate)")
 
   names = [f"gsm8k_boxed_train.parquet", f"gsm8k_boxed_test{args.n_eval}.parquet", "gsm8k_boxed_test.parquet", "prompt_fixture.json"]
   with open(f"{args.out}/MANIFEST.sha256", "w") as f:

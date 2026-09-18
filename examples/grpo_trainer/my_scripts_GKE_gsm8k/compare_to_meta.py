@@ -19,26 +19,30 @@ import matplotlib.pyplot as plt
 from tensorboard.backend.event_processing import event_accumulator as ea
 
 
-def read_csv(p):
+def read_csv(p, col):
+  """Meta's TensorBoard exports: one row per step, named metric columns (reward/accuracy, eval/accuracy, ...)."""
   pts = {}
   with open(p) as f:
-    for row in csv.DictReader(f):
-      k = "step" if "step" in row else ("Step" if "Step" in row else None)
-      v = "value" if "value" in row else ("Value" if "Value" in row else None)
-      if k and v:
-        pts[int(float(row[k]))] = float(row[v])
+    rd = csv.DictReader(f)
+    if col not in rd.fieldnames:
+      raise SystemExit(f"{p} has no column {col!r}; columns: {rd.fieldnames}")
+    for row in rd:
+      if row.get(col, "") != "":
+        pts[int(float(row["step"]))] = float(row[col])
+  if not pts:
+    raise SystemExit(f"{p}: column {col!r} has no values")
   return pts
 
 
-def ours_train_acc(rollout_dir, groups, group_size):
-  """Mean acc per COMPLETE step: groups x group_size rows, one uid per group, finite acc on every row."""
+def ours_rollout_stats(rollout_dir, groups, group_size):
+  """Per COMPLETE step: mean acc, mean raw reward, frac of groups with zero reward std."""
   out, skipped = {}, []
   for f in glob.glob(os.path.join(rollout_dir, "*.jsonl")):
     try:
       s = int(os.path.basename(f)[:-6])
     except ValueError:
       continue
-    n = a = 0; uids = {}; ok = True
+    n = a = rr = 0.0; by_uid = {}; ok = True
     try:
       for l in open(f):
         if not l.strip():
@@ -46,11 +50,13 @@ def ours_train_acc(rollout_dir, groups, group_size):
         r = json.loads(l)
         if "acc" not in r or "uid" not in r or not np.isfinite(float(r["acc"])):
           ok = False; break
-        n += 1; a += float(r["acc"]); uids[r["uid"]] = uids.get(r["uid"], 0) + 1
+        n += 1; a += float(r["acc"]); rr += float(r.get("reward_raw", r.get("score", 0.0)))
+        by_uid.setdefault(r["uid"], []).append(float(r.get("reward_raw", r.get("score", 0.0))))
     except (OSError, ValueError):
       ok = False
-    if ok and n == groups * group_size and len(uids) == groups and all(c == group_size for c in uids.values()):
-      out[s] = a / n
+    if ok and n == groups * group_size and len(by_uid) == groups and all(len(v) == group_size for v in by_uid.values()):
+      zero = sum(1 for v in by_uid.values() if max(v) == min(v)) / groups
+      out[s] = {"acc": a / n, "reward_raw": rr / n, "frac_zero_std": zero}
     else:
       skipped.append(s)
   if skipped:
@@ -61,21 +67,42 @@ def ours_train_acc(rollout_dir, groups, group_size):
 def main():
   ap = argparse.ArgumentParser()
   ap.add_argument("--tb", required=True); ap.add_argument("--rollout", required=True)
-  ap.add_argument("--meta_train", required=True); ap.add_argument("--meta_eval", default=None)
+  ap.add_argument("--meta_train", required=True, help="reference/train_metrics.csv"); ap.add_argument("--meta_eval", default=None, help="reference/eval_metrics.csv")
+  ap.add_argument("--meta_train_col", default="reward/accuracy"); ap.add_argument("--meta_eval_col", default="eval/accuracy")
   ap.add_argument("--eval_tag", default="val-core/gsm8k_boxed_test512/acc/mean@1")
   ap.add_argument("--out", required=True)
   ap.add_argument("--groups", type=int, default=128); ap.add_argument("--group_size", type=int, default=16)
   a = ap.parse_args()
   acc = ea.EventAccumulator(a.tb, size_guidance={ea.SCALARS: 0}); acc.Reload()
   tags = acc.Tags()["scalars"]
-  ours_tr = ours_train_acc(a.rollout, a.groups, a.group_size)
-  meta_tr = read_csv(a.meta_train)
-  if not ours_tr or not meta_tr:
-    raise SystemExit(f"no usable data: ours {len(ours_tr)} complete steps, meta {len(meta_tr)} points")
+  stats = ours_rollout_stats(a.rollout, a.groups, a.group_size)
+  ours_tr = {k: v["acc"] for k, v in stats.items()}
+  meta_tr = read_csv(a.meta_train, a.meta_train_col)
+  if not ours_tr:
+    raise SystemExit("no complete rollout steps on our side")
   if not set(ours_tr) & set(meta_tr):
-    raise SystemExit("no common training steps between ours and Meta's CSV -- check step numbering (1-based?)")
-  ours_ev = {e.step: e.value for e in acc.Scalars(a.eval_tag)} if a.eval_tag in tags else {}
-  meta_ev = read_csv(a.meta_eval) if a.meta_eval else {}
+    raise SystemExit("no common training steps between ours and Meta's CSV -- check step numbering (both 1-based)")
+  ev_tag = a.eval_tag if a.eval_tag in tags else (a.eval_tag.replace("@", "_") if a.eval_tag.replace("@", "_") in tags else None)  # some writers sanitize '@'
+  ours_ev = {e.step: e.value for e in acc.Scalars(ev_tag)} if ev_tag else {}
+  if not ours_ev:
+    print(f"!! eval tag {a.eval_tag!r} not found in {a.tb}; available val tags: {[t for t in tags if 'val-core' in t][:6]}")
+  meta_ev = read_csv(a.meta_eval, a.meta_eval_col) if a.meta_eval else {}
+  # secondary channels (printed, not gated): completion length, cap-hit ratio, zero-std groups
+  def tb(tag):
+    return {e.step: e.value for e in acc.Scalars(tag)} if tag in tags else {}
+  extras = [("completions/length_mean", tb("response_length/mean")),
+            ("completions/clipped_ratio", tb("response_length/clip_ratio")),
+            ("reward/frac_zero_std", {k: v["frac_zero_std"] for k, v in stats.items()}),
+            ("reward/mean", tb("critic/score/mean"))]
+  for col, ours in extras:
+    try:
+      m = read_csv(a.meta_train, col)
+    except SystemExit:
+      continue
+    kk = sorted(set(m) & set(ours))
+    if kk:
+      dd = np.array([ours[k] - m[k] for k in kk])
+      print(f"{col:<28} common {len(kk):>3} | ours-meta mean {dd.mean():+.4f} | first5 ours {np.mean([ours[k] for k in kk[:5]]):.3f} meta {np.mean([m[k] for k in kk[:5]]):.3f} | last5 ours {np.mean([ours[k] for k in kk[-5:]]):.3f} meta {np.mean([m[k] for k in kk[-5:]]):.3f}")
 
   fig, axes = plt.subplots(1, 2, figsize=(14, 5))
   ks = sorted(set(ours_tr) & set(meta_tr))

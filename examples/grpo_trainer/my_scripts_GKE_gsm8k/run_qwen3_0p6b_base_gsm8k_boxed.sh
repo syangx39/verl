@@ -39,8 +39,23 @@ lr_scheduler=cosine                  # lr_scheduler_type: cosine, decays to 0 at
 lr_warmup_steps=10                   # warmup_steps: 10
 TOTAL_STEPS=${TOTAL_STEPS:-250}      # max_steps: 250
 clip_ratio_low=0.2
-clip_ratio_high=0.28                 # inert at ppo_epochs=1
+clip_ratio_high=0.28                 # inert: Meta sets old=new.detach() so the PPO ratio is identically 1 (REPRODUCTION.md §3)
+clip_ratio_c=5.0                     # clip_ratio_dual 5.0 (Meta default; also inert at ratio 1, but recorded)
 kl_loss_coef=0.0                     # kl_coeff 0.0: no KL, no reference model
+# Token-level importance-sampling correction (REPRODUCTION.md §4): w = min(exp(clamp(logp_actor - logp_rollout, ±20)), 3.0),
+# multiplies the (inert) clipped policy loss, no batch renormalization, no lower truncation, no rejection.
+# verl mapping: rollout correction in TIS mode with threshold 3.0 and NO bypass -- old_log_probs stay the trainer's
+# own recompute (ratio == 1 exactly, clip inert) and the TIS weight is exp(old_trainer - rollout) truncated at 3.0,
+# detached. Gradient = -adv * w * grad(log pi), the same as Meta's IF Meta's w is detached (asked, PENDING).
+# The +-20 log-ratio clamp is an overflow guard that never activated in Meta's logs; verl has no equivalent knob.
+IS_THRESHOLD=${IS_THRESHOLD:-3.0}
+IS_ARGS=( "algorithm.rollout_correction.rollout_is=token"                 # per-token IS (TIS), verl v0.8 rollout_correction.yaml
+          "algorithm.rollout_correction.rollout_is_threshold=${IS_THRESHOLD}"   # upper truncation only
+          "algorithm.rollout_correction.rollout_rs=null"                    # no rejection sampling
+          "algorithm.rollout_correction.rollout_is_batch_normalize=False"   # raw weights
+          "algorithm.rollout_correction.bypass_mode=False" )                # decoupled: rollout / old(trainer) / current
+# the resolved-config pre-flight below aborts if the fork spells these keys differently
+export REWARD_PENALTY_SOURCES=${META_PENALTY_SOURCES:-gsm8k_boxed_train}   # overlong penalty is TRAINING-only (Meta evaluates the raw reward)
 temperature=1.0                      # generator.temperature
 grad_clip=1.0                        # max_grad_norm
 TEST_FREQ=${TEST_FREQ:-20}           # eval_steps: 20
@@ -91,27 +106,27 @@ if [ "${REWARD_OVERLONG_BUFFER}" != "0" ]; then
   RM=$(python3 -c "import verl.experimental.reward_loop.reward_manager.naive as m; print(m.__file__)" 2>/dev/null | tail -1)
   grep -q "_RESP_LEN" "${RM}" || { echo "[meta] ABORT: ${RM} lacks the response_len patch (patch_verl_reward_response_len.py)"; exit 2; }
 fi
-python3 - "${REWARD_FN_PATH}" <<'PYEOF'
-import importlib.util, os, sys, threading
-spec = importlib.util.spec_from_file_location("r", sys.argv[1]); r = importlib.util.module_from_spec(spec); spec.loader.exec_module(r)
-fs = float(os.environ.get("REWARD_FORMAT_SCORE", "0.1")); pen = float(os.environ.get("REWARD_OVERLONG_PENALTY", "1.0")); mx = int(os.environ.get("REWARD_MAX_RESP_LEN", "2048"))
-buf = int(os.environ.get("REWARD_OVERLONG_BUFFER", "512"))
-res = {}
-t = threading.Thread(target=lambda: res.__setitem__("o", [r.compute_score("x", c, g, extra_info={"index": 0, "response_len": n}) for c, g, n in
-      (("\\boxed{72}", "72", 100), ("\\boxed{7}", "72", 100), ("the answer is 72", "72", 100),
-       ("\\boxed{72}", "72", mx - buf), ("\\boxed{72}", "72", mx - buf // 2), ("\\boxed{72}", "72", mx))]))
-t.start(); t.join(); o = res["o"]
-checks = [("correct boxed -> 1.0", o[0]["score"] == 1.0 and o[0]["acc"] == 1.0),
-          (f"boxed but wrong -> format_score {fs}", abs(o[1]["score"] - fs) < 1e-9 and o[1]["acc"] == 0.0),
-          ("no box -> 0", o[2]["score"] == 0.0 and o[2]["fmt"] == 0.0),
-          (f"length {mx - buf} -> penalty 0", o[3]["length_penalty"] == 0.0 and o[3]["score"] == 1.0),
-          (f"length {mx - buf // 2} -> penalty -{pen / 2}", abs(o[4]["length_penalty"] + pen / 2) < 1e-9),
-          (f"length {mx} -> penalty -{pen}", abs(o[5]["length_penalty"] + pen) < 1e-9 and abs(o[5]["score"] - (1.0 - pen)) < 1e-9),
-          (f"buffer is {buf} (Meta: 512)", buf == 512)]
-bad = [n for n, ok in checks if not ok]
-print("[meta] reward pre-flight:", "OK " + ", ".join(n for n, _ in checks) if not bad else "FAILED " + str(bad))
-sys.exit(1 if bad else 0)
-PYEOF
+python3 "${REWARD_FN_PATH}" > "${LOG_DIR}/reward_fixtures_check.log" 2>&1 \
+  || { echo "[meta] ABORT: reward failed Meta's fixtures:"; grep -E "FAIL|RESULT" "${LOG_DIR}/reward_fixtures_check.log"; exit 2; }
+grep -q "buffer': 512" "${LOG_DIR}/reward_fixtures_check.log" || { echo "[meta] ABORT: overlong buffer is not 512 (env leak?)"; grep knobs "${LOG_DIR}/reward_fixtures_check.log"; exit 2; }
+echo "[meta] reward pre-flight: $(grep RESULT "${LOG_DIR}/reward_fixtures_check.log") (Meta's 15 reward + 6 overlong fixtures, penalty train-only)"
+
+########################### resolved-config pre-flight (hydra --cfg job; no Ray, no GPU) ############
+CFG_LOG=${LOG_DIR}/${EXPERIMENT_NAME}/resolved_config_preflight.txt; mkdir -p "$(dirname "${CFG_LOG}")"
+python3 -m verl.trainer.main_ppo --cfg job \
+    algorithm.adv_estimator=grpo data.train_files="['${TRAIN_FILE}']" data.val_files="${VAL_FILES}" \
+    actor_rollout_ref.model.path="${MODEL_PATH}" actor_rollout_ref.actor.strategy=fsdp \
+    actor_rollout_ref.actor.loss_agg_mode=${loss_agg_mode} actor_rollout_ref.actor.clip_ratio_c=${clip_ratio_c} \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=${micro_bsz_per_gpu} actor_rollout_ref.actor.use_dynamic_bsz=False \
+    actor_rollout_ref.actor.optim.weight_decay=${weight_decay} actor_rollout_ref.actor.optim.lr_scheduler_type=${lr_scheduler} \
+    actor_rollout_ref.rollout.n=${rollout_n} actor_rollout_ref.rollout.calculate_log_probs=True "${IS_ARGS[@]}" "$@" > "${CFG_LOG}" 2>&1 \
+  || { echo "[meta] ABORT: hydra rejected the config (unknown key?). Last lines:"; tail -15 "${CFG_LOG}"; echo "check the rollout-correction key names: grep -rn rollout_correction \$(python3 -c 'import verl,os;print(os.path.dirname(verl.__file__))')/trainer/config"; exit 2; }
+for pat in "rollout_is: token" "rollout_is_threshold: ${IS_THRESHOLD}" "rollout_rs: null" "rollout_is_batch_normalize: false" "bypass_mode: false" \
+           "clip_ratio_c: ${clip_ratio_c}" "loss_agg_mode: ${loss_agg_mode}" "use_dynamic_bsz: false" "ppo_micro_batch_size_per_gpu: ${micro_bsz_per_gpu}" \
+           "weight_decay: ${weight_decay}" "lr_scheduler_type: ${lr_scheduler}" "calculate_log_probs: true" "n: ${rollout_n}"; do
+  grep -qi -- "${pat}" "${CFG_LOG}" || { echo "[meta] ABORT: resolved config lacks '${pat}' -- see ${CFG_LOG}"; exit 2; }
+done
+echo "[meta] resolved-config pre-flight OK: token-IS threshold ${IS_THRESHOLD}, no bypass, dual clip ${clip_ratio_c}, ${loss_agg_mode}, micro ${micro_bsz_per_gpu}/GPU fixed, wd ${weight_decay}, ${lr_scheduler}"
 
 ########################### TB mirror + signal handling + guard ###########################
 ( while true; do sleep 300; cp -r "${TB_DIR}/." "${TB_MIRROR}/" 2>/dev/null || true; done ) &
@@ -133,7 +148,7 @@ on_exit() {
 }
 trap on_exit EXIT
 
-echo "[recipe] model=Qwen3-0.6B-Base lr=${actor_lr} sched=${lr_scheduler} warmup=${lr_warmup_steps} steps=${TOTAL_STEPS} batch=${train_batch_size}x${rollout_n} mini=${ppo_mini_batch_size} (mu=1) micro/gpu=${micro_bsz_per_gpu} dyn_bsz=False clip=${clip_ratio_low}/${clip_ratio_high} kl=${kl_loss_coef} T=${temperature} top_p=${top_p} top_k=${top_k} prompt=${max_prompt_length} cap=${max_response_length} fmt_score=${REWARD_FORMAT_SCORE} overlong=${REWARD_OVERLONG_BUFFER}/${REWARD_OVERLONG_PENALTY} wd=${weight_decay} loss_agg=${loss_agg_mode} stop=[151645,151643] fp32-master eval=test512@${TEST_FREQ}"
+echo "[recipe] model=Qwen3-0.6B-Base IS=token/${IS_THRESHOLD}(no-bypass,no-norm,no-rs) dual_clip=${clip_ratio_c} eps=1e-8 fused=False lr=${actor_lr} sched=${lr_scheduler} warmup=${lr_warmup_steps} steps=${TOTAL_STEPS} batch=${train_batch_size}x${rollout_n} mini=${ppo_mini_batch_size} (mu=1) micro/gpu=${micro_bsz_per_gpu} dyn_bsz=False clip=${clip_ratio_low}/${clip_ratio_high} kl=${kl_loss_coef} T=${temperature} top_p=${top_p} top_k=${top_k} prompt=${max_prompt_length} cap=${max_response_length} fmt_score=${REWARD_FORMAT_SCORE} overlong=${REWARD_OVERLONG_BUFFER}/${REWARD_OVERLONG_PENALTY} wd=${weight_decay} loss_agg=${loss_agg_mode} stop=[151645,151643] fp32-master eval=test512@${TEST_FREQ}"
 echo "[meta] tensorboard -> ${TB_DIR}"; echo "[meta] tb mirror -> ${TB_MIRROR}"
 
 ########################### launch ####################################################
@@ -171,6 +186,8 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.kl_loss_coef=${kl_loss_coef} \
     actor_rollout_ref.actor.clip_ratio_low=${clip_ratio_low} \
     actor_rollout_ref.actor.clip_ratio_high=${clip_ratio_high} \
+    actor_rollout_ref.actor.clip_ratio_c=${clip_ratio_c} \
+    "${IS_ARGS[@]}" \
     actor_rollout_ref.actor.entropy_coeff=0 \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
@@ -217,6 +234,7 @@ python3 -m verl.trainer.main_ppo \
     "+ray_kwargs.ray_init.runtime_env.env_vars.REWARD_OVERLONG_BUFFER='${REWARD_OVERLONG_BUFFER}'" \
     "+ray_kwargs.ray_init.runtime_env.env_vars.REWARD_OVERLONG_PENALTY='${REWARD_OVERLONG_PENALTY}'" \
     "+ray_kwargs.ray_init.runtime_env.env_vars.REWARD_MAX_RESP_LEN='${REWARD_MAX_RESP_LEN}'" \
+    "+ray_kwargs.ray_init.runtime_env.env_vars.REWARD_PENALTY_SOURCES='${REWARD_PENALTY_SOURCES}'" \
     "+ray_kwargs.ray_init.runtime_env.env_vars.LOGPROB_FIXTURE_DIR='${LOGPROB_FIXTURE_DIR:-}'" \
     "+ray_kwargs.ray_init.runtime_env.env_vars.LOGPROB_FIXTURE_STEP='${LOGPROB_FIXTURE_STEP:-1}'" \
     "$@" &
