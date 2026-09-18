@@ -35,7 +35,8 @@ def read_csv(p, col):
 
 
 def ours_rollout_stats(rollout_dir, groups, group_size):
-  """Per COMPLETE step: mean acc, mean raw reward, frac of groups with zero reward std."""
+  """Per COMPLETE step: mean acc, mean raw reward, and the fraction of groups whose TRAINING rewards (score =
+  raw + overlong penalty, the quantity advantages are computed from) are all identical -- Meta's reward/frac_zero_std."""
   out, skipped = {}, []
   for f in glob.glob(os.path.join(rollout_dir, "*.jsonl")):
     try:
@@ -51,7 +52,7 @@ def ours_rollout_stats(rollout_dir, groups, group_size):
         if "acc" not in r or "uid" not in r or not np.isfinite(float(r["acc"])):
           ok = False; break
         n += 1; a += float(r["acc"]); rr += float(r.get("reward_raw", r.get("score", 0.0)))
-        by_uid.setdefault(r["uid"], []).append(float(r.get("reward_raw", r.get("score", 0.0))))
+        by_uid.setdefault(r["uid"], []).append(float(r["score"]))      # TRAINING reward (raw + overlong penalty) -> what advantages see
     except (OSError, ValueError):
       ok = False
     if ok and n == groups * group_size and len(by_uid) == groups and all(len(v) == group_size for v in by_uid.values()):

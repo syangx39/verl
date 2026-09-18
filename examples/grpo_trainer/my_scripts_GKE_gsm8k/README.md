@@ -28,7 +28,7 @@ trainer) on verl, match its curves, then hand the frozen recipe to the TPU side.
 | loss_agg "token" (global token mean) | `loss_agg_mode=token-mean` | §2 |
 | clip 0.2/0.28, dual clip 5.0 -- all inert (ratio == 1 by construction) | `clip_ratio_low=0.2 clip_ratio_high=0.28 clip_ratio_c=5.0` | §3 |
 | old_log_probs = new.detach() (no separate pass) | verl recomputes old with the trainer (separate no-grad pass); ratio == 1 exactly (measured repeat error 0). Same gradient; extra time to account for in perf | §3 |
-| token-level IS: w = min(exp(clamp(logp_actor - logp_rollout, ±20)), 3.0), no renorm, no RS | `rollout_correction.rollout_is=token rollout_is_threshold=3.0 rollout_rs=null rollout_is_batch_normalize=False bypass_mode=False` (weight = exp(old_trainer - rollout), truncated, detached). ±20 guard has no verl knob (never active in Meta's logs) | §4; **PENDING: is Meta's w detached?** |
+| token-level IS: w = min(exp(clamp(logp_actor - logp_rollout, ±20)), 3.0), no renorm, no RS | `rollout_correction.rollout_is=token rollout_is_threshold=3.0 rollout_rs=null rollout_is_batch_normalize=False bypass_mode=False` (weight = exp(clamp(old_trainer - rollout, ±20)) truncated at 3.0, detached; verl's backend has the same ±20 guard) | §4; **PENDING: is Meta's w detached?** |
 | kl_coeff 0, no reference model | `use_kl_loss=False` | yaml |
 | temperature 1.0; top_p / top_k / seed UNSET (backend = vLLM defaults) | `temperature=1.0 top_p=1.0 top_k=-1` (vLLM defaults, same backend) | §2 gap 3 |
 | eval: rows 0-511 of test.jsonl (head), greedy, n=1, 2048 tokens, every 20 steps, raw reward (no overlong penalty) | test512 parquet (head), `val_kwargs` greedy n=1, `test_freq=20`; reward applies the penalty only to `gsm8k_boxed_train` | §5 |
@@ -57,7 +57,10 @@ SEED=1 bash run_qwen3_0p6b_base_gsm8k_boxed.sh 2>&1 | tee $LOG_DIR/meta_boxed_se
 python3 compare_to_meta.py --tb $TB_DIR --rollout $ROLLOUT_DUMP_DIR --meta_train $META/reference/train_metrics.csv --meta_eval $META/reference/eval_metrics.csv --out cmp.png
 ```
 The launcher runs three pre-flights before touching the GPUs: Meta's reward fixtures, the collapse guard config (128x16), and a
-hydra `--cfg job` render of the resolved config that must contain the IS / dual-clip / micro-batch / wd / schedule values above.
+hydra `--cfg job` render of the **full launch argument list** (`TRAIN_ARGS`, the same array the launch uses) written to
+`resolved_config_preflight.txt`; it must contain the IS / dual-clip / micro-batch / wd / LR / warmup / batch / steps / length values above.
+`compare_to_meta.py` computes `frac_zero_std` from the training reward (`score` = raw + penalty, what advantages see), and reports the
+raw-reward mean separately.
 Analysis tools take the batch shape: `plot_phase0.py --groups 128 --group_size 16 --cap 2048`, `collapse_guard.py --groups 128 --group_size 16`,
 `band_plot.py --steps 0:240:20,250 --metrics 'val-core/gsm8k_boxed_test512/acc/mean@1=GSM8K test512 acc (greedy)'`,
 `paired_eval_bootstrap.py --key qid --sources gsm8k_boxed_test512=... gsm8k_boxed_test=...` (no pooled row across overlapping sets).

@@ -210,6 +210,7 @@ def main():
   ap.add_argument("--rollout", default=None)
   ap.add_argument("--groups", type=int, default=256, help="prompts per step")
   ap.add_argument("--group_size", type=int, default=8, help="completions per prompt")
+  ap.add_argument("--cap", type=int, default=8192, help="response cap, for labels only")
   ap.add_argument("--allow_no_uid", action="store_true",
                   help="permit grouping by qid/input for dumps written before the uid patch (pilot runs only)")
   ap.add_argument("--out", default="phase0.png")
@@ -322,7 +323,7 @@ def main():
   st2, v2 = tb_get(tb, "response_length/clip_ratio")
   if len(st2):
     ax2 = ax.twinx()
-    ax2.plot(st2, v2, color="#e6550d", lw=1.5, label="clip_ratio (hit 8192 cap)")
+    ax2.plot(st2, v2, color="#e6550d", lw=1.5, label=f"clip_ratio (hit {args.cap} cap)")
     ax2.set_ylim(0, 1)
     ax2.set_ylabel("cap-hit fraction")
     ax2.legend(loc="upper right", fontsize=8)
