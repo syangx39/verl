@@ -201,14 +201,22 @@ TRAIN_ARGS=(
 
 ########################### resolved-config pre-flight (hydra --cfg job; no Ray, no GPU) ############
 CFG_LOG=${LOG_DIR}/${EXPERIMENT_NAME}/resolved_config_preflight.yaml; mkdir -p "$(dirname "${CFG_LOG}")"
-python3 -m verl.trainer.main_ppo --cfg job "${TRAIN_ARGS[@]}" "$@" > "${CFG_LOG}" 2>&1 \
-  || { echo "[meta] ABORT: hydra rejected the config (unknown key?). Last lines:"; tail -15 "${CFG_LOG}"; echo "check the rollout-correction key names: grep -rn rollout_correction \$(python3 -c 'import verl,os;print(os.path.dirname(verl.__file__))')/trainer/config"; exit 2; }
-python3 - "${CFG_LOG}" <<PYEOF
+CFG_ERR=${CFG_LOG%.yaml}.stderr.log
+python3 -m verl.trainer.main_ppo --cfg job "${TRAIN_ARGS[@]}" "$@" > "${CFG_LOG}" 2> "${CFG_ERR}" \
+  || { echo "[meta] ABORT: hydra rejected the config (unknown key?)."; echo "--- stdout (${CFG_LOG}) tail:"; tail -15 "${CFG_LOG}"; echo "--- stderr (${CFG_ERR}) tail:"; tail -30 "${CFG_ERR}";
+       echo "check the rollout-correction key names: grep -rn rollout_correction \$(python3 -c 'import verl,os;print(os.path.dirname(verl.__file__))')/trainer/config"; exit 2; }
+python3 - "${CFG_LOG}" "${CFG_ERR}" <<PYEOF
 import sys, yaml
 from omegaconf import OmegaConf
 txt = open(sys.argv[1]).read()
 txt = txt[txt.index("\n") + 1:] if txt.startswith("#") else txt          # hydra may prefix a comment line
-cfg = OmegaConf.create(yaml.safe_load(txt))
+try:
+    cfg = OmegaConf.create(yaml.safe_load(txt))
+except Exception as e:  # noqa: BLE001
+    print(f"[meta] ABORT: could not parse the rendered config as YAML ({type(e).__name__}: {e})")
+    print(f"--- {sys.argv[1]} head:"); print("".join(open(sys.argv[1]).readlines()[:20]))
+    print(f"--- {sys.argv[2]} tail:"); print("".join(open(sys.argv[2]).readlines()[-30:]))
+    sys.exit(1)
 expect = {
   "algorithm.rollout_correction.rollout_is": "token", "algorithm.rollout_correction.rollout_is_threshold": ${IS_THRESHOLD},
   "algorithm.rollout_correction.rollout_rs": None, "algorithm.rollout_correction.rollout_is_batch_normalize": False,
@@ -245,7 +253,9 @@ for key, want in expect.items():
     if not ok:
         bad.append(f"{key}: got {got!r}, want {want!r}")
 if bad:
-    print("[meta] ABORT: resolved config mismatch:\n  " + "\n  ".join(bad)); sys.exit(1)
+    print("[meta] ABORT: resolved config mismatch:\n  " + "\n  ".join(bad))
+    print(f"--- {sys.argv[2]} tail:"); print("".join(open(sys.argv[2]).readlines()[-15:]))
+    sys.exit(1)
 print(f"[meta] resolved-config pre-flight OK: {len(expect)} fields verified numerically from {sys.argv[1]}")
 PYEOF
 
