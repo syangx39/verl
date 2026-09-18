@@ -57,6 +57,7 @@ def main():
   ap.add_argument("--model_in", required=True, help="HF Qwen/Qwen3-0.6B-Base local dir")
   ap.add_argument("--model_out", required=True, help="where to write the stop-set-patched copy")
   ap.add_argument("--n_eval", type=int, default=512)
+  ap.add_argument("--overwrite", action="store_true", help="replace an existing --model_out")
   args = ap.parse_args()
   os.makedirs(args.out, exist_ok=True)
 
@@ -85,10 +86,17 @@ def main():
   dte512.to_parquet(f"{args.out}/gsm8k_boxed_test{args.n_eval}.parquet", index=False)
   dte.to_parquet(f"{args.out}/gsm8k_boxed_test.parquet", index=False)
 
-  # ---- model copy with the frozen stop set
-  if os.path.exists(args.model_out):
-    shutil.rmtree(args.model_out)
-  shutil.copytree(args.model_in, args.model_out)
+  # ---- model copy with the frozen stop set (guarded: never touch the source checkpoint)
+  src, dst = os.path.realpath(args.model_in), os.path.realpath(args.model_out)
+  if src == dst or dst.startswith(src + os.sep) or src.startswith(dst + os.sep):
+    raise SystemExit(f"refusing: --model_out {dst} must not equal, contain or be inside --model_in {src}")
+  if not os.path.exists(os.path.join(src, "model.safetensors")):
+    raise SystemExit(f"--model_in {src} has no model.safetensors")
+  if os.path.exists(dst):
+    if not args.overwrite:
+      raise SystemExit(f"--model_out {dst} exists; pass --overwrite to replace it")
+    shutil.rmtree(dst)
+  shutil.copytree(src, dst)
   gpath = os.path.join(args.model_out, "generation_config.json")
   gcfg = json.load(open(gpath)) if os.path.exists(gpath) else {}
   before = gcfg.get("eos_token_id")

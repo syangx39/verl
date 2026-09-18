@@ -15,8 +15,12 @@ set -x
 ########################### environment ##############################################
 : "${DATA_DIR:?set DATA_DIR to the dir produced by build_gsm8k_boxed_data.py --out}"
 : "${MODEL_PATH:?set MODEL_PATH to the stop-set-patched Qwen3-0.6B-Base copy (build_gsm8k_boxed_data.py --model_out)}"
-SCRIPTS_DIR=${SCRIPTS_DIR:-$(cd "$(dirname "$0")" && pwd)}
-REWARD_FN_PATH=${REWARD_FN_PATH:-$SCRIPTS_DIR/boxed_math_reward.py}
+# Isolation from the Track A environment: setup_env.sh exports SCRIPTS_DIR / REWARD_FN_PATH for the OLD
+# recipe and shells may carry REWARD_OVERLONG_BUFFER=1024 etc. This launcher ignores those and takes
+# its own directory and its own reward; overrides use META_* names only.
+SCRIPTS_DIR=$(cd "$(dirname "$0")" && pwd)
+REWARD_FN_PATH=${META_REWARD_FN:-$SCRIPTS_DIR/boxed_math_reward.py}
+for f in collapse_guard.py boxed_math_reward.py; do test -s "$SCRIPTS_DIR/$f" || { echo "[meta] ABORT: $SCRIPTS_DIR/$f missing"; exit 2; }; done
 LOG_DIR=${LOG_DIR:-/workspace/meta-RL/logs}
 CKPT_DIR=${CKPT_DIR:-/workspace/meta-RL/ckpt}
 TB_ROOT=${TB_ROOT:-/tmp/tb_local}                                     # node-local; NEVER a gcsfuse path
@@ -42,10 +46,11 @@ grad_clip=1.0                        # max_grad_norm
 TEST_FREQ=${TEST_FREQ:-20}           # eval_steps: 20
 SAVE_FREQ=${SAVE_FREQ:-50}           # save_steps: 50
 # reward: boxed_math weight 1.0, format_score 0.1; overlong_buffer 512 / penalty 1.0 on cap 2048
-export REWARD_FORMAT_SCORE=${REWARD_FORMAT_SCORE:-0.1}
-export REWARD_OVERLONG_BUFFER=${REWARD_OVERLONG_BUFFER:-512}
-export REWARD_OVERLONG_PENALTY=${REWARD_OVERLONG_PENALTY:-1.0}
+export REWARD_FORMAT_SCORE=${META_FORMAT_SCORE:-0.1}        # always set here -> inherited REWARD_* values cannot leak in
+export REWARD_OVERLONG_BUFFER=${META_OVERLONG_BUFFER:-512}
+export REWARD_OVERLONG_PENALTY=${META_OVERLONG_PENALTY:-1.0}
 export REWARD_MAX_RESP_LEN=2048
+unset REWARD_FMT_WEIGHT REWARD_MATH_VERIFY_MAX_CHARS REWARD_MV_PROCS REWARD_MV_TIMEOUT 2>/dev/null || true
 # stop set: Meta vllm_stop_token_ids=[151645] + tokenizer eos 151643 -> both are in MODEL_PATH/generation_config.json
 ########################### NOT specified by Meta -- confirm before freezing ###########
 top_p=${ROLLOUT_TOP_P:-1.0}          # GUESS: vLLM default (Base generation_config has none)
@@ -66,6 +71,7 @@ mkdir -p "${TB_DIR}" "${TB_MIRROR}" "${VAL_DUMP_DIR}" "${ROLLOUT_DUMP_DIR}"
 TRAIN_FILE=${TRAIN_FILE:-$DATA_DIR/gsm8k_boxed_train.parquet}
 VAL512=${VAL512:-$DATA_DIR/gsm8k_boxed_test512.parquet}       # Meta's eval set (first 512)
 VALFULL=${VALFULL:-$DATA_DIR/gsm8k_boxed_test.parquet}        # our full-set diagnostic
+if [ "${EVAL_FULL:-1}" = "1" ]; then VAL_FILES="['${VAL512}','${VALFULL}']"; else VAL_FILES="['${VAL512}']"; fi   # EVAL_FULL=0 for Meta-comparable timing (512-question eval only)
 for f in "${TRAIN_FILE}" "${VAL512}" "${VALFULL}" "${MODEL_PATH}/generation_config.json"; do
   test -s "$f" || { echo "[meta] ABORT: missing $f"; exit 2; }
 done
@@ -89,14 +95,19 @@ python3 - "${REWARD_FN_PATH}" <<'PYEOF'
 import importlib.util, os, sys, threading
 spec = importlib.util.spec_from_file_location("r", sys.argv[1]); r = importlib.util.module_from_spec(spec); spec.loader.exec_module(r)
 fs = float(os.environ.get("REWARD_FORMAT_SCORE", "0.1")); pen = float(os.environ.get("REWARD_OVERLONG_PENALTY", "1.0")); mx = int(os.environ.get("REWARD_MAX_RESP_LEN", "2048"))
+buf = int(os.environ.get("REWARD_OVERLONG_BUFFER", "512"))
 res = {}
 t = threading.Thread(target=lambda: res.__setitem__("o", [r.compute_score("x", c, g, extra_info={"index": 0, "response_len": n}) for c, g, n in
-      (("\\boxed{72}", "72", 100), ("\\boxed{7}", "72", 100), ("the answer is 72", "72", 100), ("\\boxed{72}", "72", mx))]))
+      (("\\boxed{72}", "72", 100), ("\\boxed{7}", "72", 100), ("the answer is 72", "72", 100),
+       ("\\boxed{72}", "72", mx - buf), ("\\boxed{72}", "72", mx - buf // 2), ("\\boxed{72}", "72", mx))]))
 t.start(); t.join(); o = res["o"]
 checks = [("correct boxed -> 1.0", o[0]["score"] == 1.0 and o[0]["acc"] == 1.0),
           (f"boxed but wrong -> format_score {fs}", abs(o[1]["score"] - fs) < 1e-9 and o[1]["acc"] == 0.0),
           ("no box -> 0", o[2]["score"] == 0.0 and o[2]["fmt"] == 0.0),
-          (f"correct at cap -> 1 - {pen}", abs(o[3]["score"] - (1.0 - pen)) < 1e-9 and abs(o[3]["length_penalty"] + pen) < 1e-9)]
+          (f"length {mx - buf} -> penalty 0", o[3]["length_penalty"] == 0.0 and o[3]["score"] == 1.0),
+          (f"length {mx - buf // 2} -> penalty -{pen / 2}", abs(o[4]["length_penalty"] + pen / 2) < 1e-9),
+          (f"length {mx} -> penalty -{pen}", abs(o[5]["length_penalty"] + pen) < 1e-9 and abs(o[5]["score"] - (1.0 - pen)) < 1e-9),
+          (f"buffer is {buf} (Meta: 512)", buf == 512)]
 bad = [n for n, ok in checks if not ok]
 print("[meta] reward pre-flight:", "OK " + ", ".join(n for n, _ in checks) if not bad else "FAILED " + str(bad))
 sys.exit(1 if bad else 0)
@@ -130,7 +141,7 @@ python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
     algorithm.use_kl_in_reward=False \
     data.train_files="['${TRAIN_FILE}']" \
-    data.val_files="['${VAL512}','${VALFULL}']" \
+    data.val_files="${VAL_FILES}" \
     data.train_batch_size=${train_batch_size} \
     data.max_prompt_length=${max_prompt_length} \
     data.max_response_length=${max_response_length} \
@@ -214,8 +225,12 @@ echo "[meta] driver pid ${DRIVER_PID}"
 GUARD_LOG=${LOG_DIR}/${EXPERIMENT_NAME}/collapse_guard.log; mkdir -p "$(dirname "${GUARD_LOG}")"
 if [ "${COLLAPSE_GUARD:-1}" = "1" ]; then
   # guard tuned for this recipe: 2048 samples/step, 128 groups x 16; warmup 20 (fast early rise)
-  python3 "${SCRIPTS_DIR}/collapse_guard.py" --tb "${TB_DIR}" --rollout "${ROLLOUT_DUMP_DIR}" --pid "${DRIVER_PID}" --poll 60 --warmup 20 > "${GUARD_LOG}" 2>&1 &
-  GUARD_PID=$!; echo "[meta] collapse guard pid ${GUARD_PID} -> ${GUARD_LOG}"
+  python3 "${SCRIPTS_DIR}/collapse_guard.py" --tb "${TB_DIR}" --rollout "${ROLLOUT_DUMP_DIR}" --pid "${DRIVER_PID}" \
+      --groups ${train_batch_size} --group_size ${rollout_n} --poll 60 --warmup 20 > "${GUARD_LOG}" 2>&1 &
+  GUARD_PID=$!; sleep 5
+  kill -0 "${GUARD_PID}" 2>/dev/null || { echo "[meta] ABORT: collapse guard died at start:"; cat "${GUARD_LOG}"; kill -TERM "${DRIVER_PID}" 2>/dev/null; exit 2; }
+  grep -q "expecting ${train_batch_size}x${rollout_n}" "${GUARD_LOG}" || { echo "[meta] ABORT: guard not configured for ${train_batch_size}x${rollout_n}"; kill -TERM "${DRIVER_PID}" 2>/dev/null; exit 2; }
+  echo "[meta] collapse guard pid ${GUARD_PID} (expecting ${train_batch_size}x${rollout_n} rows/step) -> ${GUARD_LOG}"
 fi
 set +e; wait "${DRIVER_PID}"; DRIVER_RC=$?
 while kill -0 "${DRIVER_PID}" 2>/dev/null; do wait "${DRIVER_PID}"; DRIVER_RC=$?; done

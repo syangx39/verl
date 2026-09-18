@@ -30,12 +30,10 @@ _MAX_RESP_LEN = int(os.environ.get("REWARD_MAX_RESP_LEN", "2048"))
 
 def last_boxed(text: str):
   """Content of the LAST \\boxed{...} with balanced braces; None if absent.  [GUESS: last, not first]"""
-  idx = text.rfind("\\boxed")
+  idx = text.rfind("\\boxed{")                 # strict: the literal token \boxed{ (GUESS: no whitespace, no \boxed[...]{ } variants)
   if idx < 0:
     return None
-  i = text.find("{", idx)
-  if i < 0:
-    return None
+  i = idx + len("\\boxed")
   depth = 0
   for j in range(i, len(text)):
     if text[j] == "{":
@@ -103,6 +101,8 @@ if __name__ == "__main__":
       ("\\boxed{}", "72", 0.0, 0.0, "empty box -> not well-formed (GUESS)"),
       ("\\boxed{5} ... \\boxed{72}", "72", 1.0, 1.0, "last box wins (GUESS)"),
       ("\\boxed{\\text{72}}", "72", 1.0, 1.0, "\\text wrapper (GUESS)"),
+      ("\\boxedgarbage{72}", "72", 0.0, 0.0, "not the literal \\boxed{ -> no box"),
+      ("\\boxed {72}", "72", 0.0, 0.0, "space before brace -> no box (GUESS: strict)"),
   ]
   ok_all = True
   for comp, gt, exp_score, exp_acc, note in cases:
@@ -117,3 +117,4 @@ if __name__ == "__main__":
     print(f"{'OK ' if ok else 'FAIL'} length {n}: penalty={o['length_penalty']:+.2f} score={o['score']:+.2f}")
   print("knobs:", dict(format_score=_FORMAT_SCORE, buffer=_OVERLONG_BUFFER, penalty=_OVERLONG_PENALTY, cap=_MAX_RESP_LEN))
   print("RESULT:", "PASS" if ok_all else "FAIL", "-- PROVISIONAL rules; replace with Meta's verbatim boxed_math")
+  raise SystemExit(0 if ok_all else 1)

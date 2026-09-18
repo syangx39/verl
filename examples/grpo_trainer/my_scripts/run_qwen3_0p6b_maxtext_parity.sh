@@ -1,171 +1,197 @@
 #!/usr/bin/env bash
-# =============================================================================
-# GRPO parity run: verl on GB200 (A4X), semantics frozen to the TPU MaxText run
-# =============================================================================
-# Forked from examples/grpo_trainer/run_qwen3_8b_fsdp.sh (verl upstream).
-# Source of truth for every algorithm-semantic value: the TPU team's MaxText
-# JobSet (rl-qwen3-21624). This script IS the executable form of the planning
-# doc's "Frozen Invariants" table (§3.1) — review by diffing against the
-# MaxText command line.
+# Meta GSM8K-boxed reproduction on verl -- Qwen3-0.6B-Base, GRPO, clip-higher, 8x GB200.
 #
-# Legend for annotations below:
-#   [MAXTEXT]  value copied from the MaxText script (frozen invariant)
-#   [GB200]    hardware adaptation inherited from upstream MACHINE=gb200 branch
-#   [SYS]      system-side choice, no algorithm-semantics impact (documented)
-#   [TODO]     pending confirmation (Tunix source / TPU team)
+# Source of truth: Meta's configs/qwen3-0p6b-base-boxed-cliphigh.yaml (reference run
+# qwen3-0p6b-base-boxed-cliphigh-0c2e52db). Every value in the FROZEN block below is copied from it;
+# the mapping to verl keys is in README.md. Items Meta did not specify (top_p/top_k, weight decay,
+# loss aggregation, chat-template thinking flag) are exposed as env knobs with our best-guess defaults
+# and MUST be confirmed with Meta before the reference band is frozen.
 #
-# Deltas vs upstream example (run_qwen3_8b_fsdp.sh), summary:
-#   1. Model: Qwen3-8B -> Qwen3-0.6B                       [MAXTEXT]
-#   2. Data: gsm8k+math -> OpenMathInstruct-2 (preprocessed) [MAXTEXT]
-#   3. batch 1024->480, mini_batch 256->480 (mu=1, on-policy) [MAXTEXT]
-#   4. lengths 1024/2048 -> 8192/8192                       [MAXTEXT]
-#   5. rollout_n 5->8, TP 2->1                              [MAXTEXT]
-#   6. KL coef 0.001->0.05                                  [MAXTEXT]
-#   7. sampling: verl defaults (1.0/1.0/-1) -> 0.8/0.95/50  [MAXTEXT]
-#      (upstream example never sets these — silent killer for parity)
-#   8. max_num_batched_tokens: verl default 8192 -> 32768   [MAXTEXT]
-#   9. prefix caching explicitly ON (MaxText hardcodes it)  [MAXTEXT]
-#  10. custom reward fn replacing built-in gsm8k routing     [MAXTEXT]
-#  11. epochs-driven loop -> step-driven (total_training_steps) [SYS]
-#  12. NPU branch, INFER_BACKEND switch, MACHINE switch removed —
-#      this script targets exactly one configuration          [SYS]
-#
-# NOT changed (verl defaults that already align, recorded for the doc):
-#   - hybrid_engine=True (default)  -> colocated sync loop, matches MaxText
-#   - clip_ratio=0.2 (default)      -> matches rl.grpo_epsilon=0.2, symmetric
-#   - norm_adv_by_std_in_grpo=True (default) -> matches Tunix GRPO advantage
-#   - actor lr=1e-6                 -> matches learning_rate=1e-6
-#   - entropy_coeff=0               -> MaxText has no entropy bonus
-#   - grad clip 1.0 (verl default clip_grad=1.0) -> matches
-#     gradient_clipping_threshold=1.0
-# =============================================================================
+# Infra blocks (node-local TensorBoard + mirror, idle check, fork-patch checks, signal handling,
+# collapse guard, recipe fingerprint) are the same as run_qwen3_0p6b_rl05_parity.sh v5.
+set -euo pipefail
+set -x
 
-set -xeuo pipefail
+########################### environment ##############################################
+: "${DATA_DIR:?set DATA_DIR to the dir produced by build_gsm8k_boxed_data.py --out}"
+: "${MODEL_PATH:?set MODEL_PATH to the stop-set-patched Qwen3-0.6B-Base copy (build_gsm8k_boxed_data.py --model_out)}"
+# Isolation from the Track A environment: setup_env.sh exports SCRIPTS_DIR / REWARD_FN_PATH for the OLD
+# recipe and shells may carry REWARD_OVERLONG_BUFFER=1024 etc. This launcher ignores those and takes
+# its own directory and its own reward; overrides use META_* names only.
+SCRIPTS_DIR=$(cd "$(dirname "$0")" && pwd)
+REWARD_FN_PATH=${META_REWARD_FN:-$SCRIPTS_DIR/boxed_math_reward.py}
+for f in collapse_guard.py boxed_math_reward.py; do test -s "$SCRIPTS_DIR/$f" || { echo "[meta] ABORT: $SCRIPTS_DIR/$f missing"; exit 2; }; done
+LOG_DIR=${LOG_DIR:-/workspace/meta-RL/logs}
+CKPT_DIR=${CKPT_DIR:-/workspace/meta-RL/ckpt}
+TB_ROOT=${TB_ROOT:-/tmp/tb_local}                                     # node-local; NEVER a gcsfuse path
+TB_MIRROR_ROOT=${TB_MIRROR_ROOT:-/workspace/meta-RL/.home/tensorboard_log}
+mkdir -p "${LOG_DIR}" "${CKPT_DIR}" "${TB_ROOT}"
 
-########################### paths (site-specific) ###########################
-# Preprocessed OpenMathInstruct-2 parquet: MUST be built with the same chat
-# template / prompt format as the MaxText data template (see preprocess
-# script; token-identical prompts are a precondition for curve overlay).
-DATA_DIR=${DATA_DIR:-$HOME/meta-RL/data/openmathinstruct2}
-TRAIN_FILE=${TRAIN_FILE:-$DATA_DIR/train.parquet}
-VAL_FILE=${VAL_FILE:-$DATA_DIR/val.parquet}
+########################### FROZEN -- Meta's config, do not tune ######################
+train_batch_size=128                 # global_batch_size: 128 prompts per optimizer step
+rollout_n=16                         # num_generations: 16  -> 2048 sequences/step
+ppo_mini_batch_size=128              # ppo_epochs=1, one update per rollout (mu=1)
+micro_bsz_per_gpu=${MICRO_BSZ:-8}    # micro_batch_size: 8 per GPU (fixed; dynamic bsz OFF to match)
+max_prompt_length=512                # max_seq_length 2560 = 512 prompt + 2048 completion
+max_response_length=2048
+actor_lr=2.0e-5                      # learning_rate
+lr_scheduler=cosine                  # lr_scheduler_type: cosine, decays to 0 at max_steps
+lr_warmup_steps=10                   # warmup_steps: 10
+TOTAL_STEPS=${TOTAL_STEPS:-250}      # max_steps: 250
+clip_ratio_low=0.2
+clip_ratio_high=0.28                 # inert at ppo_epochs=1
+kl_loss_coef=0.0                     # kl_coeff 0.0: no KL, no reference model
+temperature=1.0                      # generator.temperature
+grad_clip=1.0                        # max_grad_norm
+TEST_FREQ=${TEST_FREQ:-20}           # eval_steps: 20
+SAVE_FREQ=${SAVE_FREQ:-50}           # save_steps: 50
+# reward: boxed_math weight 1.0, format_score 0.1; overlong_buffer 512 / penalty 1.0 on cap 2048
+export REWARD_FORMAT_SCORE=${META_FORMAT_SCORE:-0.1}        # always set here -> inherited REWARD_* values cannot leak in
+export REWARD_OVERLONG_BUFFER=${META_OVERLONG_BUFFER:-512}
+export REWARD_OVERLONG_PENALTY=${META_OVERLONG_PENALTY:-1.0}
+export REWARD_MAX_RESP_LEN=2048
+unset REWARD_FMT_WEIGHT REWARD_MATH_VERIFY_MAX_CHARS REWARD_MV_PROCS REWARD_MV_TIMEOUT 2>/dev/null || true
+# stop set: Meta vllm_stop_token_ids=[151645] + tokenizer eos 151643 -> both are in MODEL_PATH/generation_config.json
+########################### NOT specified by Meta -- confirm before freezing ###########
+top_p=${ROLLOUT_TOP_P:-1.0}          # GUESS: vLLM default (Base generation_config has none)
+top_k=${ROLLOUT_TOP_K:--1}           # GUESS
+weight_decay=${WEIGHT_DECAY:-0.0}    # GUESS: HF TrainingArguments default is 0.0 (verl default would be 0.01)
+loss_agg_mode=${LOSS_AGG_MODE:-token-mean}   # GUESS: Meta's trainer aggregation unknown
+SEED=${SEED:-1}
+########################### run identity ##############################################
+NNODES=${NNODES:-2}; GPUS_PER_NODE=${GPUS_PER_NODE:-4}; W=$((NNODES*GPUS_PER_NODE))   # 8x GB200 = 2 GKE nodes x 4
+RUN_TAG=${RUN_TAG:-meta_boxed}
+PROJECT_NAME=meta_gsm8k_boxed
+EXPERIMENT_NAME=${EXPERIMENT_NAME:-qwen3_0p6b_base_${RUN_TAG}_seed${SEED}_${NNODES}n${W}g_$(date +%Y%m%d_%H%M)}
+TB_DIR=${TB_ROOT}/${PROJECT_NAME}/${EXPERIMENT_NAME}
+TB_MIRROR=${TB_MIRROR_ROOT}/${PROJECT_NAME}/${EXPERIMENT_NAME}
+VAL_DUMP_DIR=${LOG_DIR}/${EXPERIMENT_NAME}/val_dump
+ROLLOUT_DUMP_DIR=${LOG_DIR}/${EXPERIMENT_NAME}/rollout_dump
+mkdir -p "${TB_DIR}" "${TB_MIRROR}" "${VAL_DUMP_DIR}" "${ROLLOUT_DUMP_DIR}"
+TRAIN_FILE=${TRAIN_FILE:-$DATA_DIR/gsm8k_boxed_train.parquet}
+VAL512=${VAL512:-$DATA_DIR/gsm8k_boxed_test512.parquet}       # Meta's eval set (first 512)
+VALFULL=${VALFULL:-$DATA_DIR/gsm8k_boxed_test.parquet}        # our full-set diagnostic
+if [ "${EVAL_FULL:-1}" = "1" ]; then VAL_FILES="['${VAL512}','${VALFULL}']"; else VAL_FILES="['${VAL512}']"; fi   # EVAL_FULL=0 for Meta-comparable timing (512-question eval only)
+for f in "${TRAIN_FILE}" "${VAL512}" "${VALFULL}" "${MODEL_PATH}/generation_config.json"; do
+  test -s "$f" || { echo "[meta] ABORT: missing $f"; exit 2; }
+done
+python3 -c "import json,sys; e=json.load(open('${MODEL_PATH}/generation_config.json'))['eos_token_id']; sys.exit(0 if sorted(e)==[151643,151645] else 1)" \
+  || { echo "[meta] ABORT: ${MODEL_PATH}/generation_config.json eos_token_id must be [151645,151643] (run build_gsm8k_boxed_data.py)"; exit 2; }
+export REWARD_MV_POOL=0    # this reward has no math_verify; the pool knobs are irrelevant
 
-# Reward: port of MaxText's default stack (match_format_exactly +
-# match_format_approximately + check_numbers), single compute_score entry.
-REWARD_FN_PATH=${REWARD_FN_PATH:-$HOME/meta-RL/reward/maxtext_math_reward.py}
-
-MODEL_PATH=${MODEL_PATH:-Qwen/Qwen3-0.6B}   # [MAXTEXT] model_name=qwen3-0.6b
-                                            # [TODO] confirm exact HF revision
-                                            # matches TPU checkpoint source
-
-########################### scale knobs (only these vary between runs) ######
-NNODES=${NNODES:-1}
-NGPUS_PER_NODE=${NGPUS_PER_NODE:-4}         # [GB200] A4X: 4 GPUs/node
-TOTAL_STEPS=${TOTAL_STEPS:-20}              # [MAXTEXT] num_batches=20 for
-                                            # smoke; raise for convergence runs
-
-PROJECT_NAME=${PROJECT_NAME:-maxtext_parity_grpo}
-EXPERIMENT_NAME=${EXPERIMENT_NAME:-qwen3_0p6b_parity_${NNODES}n$(( NNODES * NGPUS_PER_NODE ))g_$(date +%Y%m%d_%H%M)}
-
-########################### frozen invariants — do not tune ################
-train_batch_size=480          # [MAXTEXT] batch_size=480
-ppo_mini_batch_size=480       # [MAXTEXT] mu=1: one optimizer update per step.
-                              # Upstream example used 256 (-> 4 updates/step =
-                              # off-policy); that would silently change the
-                              # algorithm. 480 == train_batch_size is the
-                              # explicit on-policy setting.
-max_prompt_length=8192        # [MAXTEXT] max_prefill_predict_length=8192
-max_response_length=8192      # [MAXTEXT] max_target_length(16384) - prefill(8192)
-                              # NOTE: Meta A100 script uses 16384/16384 — we
-                              # anchor to MaxText, not Meta (planning doc §1.2)
-rollout_n=8                   # [MAXTEXT] rl.num_generations=8
-kl_loss_coef=0.05             # [MAXTEXT] rl.grpo_beta=0.05
-temperature=0.8               # [MAXTEXT] decode_sampling_temperature=0.8
-top_p=0.95                    # [MAXTEXT] decode_sampling_nucleus_p=0.95
-top_k=50                      # [MAXTEXT] decode_sampling_top_k=50
-max_num_batched_tokens=32768  # [MAXTEXT] max_num_batched_tokens=32768
-actor_lr=1e-6                 # [MAXTEXT] learning_rate=1e-6
-
-########################### system adaptations ############################
-rollout_tp=1                  # [MAXTEXT] rollout_tensor_parallelism... is 8 on
-                              # TPU, but that reflects v7x per-chip HBM; 0.6B
-                              # needs no TP on GB200 (192GB HBM). TP is a
-                              # [SYS] free variable per doc §1.2 — each side
-                              # uses its natural parallelism. Meta also runs TP=1.
-rollout_gpu_mem_util=0.30     # [SYS] colocated HBM split. MaxText uses 0.22 on
-                              # v7x; exact fraction is hardware-dependent, not
-                              # semantic. 0.30 leaves ample room for 0.6B FSDP.
-ppo_max_token_len_per_gpu=32768  # [SYS] dynamic-bsz packing budget for the
-                              # training pass (prompt+response=16384 -> holds
-                              # 2 full-length seqs). Tune freely; throughput
-                              # only, no semantics.
-
-########################### launch ########################################
-# [GB200] block inherited from upstream MACHINE=gb200 (PR #5596):
-#   - enforce_eager=False: DEVIATION from upstream gb200 branch (which forced
-#     eager on SM100). Verified on this image's vLLM: CUDA graphs work on
-#     Blackwell — 2.1x gen speedup, numerics identical to eager over matched
-#     steps (score/length distributions, same data order). [SYS] change.
-#   - free_cache_engine=False: DEVIATION from upstream gb200 branch (which
-#     sets True to release vLLM KV between steps for large models). At 0.6B
-#     HBM is abundant and the sleep/wake cycle was the prime suspect for the
-#     29s update_weights observed in the smoke run. [SYS] change, no
-#     semantics impact.
-#   - model_dtype=bfloat16: FSDP master/compute dtype pinned. [MAXTEXT] is
-#     also bf16 -> parity precision.
-#   - ray_init.num_gpus pinned: privileged/enroot containers break Ray GPU
-#     autodetect.
-
-# ray_init.num_gpus workaround is only valid when the driver starts its own
-# local Ray (single-node; privileged/enroot containers break GPU autodetect).
-# When attaching to an existing cluster (RAY_ADDRESS set), Ray forbids
-# num_cpus/num_gpus at ray.init() -- resources are reported by each node's
-# `ray start --num-gpus`. Inject the flag only in the single-node case.
-RAY_NUM_GPUS_ARG=""
-if [ -z "${RAY_ADDRESS:-}" ]; then
-  RAY_NUM_GPUS_ARG="+ray_kwargs.ray_init.num_gpus=${NGPUS_PER_NODE}"
+########################### pre-flights ################################################
+if [ "${SKIP_IDLE_CHECK:-0}" != "1" ] && command -v ray >/dev/null 2>&1; then
+  GPU_USE=$(ray status 2>/dev/null | awk '/GPU/ && /\// {print $1; exit}')
+  [ -n "${GPU_USE}" ] && [ "${GPU_USE%%/*}" != "0.0" ] && { echo "[meta] ABORT: GPUs in use (${GPU_USE}); clean leftovers first"; exit 2; }
+  echo "[meta] ray GPU usage before launch: ${GPU_USE:-unknown}"
 fi
+RT=$(python3 -c "import verl.trainer.ppo.ray_trainer as m; print(m.__file__)" 2>/dev/null | tail -1)
+grep -q "_DUMP_UID" "${RT}" || { echo "[meta] ABORT: ${RT} lacks the uid dump patch (patch_verl_dump_uid.py)"; exit 2; }
+if [ "${REWARD_OVERLONG_BUFFER}" != "0" ]; then
+  RM=$(python3 -c "import verl.experimental.reward_loop.reward_manager.naive as m; print(m.__file__)" 2>/dev/null | tail -1)
+  grep -q "_RESP_LEN" "${RM}" || { echo "[meta] ABORT: ${RM} lacks the response_len patch (patch_verl_reward_response_len.py)"; exit 2; }
+fi
+python3 - "${REWARD_FN_PATH}" <<'PYEOF'
+import importlib.util, os, sys, threading
+spec = importlib.util.spec_from_file_location("r", sys.argv[1]); r = importlib.util.module_from_spec(spec); spec.loader.exec_module(r)
+fs = float(os.environ.get("REWARD_FORMAT_SCORE", "0.1")); pen = float(os.environ.get("REWARD_OVERLONG_PENALTY", "1.0")); mx = int(os.environ.get("REWARD_MAX_RESP_LEN", "2048"))
+buf = int(os.environ.get("REWARD_OVERLONG_BUFFER", "512"))
+res = {}
+t = threading.Thread(target=lambda: res.__setitem__("o", [r.compute_score("x", c, g, extra_info={"index": 0, "response_len": n}) for c, g, n in
+      (("\\boxed{72}", "72", 100), ("\\boxed{7}", "72", 100), ("the answer is 72", "72", 100),
+       ("\\boxed{72}", "72", mx - buf), ("\\boxed{72}", "72", mx - buf // 2), ("\\boxed{72}", "72", mx))]))
+t.start(); t.join(); o = res["o"]
+checks = [("correct boxed -> 1.0", o[0]["score"] == 1.0 and o[0]["acc"] == 1.0),
+          (f"boxed but wrong -> format_score {fs}", abs(o[1]["score"] - fs) < 1e-9 and o[1]["acc"] == 0.0),
+          ("no box -> 0", o[2]["score"] == 0.0 and o[2]["fmt"] == 0.0),
+          (f"length {mx - buf} -> penalty 0", o[3]["length_penalty"] == 0.0 and o[3]["score"] == 1.0),
+          (f"length {mx - buf // 2} -> penalty -{pen / 2}", abs(o[4]["length_penalty"] + pen / 2) < 1e-9),
+          (f"length {mx} -> penalty -{pen}", abs(o[5]["length_penalty"] + pen) < 1e-9 and abs(o[5]["score"] - (1.0 - pen)) < 1e-9),
+          (f"buffer is {buf} (Meta: 512)", buf == 512)]
+bad = [n for n, ok in checks if not ok]
+print("[meta] reward pre-flight:", "OK " + ", ".join(n for n, _ in checks) if not bad else "FAILED " + str(bad))
+sys.exit(1 if bad else 0)
+PYEOF
 
+########################### TB mirror + signal handling + guard ###########################
+( while true; do sleep 300; cp -r "${TB_DIR}/." "${TB_MIRROR}/" 2>/dev/null || true; done ) &
+TB_SYNC_PID=$!; GUARD_PID=""; DRIVER_PID=""
+on_signal() { echo "[meta] caught signal -- stopping driver ${DRIVER_PID:-<none>}"; [ -n "${DRIVER_PID}" ] && kill -TERM "${DRIVER_PID}" 2>/dev/null || true; }
+trap 'on_signal; exit 130' INT
+trap 'on_signal; exit 143' TERM
+on_exit() {
+  if [ -n "${DRIVER_PID}" ] && kill -0 "${DRIVER_PID}" 2>/dev/null; then
+    echo "[meta] exit: driver ${DRIVER_PID} still alive -- TERM"; kill -TERM "${DRIVER_PID}" 2>/dev/null || true
+    for _ in $(seq 1 "$(( ${DRIVER_KILL_GRACE:-30} / 2 ))"); do kill -0 "${DRIVER_PID}" 2>/dev/null || break; sleep 2; done
+    kill -0 "${DRIVER_PID}" 2>/dev/null && { echo "[meta] exit: KILL"; kill -KILL "${DRIVER_PID}" 2>/dev/null || true; }
+  fi
+  kill ${TB_SYNC_PID} ${GUARD_PID} 2>/dev/null || true
+  cp -r "${TB_DIR}/." "${TB_MIRROR}/" 2>/dev/null || true
+  test -f "${TB_DIR}/COLLAPSE_ABORT.txt" && { echo "[meta] RUN ABORTED BY COLLAPSE GUARD:"; cat "${TB_DIR}/COLLAPSE_ABORT.txt"; }
+  test -f "${TB_DIR}/COLLAPSE_WARN.txt" && { echo "[meta] guard warnings:"; cat "${TB_DIR}/COLLAPSE_WARN.txt"; }
+  return 0
+}
+trap on_exit EXIT
+
+echo "[recipe] model=Qwen3-0.6B-Base lr=${actor_lr} sched=${lr_scheduler} warmup=${lr_warmup_steps} steps=${TOTAL_STEPS} batch=${train_batch_size}x${rollout_n} mini=${ppo_mini_batch_size} (mu=1) micro/gpu=${micro_bsz_per_gpu} dyn_bsz=False clip=${clip_ratio_low}/${clip_ratio_high} kl=${kl_loss_coef} T=${temperature} top_p=${top_p} top_k=${top_k} prompt=${max_prompt_length} cap=${max_response_length} fmt_score=${REWARD_FORMAT_SCORE} overlong=${REWARD_OVERLONG_BUFFER}/${REWARD_OVERLONG_PENALTY} wd=${weight_decay} loss_agg=${loss_agg_mode} stop=[151645,151643] fp32-master eval=test512@${TEST_FREQ}"
+echo "[meta] tensorboard -> ${TB_DIR}"; echo "[meta] tb mirror -> ${TB_MIRROR}"
+
+########################### launch ####################################################
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
     algorithm.use_kl_in_reward=False \
     data.train_files="['${TRAIN_FILE}']" \
-    data.val_files="['${VAL_FILE}']" \
+    data.val_files="${VAL_FILES}" \
     data.train_batch_size=${train_batch_size} \
     data.max_prompt_length=${max_prompt_length} \
     data.max_response_length=${max_response_length} \
-    data.filter_overlong_prompts=False \
-    data.truncation='error' \
+    data.filter_overlong_prompts=True \
+    data.truncation=error \
+    data.shuffle=${DATA_SHUFFLE:-True} \
+    data.seed=${SEED} \
+    data.dataloader_num_workers=2 \
     actor_rollout_ref.model.path="${MODEL_PATH}" \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
+    actor_rollout_ref.actor.strategy=fsdp \
     actor_rollout_ref.actor.optim.lr=${actor_lr} \
+    actor_rollout_ref.actor.optim.lr_scheduler_type=${lr_scheduler} \
+    actor_rollout_ref.actor.optim.lr_warmup_steps=${lr_warmup_steps} \
+    actor_rollout_ref.actor.optim.min_lr_ratio=0.0 \
+    actor_rollout_ref.actor.optim.num_cycles=0.5 \
+    actor_rollout_ref.actor.optim.betas='[0.9,0.999]' \
+    actor_rollout_ref.actor.optim.weight_decay=${weight_decay} \
+    actor_rollout_ref.actor.optim.clip_grad=${grad_clip} \
     actor_rollout_ref.actor.ppo_mini_batch_size=${ppo_mini_batch_size} \
-    actor_rollout_ref.actor.use_dynamic_bsz=True \
-    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=${ppo_max_token_len_per_gpu} \
-    actor_rollout_ref.actor.use_kl_loss=True \
+    actor_rollout_ref.actor.ppo_epochs=1 \
+    actor_rollout_ref.actor.use_dynamic_bsz=False \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=${micro_bsz_per_gpu} \
+    actor_rollout_ref.actor.loss_agg_mode=${loss_agg_mode} \
+    actor_rollout_ref.actor.use_kl_loss=False \
     actor_rollout_ref.actor.kl_loss_coef=${kl_loss_coef} \
-    actor_rollout_ref.actor.kl_loss_type=low_var_kl \
+    actor_rollout_ref.actor.clip_ratio_low=${clip_ratio_low} \
+    actor_rollout_ref.actor.clip_ratio_high=${clip_ratio_high} \
     actor_rollout_ref.actor.entropy_coeff=0 \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
-    actor_rollout_ref.actor.fsdp_config.model_dtype=bfloat16 \
-    actor_rollout_ref.ref.log_prob_use_dynamic_bsz=True \
-    actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=${ppo_max_token_len_per_gpu} \
-    actor_rollout_ref.ref.fsdp_config.param_offload=False \
+    actor_rollout_ref.actor.fsdp_config.model_dtype=fp32 \
+    actor_rollout_ref.actor.checkpoint.save_contents='["model","optimizer","extra","hf_model"]' \
     actor_rollout_ref.rollout.name=vllm \
-    actor_rollout_ref.rollout.tensor_model_parallel_size=${rollout_tp} \
-    actor_rollout_ref.rollout.gpu_memory_utilization=${rollout_gpu_mem_util} \
+    actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.30 \
     actor_rollout_ref.rollout.n=${rollout_n} \
     actor_rollout_ref.rollout.temperature=${temperature} \
     actor_rollout_ref.rollout.top_p=${top_p} \
     actor_rollout_ref.rollout.top_k=${top_k} \
-    actor_rollout_ref.rollout.max_num_batched_tokens=${max_num_batched_tokens} \
+    actor_rollout_ref.rollout.max_num_batched_tokens=8192 \
     actor_rollout_ref.rollout.enable_chunked_prefill=True \
     actor_rollout_ref.rollout.enforce_eager=False \
     actor_rollout_ref.rollout.free_cache_engine=False \
-    actor_rollout_ref.rollout.log_prob_use_dynamic_bsz=True \
-    actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu=${ppo_max_token_len_per_gpu} \
+    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=${micro_bsz_per_gpu} \
+    actor_rollout_ref.rollout.calculate_log_probs=True \
+    actor_rollout_ref.rollout.val_kwargs.do_sample=False \
+    actor_rollout_ref.rollout.val_kwargs.temperature=0 \
+    actor_rollout_ref.rollout.val_kwargs.n=1 \
     +actor_rollout_ref.rollout.engine_kwargs.vllm.enable_prefix_caching=True \
     custom_reward_function.path="${REWARD_FN_PATH}" \
     custom_reward_function.name=compute_score \
@@ -173,30 +199,41 @@ python3 -m verl.trainer.main_ppo \
     trainer.logger='["console","tensorboard"]' \
     trainer.project_name=${PROJECT_NAME} \
     trainer.experiment_name=${EXPERIMENT_NAME} \
-    trainer.n_gpus_per_node=${NGPUS_PER_NODE} \
+    trainer.n_gpus_per_node=${GPUS_PER_NODE} \
     trainer.nnodes=${NNODES} \
-    trainer.save_freq=-1 \
-    trainer.test_freq=5 \
-    trainer.total_epochs=1 \
+    trainer.save_freq=${SAVE_FREQ} \
+    trainer.default_local_dir="${CKPT_DIR}/${EXPERIMENT_NAME}" \
+    trainer.test_freq=${TEST_FREQ} \
+    trainer.val_before_train=True \
+    trainer.log_val_generations=10 \
+    trainer.validation_data_dir="${VAL_DUMP_DIR}" \
+    trainer.rollout_data_dir="${ROLLOUT_DUMP_DIR}" \
+    trainer.resume_mode=disable \
+    trainer.total_epochs=100 \
     trainer.total_training_steps=${TOTAL_STEPS} \
-    ${RAY_NUM_GPUS_ARG} \
-    "$@"
-
-# =============================================================================
-# Open items pinned in this script (grep TODO):
-#   1. kl_loss_type=low_var_kl kept from upstream; verify against Tunix's
-#      grpo_beta KL estimator (k1/k3/low-var) and change if mismatched.
-#      -> affects curve overlay, not step time.
-#   2. loss_agg_mode: verl default token-mean; confirm Tunix rl.loss_agg_mode
-#      default. If Tunix differs, add ++actor_rollout_ref.actor.loss_agg_mode.
-#   3. MaxText applies its own prompt-length filter (tokenize<=8192) at data
-#      prep; our preprocess script must replicate it so both sides train on
-#      the identical prompt set (same filter, same shuffle seed semantics
-#      are NOT reproducible across frameworks — document as known delta).
-#   4. save_freq=-1 (checkpointing off) for perf runs; MaxText smoke run has
-#      checkpoint_period=20 i.e. effectively once at end. For measured runs
-#      both sides must exclude checkpoint steps from the timing window (§4.1).
-#   5. Option name drift across verl versions (e.g. engine_kwargs path,
-#      total_training_steps): validated against main (0.9.0.dev) tree; re-check
-#      after pinning the release tag.
-# =============================================================================
+    "+ray_kwargs.ray_init.runtime_env.env_vars.TENSORBOARD_DIR='${TB_DIR}'" \
+    "+ray_kwargs.ray_init.runtime_env.env_vars.EXPERIMENT_NAME='${EXPERIMENT_NAME}'" \
+    "+ray_kwargs.ray_init.runtime_env.env_vars.REWARD_FORMAT_SCORE='${REWARD_FORMAT_SCORE}'" \
+    "+ray_kwargs.ray_init.runtime_env.env_vars.REWARD_OVERLONG_BUFFER='${REWARD_OVERLONG_BUFFER}'" \
+    "+ray_kwargs.ray_init.runtime_env.env_vars.REWARD_OVERLONG_PENALTY='${REWARD_OVERLONG_PENALTY}'" \
+    "+ray_kwargs.ray_init.runtime_env.env_vars.REWARD_MAX_RESP_LEN='${REWARD_MAX_RESP_LEN}'" \
+    "+ray_kwargs.ray_init.runtime_env.env_vars.LOGPROB_FIXTURE_DIR='${LOGPROB_FIXTURE_DIR:-}'" \
+    "+ray_kwargs.ray_init.runtime_env.env_vars.LOGPROB_FIXTURE_STEP='${LOGPROB_FIXTURE_STEP:-1}'" \
+    "$@" &
+DRIVER_PID=$!
+echo "[meta] driver pid ${DRIVER_PID}"
+GUARD_LOG=${LOG_DIR}/${EXPERIMENT_NAME}/collapse_guard.log; mkdir -p "$(dirname "${GUARD_LOG}")"
+if [ "${COLLAPSE_GUARD:-1}" = "1" ]; then
+  # guard tuned for this recipe: 2048 samples/step, 128 groups x 16; warmup 20 (fast early rise)
+  python3 "${SCRIPTS_DIR}/collapse_guard.py" --tb "${TB_DIR}" --rollout "${ROLLOUT_DUMP_DIR}" --pid "${DRIVER_PID}" \
+      --groups ${train_batch_size} --group_size ${rollout_n} --poll 60 --warmup 20 > "${GUARD_LOG}" 2>&1 &
+  GUARD_PID=$!; sleep 5
+  kill -0 "${GUARD_PID}" 2>/dev/null || { echo "[meta] ABORT: collapse guard died at start:"; cat "${GUARD_LOG}"; kill -TERM "${DRIVER_PID}" 2>/dev/null; exit 2; }
+  grep -q "expecting ${train_batch_size}x${rollout_n}" "${GUARD_LOG}" || { echo "[meta] ABORT: guard not configured for ${train_batch_size}x${rollout_n}"; kill -TERM "${DRIVER_PID}" 2>/dev/null; exit 2; }
+  echo "[meta] collapse guard pid ${GUARD_PID} (expecting ${train_batch_size}x${rollout_n} rows/step) -> ${GUARD_LOG}"
+fi
+set +e; wait "${DRIVER_PID}"; DRIVER_RC=$?
+while kill -0 "${DRIVER_PID}" 2>/dev/null; do wait "${DRIVER_PID}"; DRIVER_RC=$?; done
+set -e
+echo "[meta] driver exited with rc=${DRIVER_RC}"
+exit ${DRIVER_RC}

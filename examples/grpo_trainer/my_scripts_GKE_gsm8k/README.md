@@ -11,7 +11,8 @@ trainer) on verl, match its curves, then hand the frozen recipe to the TPU side.
 | `boxed_math_reward.py` | **PROVISIONAL** port of Meta's `boxed_math` (1.0 / format_score 0.1 / 0) + DAPO overlong penalty (512 on cap 2048). Replace with Meta's verbatim code when received; rules marked GUESS |
 | `run_qwen3_0p6b_base_gsm8k_boxed.sh` | launcher; FROZEN block = Meta's yaml; unspecified items are env knobs (see below) |
 | `compare_to_meta.py` | overlay our train-batch acc / eval acc against Meta's TensorBoard CSV export |
-| shared from `my_scripts_GKE`: `collapse_guard.py`, `plot_phase0.py`, `band_plot.py`, `paired_eval_bootstrap.py`, `patch_verl_dump_uid.py`, `patch_verl_reward_response_len.py`, `patch_verl_logprob_fixture.py` | copy them in; the fork patches are already applied on the pod |
+| `collapse_guard.py`, `plot_phase0.py`, `band_plot.py`, `paired_eval_bootstrap.py` | shared tools, now parameterized (`--groups/--group_size`, `--metrics`, `--sources`); these copies supersede the `my_scripts_GKE` ones |
+| `patch_verl_dump_uid.py`, `patch_verl_reward_response_len.py`, `patch_verl_logprob_fixture.py` | fork patches (already applied on the pod; launcher only checks) |
 
 ## Meta yaml -> verl mapping (FROZEN)
 | Meta | verl arg |
@@ -39,15 +40,35 @@ chat-template thinking flag (tokenizer default), whether eval uses the first 512
 ```bash
 export DATA_DIR=/workspace/meta-RL/data/gsm8k_boxed MODEL_PATH=/workspace/meta-RL/models/Qwen3-0.6B-Base-stop
 python3 build_gsm8k_boxed_data.py --meta_data /workspace/meta-RL/meta_pkg/data --out $DATA_DIR \
-    --model_in /workspace/meta-RL/models/Qwen3-0.6B-Base --model_out $MODEL_PATH
-python3 boxed_math_reward.py                                        # self-test (PROVISIONAL rules)
+    --model_in /workspace/meta-RL/models/Qwen3-0.6B-Base --model_out $MODEL_PATH      # refuses to touch --model_in
+python3 boxed_math_reward.py                                        # self-test (PROVISIONAL rules; non-zero exit on failure)
 TOTAL_STEPS=3 TEST_FREQ=1 SAVE_FREQ=2 bash run_qwen3_0p6b_base_gsm8k_boxed.sh 2>&1 | tee $LOG_DIR/meta_smoke.log
 SEED=1 bash run_qwen3_0p6b_base_gsm8k_boxed.sh 2>&1 | tee $LOG_DIR/meta_boxed_seed1_$(date +%m%d_%H%M).log
 ```
-Gate 0 for the reproduction: step-1 train-batch accuracy ~0.25 (Meta's first point) and step-0 eval on
-test512; then overlay with `compare_to_meta.py` once Meta's CSVs arrive.
+The launcher ignores the Track A environment (`SCRIPTS_DIR`, `REWARD_FN_PATH`, `REWARD_*`) and sets its own; overrides use
+`META_*` names only. Its pre-flight checks the reward at 1536 -> 0, 1792 -> -0.5, 2048 -> -1 and that the buffer is 512,
+and verifies the collapse guard started with `--groups 128 --group_size 16`.
 
-## Acceptance (draft, to agree with Henry / Meta)
-verl vs Meta's trainer on the same GPU: train-batch acc per step within ±0.07 (2 sigma, 128 prompts) except isolated
-steps; eval acc per checkpoint within ±0.04 (2 sigma, 512 questions); same qualitative shape (rise by step 10,
-plateau ~0.8). Three seeds for the band, as before.
+Analysis tools take the batch shape explicitly for this recipe:
+`plot_phase0.py --groups 128 --group_size 16`, `collapse_guard.py --groups 128 --group_size 16`,
+`band_plot.py --metrics 'val-core/gsm8k_boxed_test512/acc/mean@1=GSM8K test512 acc (greedy)' ...`,
+`paired_eval_bootstrap.py --sources gsm8k_boxed_test512=$DATA_DIR/gsm8k_boxed_test512.parquet`.
+
+## Eval accounting
+Each eval runs 512 (Meta's set) + 1,319 (our full-set diagnostic) = 1,831 questions. For wall-time comparisons with
+Meta, either use `EVAL_FULL=0` (512 only) or exclude eval time; steady-state step time excludes eval either way.
+
+## Status of assumptions -- all PENDING until Meta confirms
+- The screenshot's `reward/accuracy` (first point ~0.25) is assumed to be train-batch accuracy at T=1; its identity
+  (accuracy vs total reward; sampled vs greedy) is unconfirmed, so it is NOT yet a gate.
+- "The first 512 test rows are Meta's eval set" (max_eval_samples 512) is assumed, not confirmed.
+- Stop set: Meta `vllm_stop_token_ids=[151645]` + tokenizer eos 151643 assumed to equal our patched eos list;
+  confirm Meta's engine also stops on 151643.
+- top_p / top_k / weight_decay / loss aggregation / chat-template thinking flag: our defaults, unconfirmed.
+- The boxed_math extraction and normalization rules are a provisional reading; Meta's code replaces them.
+
+## Acceptance -- PENDING
+Numbers for "verl reproduces Meta's trainer on the same GPU" (per-step train-acc and per-checkpoint eval differences)
+will be declared in writing after Meta's CSV export and reward code arrive and before any TPU number is inspected.
+`compare_to_meta.py` prints binomial 2-sigma values for the batch sizes as a reference scale only; they are not
+run-to-run noise estimates and are not acceptance thresholds. Three seeds for the band, as in Track A.
