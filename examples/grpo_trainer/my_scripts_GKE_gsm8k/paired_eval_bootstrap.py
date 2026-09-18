@@ -63,6 +63,10 @@ def main():
   ap.add_argument("--boot", type=int, default=20000)
   ap.add_argument("--min_gain", type=float, default=0.04)
   ap.add_argument("--seed", type=int, default=0)
+  ap.add_argument("--key", choices=["question", "qid"], default="question",
+                  help="how dump rows are paired with eval questions. 'question': recover the question text from the dumped "
+                       "prompt (Track A dumps). 'qid': use the reward's qid (= extra_info.index), required when several eval "
+                       "sets share questions (e.g. Meta test512 is a subset of the full test); index ranges must not overlap")
   args = ap.parse_args()
 
   # data-source lookup + template pieces from the parquets
@@ -73,19 +77,35 @@ def main():
   else:
     sources = [("gsm8k", os.path.join(args.data_dir, "gsm8k_test.parquet")), ("omi2_val1k", os.path.join(args.data_dir, "val_1k_qsplit.parquet"))]
   source_names = [n for n, _ in sources]
+  qid_of = {}                 # qid -> (source, normalized question)
+  conflicts = set()
+  qid_conflicts = set()
   for name, p in sources:
     if not os.path.exists(p):
       continue
     df = pd.read_parquet(p)
     for _, r in df.iterrows():
       q = r["extra_info"]["question"]
-      src_of[norm(q)] = name
+      nq = norm(q)
+      if nq in src_of and src_of[nq] != name:
+        conflicts.add(nq)
+      src_of[nq] = name
+      qi = int(r["extra_info"]["index"])
+      if qi in qid_of and qid_of[qi][0] != name:
+        qid_conflicts.add(qi)
+      qid_of[qi] = (name, nq)
       if tmpl is None:
         c = r["prompt"][-1]["content"]           # the user turn (last message) carries the question
         k = c.find(q)
         tmpl = (c[:k], c[k + len(q):])
   if tmpl is None:
     raise SystemExit("could not derive the prompt template from the parquets")
+  if qid_conflicts and args.key == "qid":
+    raise SystemExit(f"{len(qid_conflicts)} qids are shared between eval sets (e.g. {sorted(qid_conflicts)[:3]}): "
+                     f"--key qid needs disjoint extra_info.index ranges (rebuild the eval parquets)")
+  if conflicts and args.key == "question":
+    raise SystemExit(f"{len(conflicts)} questions appear in more than one eval set (e.g. test512 within the full test); "
+                     f"pairing by question text would mix them -- rerun with --key qid")
   prefix_tail = tmpl[0][-40:]          # last chars before the question in the rendered user turn ("" if the question is the whole turn)
   suffix_head = tmpl[1][:14]           # chars right after the question ("" if none)
 
@@ -93,14 +113,28 @@ def main():
   rows_b = load_rows(os.path.join(args.dump, f"{args.b}.jsonl"))
 
   def index(rows):
+    """Map pairing key -> acc. Key = (source, question) via qid, or the question text (legacy)."""
     out = {}
     miss = 0
+    dup = 0
     for r in rows:
-      q = question_from_input(r["input"], prefix_tail, suffix_head, src_of)
-      if q is None:
-        miss += 1
-        continue
-      out[q] = float(r.get("acc", 1.0 if float(r.get("score", 0)) >= 1.0 else 0.0))
+      if args.key == "qid":
+        qi = r.get("qid")
+        if qi is None or int(qi) not in qid_of:
+          miss += 1
+          continue
+        key = qid_of[int(qi)]                       # (source, question)
+      else:
+        q = question_from_input(r["input"], prefix_tail, suffix_head, src_of)
+        if q is None:
+          miss += 1
+          continue
+        key = (src_of.get(q), q)
+      if key in out:
+        dup += 1
+      out[key] = float(r.get("acc", 1.0 if float(r.get("score", 0)) >= 1.0 else 0.0))
+    if dup:
+      raise SystemExit(f"{dup} duplicate pairing keys inside one dump -- overlapping eval sets? use --key qid with disjoint index ranges")
     return out, miss
 
   A, miss_a = index(rows_a)
@@ -112,7 +146,7 @@ def main():
   rng = np.random.default_rng(args.seed)
   print(f"\n{'source':<12}{'n':>6}{'acc_a':>8}{'acc_b':>8}{'delta':>8}{'95% CI (paired bootstrap)':>28}{'0->1':>6}{'1->0':>6}{'McNemar p':>11}  verdict")
   for src in source_names + ["all"]:
-    qs = [q for q in common if src == "all" or src_of.get(q) == src]
+    qs = [k for k in common if src == "all" or k[0] == src]
     if not qs:
       continue
     a = np.array([A[q] for q in qs]); b = np.array([B[q] for q in qs])

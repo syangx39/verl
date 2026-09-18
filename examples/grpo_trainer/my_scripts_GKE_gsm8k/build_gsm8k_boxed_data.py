@@ -9,8 +9,9 @@ Optionally re-verify them against public GSM8K with Meta's scripts/build_gsm8k_b
 
 Outputs (in --out):
   gsm8k_boxed_train.parquet       7,473 rows, data_source=gsm8k_boxed_train
-  gsm8k_boxed_test512.parquet     first 512 test rows, data_source=gsm8k_boxed_test512  (Meta: max_eval_samples=512)
-  gsm8k_boxed_test.parquet        all 1,319 test rows, data_source=gsm8k_boxed_test     (our full-set diagnostic)
+  gsm8k_boxed_test512.parquet     first 512 test rows, data_source=gsm8k_boxed_test512, index 20,000,000+ (Meta: max_eval_samples=512)
+  gsm8k_boxed_test.parquet        all 1,319 test rows, data_source=gsm8k_boxed_test, index 10,000,000+ (our full-set diagnostic)
+  (train index 0..7472; the three ranges are disjoint so val dumps pair by (source, qid))
   prompt_fixture.json             10 prompts: messages, rendered text, full token ids (Base tokenizer)
   MANIFEST.sha256
   <model_out>/                    copy of Qwen3-0.6B-Base whose generation_config.json eos_token_id is
@@ -72,7 +73,9 @@ def main():
   dte = rows_to_df(te, "gsm8k_boxed_test", offset=10_000_000)
   dte512 = dte.head(args.n_eval).copy()
   dte512["data_source"] = f"gsm8k_boxed_test{args.n_eval}"
-  dte512["extra_info"] = [dict(e, split=f"gsm8k_boxed_test{args.n_eval}") for e in dte512["extra_info"]]
+  # its own index range (20,000,000+) so dumps can be paired by (source, qid) even though the questions
+  # are a subset of the full test set (paired_eval_bootstrap.py --key qid)
+  dte512["extra_info"] = [dict(e, index=20_000_000 + i, split=f"gsm8k_boxed_test{args.n_eval}") for i, e in enumerate(dte512["extra_info"])]
   # train/test overlap check on normalized question text
   norm = lambda s: " ".join(s.split())
   trq = {norm(e["question"]) for e in dtr["extra_info"]}

@@ -56,7 +56,9 @@ def main():
   ap.add_argument("--extra", nargs="*", default=[], help="TB dirs to overlay (not part of the band)")
   ap.add_argument("--extra_labels", nargs="*", default=None)
   ap.add_argument("--out", required=True)
-  ap.add_argument("--steps", default="0:300:10", help="required eval steps as start:stop:stride (inclusive)")
+  ap.add_argument("--steps", default="0:300:10",
+                  help="required eval steps: comma-separated list of ints and/or start:stop:stride ranges (inclusive), "
+                       "e.g. '0:300:10' (Track A) or '0:240:20,250' (Meta: eval every 20 steps plus the final step 250)")
   ap.add_argument("--allow_partial", action="store_true", help="do not fail on missing checkpoints (exploratory only)")
   ap.add_argument("--metrics", nargs="*", default=DEFAULT_METRICS, help="TB tag=title entries (default: Track A metrics)")
   args = ap.parse_args()
@@ -67,8 +69,15 @@ def main():
     raise SystemExit(f"--labels has {len(args.labels)} entries for {len(args.tb)} --tb dirs")
   if args.extra_labels is not None and len(args.extra_labels) != len(args.extra):
     raise SystemExit(f"--extra_labels has {len(args.extra_labels)} entries for {len(args.extra)} --extra dirs")
-  a0, a1, st = (int(x) for x in args.steps.split(":"))
-  required = list(range(a0, a1 + 1, st))
+  required = []
+  for part in args.steps.split(","):
+    part = part.strip()
+    if ":" in part:
+      a0, a1, st = (int(x) for x in part.split(":"))
+      required += list(range(a0, a1 + 1, st))
+    elif part:
+      required.append(int(part))
+  required = sorted(set(required))
 
   runs = [load(p) for p in args.tb]
   labels = args.labels or [f"seed{i + 1}" for i in range(len(runs))]
@@ -94,6 +103,7 @@ def main():
 
   band = {}
   fig, axes = plt.subplots(1, len(METRICS), figsize=(7 * len(METRICS), 5))
+  axes = np.atleast_1d(axes)                      # one metric -> still iterable
   for ax, (tag, title) in zip(axes, METRICS):
     k = key(tag)
     steps = sorted(set.intersection(*[set(r.get(k, {})) for r in runs]))

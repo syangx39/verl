@@ -123,7 +123,7 @@ def load_rollout(rollout_dir, require_uid=True, groups=256, group_size=8):
     if bad or len(groups_) != groups or n != expect_rows:
       # per review: a step whose groups are not exactly 256 x 8 is SKIPPED for the
       # group statistics (not silently included); it is listed in the summary.
-      anomalies.append((step, n, len(groups), bad))
+      anomalies.append((step, n, len(groups_), bad))
       continue
     gs = list(groups_.values())
     def frac(pred):

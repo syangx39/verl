@@ -51,8 +51,9 @@ and verifies the collapse guard started with `--groups 128 --group_size 16`.
 
 Analysis tools take the batch shape explicitly for this recipe:
 `plot_phase0.py --groups 128 --group_size 16`, `collapse_guard.py --groups 128 --group_size 16`,
-`band_plot.py --metrics 'val-core/gsm8k_boxed_test512/acc/mean@1=GSM8K test512 acc (greedy)' ...`,
-`paired_eval_bootstrap.py --sources gsm8k_boxed_test512=$DATA_DIR/gsm8k_boxed_test512.parquet`.
+`band_plot.py --steps 0:240:20,250 --metrics 'val-core/gsm8k_boxed_test512/acc/mean@1=GSM8K test512 acc (greedy)'`,
+`paired_eval_bootstrap.py --key qid --sources gsm8k_boxed_test512=$DATA_DIR/gsm8k_boxed_test512.parquet gsm8k_boxed_test=$DATA_DIR/gsm8k_boxed_test.parquet`
+(the two eval sets share 512 questions, so pairing is by (data_source, qid); the builder gives them disjoint index ranges).
 
 ## Eval accounting
 Each eval runs 512 (Meta's set) + 1,319 (our full-set diagnostic) = 1,831 questions. For wall-time comparisons with
