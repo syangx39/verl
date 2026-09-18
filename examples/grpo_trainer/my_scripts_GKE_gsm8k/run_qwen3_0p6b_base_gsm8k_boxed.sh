@@ -200,18 +200,77 @@ TRAIN_ARGS=(
 )
 
 ########################### resolved-config pre-flight (hydra --cfg job; no Ray, no GPU) ############
-CFG_LOG=${LOG_DIR}/${EXPERIMENT_NAME}/resolved_config_preflight.txt; mkdir -p "$(dirname "${CFG_LOG}")"
+CFG_LOG=${LOG_DIR}/${EXPERIMENT_NAME}/resolved_config_preflight.yaml; mkdir -p "$(dirname "${CFG_LOG}")"
 python3 -m verl.trainer.main_ppo --cfg job "${TRAIN_ARGS[@]}" "$@" > "${CFG_LOG}" 2>&1 \
   || { echo "[meta] ABORT: hydra rejected the config (unknown key?). Last lines:"; tail -15 "${CFG_LOG}"; echo "check the rollout-correction key names: grep -rn rollout_correction \$(python3 -c 'import verl,os;print(os.path.dirname(verl.__file__))')/trainer/config"; exit 2; }
-for pat in "rollout_is: token" "rollout_is_threshold: ${IS_THRESHOLD}" "rollout_rs: null" "rollout_is_batch_normalize: false" "bypass_mode: false" \
-           "clip_ratio_c: ${clip_ratio_c}" "loss_agg_mode: ${loss_agg_mode}" "use_dynamic_bsz: false" "ppo_micro_batch_size_per_gpu: ${micro_bsz_per_gpu}" \
-           "weight_decay: ${weight_decay}" "lr_scheduler_type: ${lr_scheduler}" "lr_warmup_steps: ${lr_warmup_steps}" "lr: ${actor_lr}" \
-           "train_batch_size: ${train_batch_size}" "ppo_mini_batch_size: ${ppo_mini_batch_size}" "total_training_steps: ${TOTAL_STEPS}" \
-           "max_prompt_length: ${max_prompt_length}" "max_response_length: ${max_response_length}" "calculate_log_probs: true" "n: ${rollout_n}" \
-           "clip_ratio_low: ${clip_ratio_low}" "clip_ratio_high: ${clip_ratio_high}" "test_freq: ${TEST_FREQ}"; do
-  grep -qi -- "${pat}" "${CFG_LOG}" || { echo "[meta] ABORT: resolved config lacks '${pat}' -- see ${CFG_LOG}"; exit 2; }
-done
-echo "[meta] resolved-config pre-flight OK (full launch arguments rendered to ${CFG_LOG})"
+python3 - "${CFG_LOG}" <<PYEOF
+import sys, yaml
+from omegaconf import OmegaConf
+txt = open(sys.argv[1]).read()
+txt = txt[txt.index("\n") + 1:] if txt.startswith("#") else txt          # hydra may prefix a comment line
+cfg = OmegaConf.create(yaml.safe_load(txt))
+expect = {
+  "algorithm.rollout_correction.rollout_is": "token", "algorithm.rollout_correction.rollout_is_threshold": ${IS_THRESHOLD},
+  "algorithm.rollout_correction.rollout_rs": None, "algorithm.rollout_correction.rollout_is_batch_normalize": False,
+  "algorithm.rollout_correction.bypass_mode": False, "algorithm.adv_estimator": "grpo", "algorithm.use_kl_in_reward": False,
+  "actor_rollout_ref.actor.clip_ratio_low": ${clip_ratio_low}, "actor_rollout_ref.actor.clip_ratio_high": ${clip_ratio_high},
+  "actor_rollout_ref.actor.clip_ratio_c": ${clip_ratio_c}, "actor_rollout_ref.actor.loss_agg_mode": "${loss_agg_mode}",
+  "actor_rollout_ref.actor.use_dynamic_bsz": False, "actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu": ${micro_bsz_per_gpu},
+  "actor_rollout_ref.actor.ppo_mini_batch_size": ${ppo_mini_batch_size}, "actor_rollout_ref.actor.ppo_epochs": 1,
+  "actor_rollout_ref.actor.use_kl_loss": False, "actor_rollout_ref.actor.entropy_coeff": 0,
+  "actor_rollout_ref.actor.optim.lr": ${actor_lr}, "actor_rollout_ref.actor.optim.lr_scheduler_type": "${lr_scheduler}",
+  "actor_rollout_ref.actor.optim.lr_warmup_steps": ${lr_warmup_steps}, "actor_rollout_ref.actor.optim.min_lr_ratio": 0.0,
+  "actor_rollout_ref.actor.optim.weight_decay": ${weight_decay}, "actor_rollout_ref.actor.optim.clip_grad": ${grad_clip},
+  "actor_rollout_ref.actor.fsdp_config.model_dtype": "fp32",
+  "actor_rollout_ref.rollout.n": ${rollout_n}, "actor_rollout_ref.rollout.temperature": ${temperature},
+  "actor_rollout_ref.rollout.top_p": ${top_p}, "actor_rollout_ref.rollout.top_k": ${top_k}, "actor_rollout_ref.rollout.calculate_log_probs": True,
+  "actor_rollout_ref.rollout.val_kwargs.do_sample": False, "actor_rollout_ref.rollout.val_kwargs.n": 1,
+  "data.train_batch_size": ${train_batch_size}, "data.max_prompt_length": ${max_prompt_length}, "data.max_response_length": ${max_response_length},
+  "trainer.total_training_steps": ${TOTAL_STEPS}, "trainer.test_freq": ${TEST_FREQ}, "trainer.nnodes": ${NNODES}, "trainer.n_gpus_per_node": ${GPUS_PER_NODE},
+}
+bad = []
+for key, want in expect.items():
+    got = OmegaConf.select(cfg, key, default="<MISSING>")
+    if got == "<MISSING>":
+        bad.append(f"{key}: missing"); continue
+    if want is None:
+        ok = got is None
+    elif isinstance(want, bool):
+        ok = bool(got) == want and isinstance(got, bool)
+    elif isinstance(want, (int, float)):
+        try: ok = abs(float(got) - float(want)) <= 1e-12 * max(1.0, abs(float(want)))
+        except (TypeError, ValueError): ok = False
+    else:
+        ok = str(got) == str(want)
+    if not ok:
+        bad.append(f"{key}: got {got!r}, want {want!r}")
+if bad:
+    print("[meta] ABORT: resolved config mismatch:\n  " + "\n  ".join(bad)); sys.exit(1)
+print(f"[meta] resolved-config pre-flight OK: {len(expect)} fields verified numerically from {sys.argv[1]}")
+PYEOF
+
+########################### TB mirror + signal handling ###################################
+( while true; do sleep 300; cp -r "${TB_DIR}/." "${TB_MIRROR}/" 2>/dev/null || true; done ) &
+TB_SYNC_PID=$!; GUARD_PID=""; DRIVER_PID=""
+on_signal() { echo "[meta] caught signal -- stopping driver ${DRIVER_PID:-<none>}"; [ -n "${DRIVER_PID}" ] && kill -TERM "${DRIVER_PID}" 2>/dev/null || true; }
+trap 'on_signal; exit 130' INT
+trap 'on_signal; exit 143' TERM
+on_exit() {
+  if [ -n "${DRIVER_PID}" ] && kill -0 "${DRIVER_PID}" 2>/dev/null; then
+    echo "[meta] exit: driver ${DRIVER_PID} still alive -- TERM"; kill -TERM "${DRIVER_PID}" 2>/dev/null || true
+    for _ in $(seq 1 "$(( ${DRIVER_KILL_GRACE:-30} / 2 ))"); do kill -0 "${DRIVER_PID}" 2>/dev/null || break; sleep 2; done
+    kill -0 "${DRIVER_PID}" 2>/dev/null && { echo "[meta] exit: KILL"; kill -KILL "${DRIVER_PID}" 2>/dev/null || true; }
+  fi
+  kill ${TB_SYNC_PID} ${GUARD_PID} 2>/dev/null || true
+  cp -r "${TB_DIR}/." "${TB_MIRROR}/" 2>/dev/null || true
+  test -f "${TB_DIR}/COLLAPSE_ABORT.txt" && { echo "[meta] RUN ABORTED BY COLLAPSE GUARD:"; cat "${TB_DIR}/COLLAPSE_ABORT.txt"; }
+  test -f "${TB_DIR}/COLLAPSE_WARN.txt" && { echo "[meta] guard warnings:"; cat "${TB_DIR}/COLLAPSE_WARN.txt"; }
+  return 0
+}
+trap on_exit EXIT
+
+echo "[recipe] model=Qwen3-0.6B-Base IS=token/${IS_THRESHOLD}(no-bypass,no-norm,no-rs) dual_clip=${clip_ratio_c} eps=1e-8 fused=False lr=${actor_lr} sched=${lr_scheduler} warmup=${lr_warmup_steps} steps=${TOTAL_STEPS} batch=${train_batch_size}x${rollout_n} mini=${ppo_mini_batch_size} (mu=1) micro/gpu=${micro_bsz_per_gpu} dyn_bsz=False clip=${clip_ratio_low}/${clip_ratio_high} kl=${kl_loss_coef} T=${temperature} top_p=${top_p} top_k=${top_k} prompt=${max_prompt_length} cap=${max_response_length} fmt_score=${REWARD_FORMAT_SCORE} overlong=${REWARD_OVERLONG_BUFFER}/${REWARD_OVERLONG_PENALTY} penalty_sources=${REWARD_PENALTY_SOURCES} wd=${weight_decay} loss_agg=${loss_agg_mode} stop=[151645,151643] fp32-master eval=test512@${TEST_FREQ}"
+echo "[meta] tensorboard -> ${TB_DIR}"; echo "[meta] tb mirror -> ${TB_MIRROR}"; echo "[meta] resolved config -> ${CFG_LOG}"
 
 ########################### launch ####################################################
 python3 -m verl.trainer.main_ppo "${TRAIN_ARGS[@]}" "$@" &

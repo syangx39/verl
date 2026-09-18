@@ -58,7 +58,8 @@ python3 compare_to_meta.py --tb $TB_DIR --rollout $ROLLOUT_DUMP_DIR --meta_train
 ```
 The launcher runs three pre-flights before touching the GPUs: Meta's reward fixtures, the collapse guard config (128x16), and a
 hydra `--cfg job` render of the **full launch argument list** (`TRAIN_ARGS`, the same array the launch uses) written to
-`resolved_config_preflight.txt`; it must contain the IS / dual-clip / micro-batch / wd / LR / warmup / batch / steps / length values above.
+`resolved_config_preflight.yaml`; 38 fields (IS, dual clip, micro-batch, wd, LR, warmup, batch, steps, lengths, sampling, eval) are read
+back with OmegaConf and compared numerically (so hydra's `2.0e-05` matches `2.0e-5`).
 `compare_to_meta.py` computes `frac_zero_std` from the training reward (`score` = raw + penalty, what advantages see), and reports the
 raw-reward mean separately.
 Analysis tools take the batch shape: `plot_phase0.py --groups 128 --group_size 16 --cap 2048`, `collapse_guard.py --groups 128 --group_size 16`,
