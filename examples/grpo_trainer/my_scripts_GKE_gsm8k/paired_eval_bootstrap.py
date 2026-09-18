@@ -145,7 +145,10 @@ def main():
 
   rng = np.random.default_rng(args.seed)
   print(f"\n{'source':<12}{'n':>6}{'acc_a':>8}{'acc_b':>8}{'delta':>8}{'95% CI (paired bootstrap)':>28}{'0->1':>6}{'1->0':>6}{'McNemar p':>11}  verdict")
-  for src in source_names + ["all"]:
+  rows_to_report = source_names + ([] if conflicts else ["all"])
+  if conflicts:
+    print(f"note: {len(conflicts)} questions are shared between eval sets -> no pooled 'all' row (it would double-count them); sets are reported separately")
+  for src in rows_to_report:
     qs = [k for k in common if src == "all" or k[0] == src]
     if not qs:
       continue
