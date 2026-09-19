@@ -42,10 +42,11 @@ from transformers import AutoModelForCausalLM
 def check_stats(st, where, tol_cos=1e-9, tol_res=1e-9):
   """Abort on non-finite values, |cos| > 1 (beyond float64 rounding) or an inconsistent residual. Zero-norm inputs are
   reported as 'degenerate' (cos undefined) rather than compared."""
+  if not (math.isfinite(st["norm_a"]) and math.isfinite(st["norm_b"])):   # finiteness first: a zero norm next to NaN/Inf must not pass as 'degenerate'
+    raise SystemExit(f"{where}: non-finite norm {st}")
   if st["norm_a"] == 0.0 or st["norm_b"] == 0.0:
     return "degenerate"
-  vals = (st["cos"], st["rel_err_vs_a"], st["norm_a"], st["norm_b"])
-  if any(not math.isfinite(v) for v in vals):
+  if any(not math.isfinite(v) for v in (st["cos"], st["rel_err_vs_a"])):
     raise SystemExit(f"{where}: non-finite statistic {st}")
   if abs(st["cos"]) > 1.0 + tol_cos:
     raise SystemExit(f"{where}: |cosine| = {st['cos']!r} > 1 -- accumulation error, refusing to report")
