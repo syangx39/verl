@@ -27,12 +27,30 @@ Usage:
 import argparse
 import glob
 import json
+import math
 import os
 import re
 
 import torch
 from safetensors.torch import load_file
 from transformers import AutoModelForCausalLM
+
+
+def check_stats(st, where, tol_cos=1e-9, tol_res=1e-9):
+  """Abort on non-finite values, |cos| > 1 (beyond float64 rounding) or an inconsistent residual. Zero-norm inputs are
+  reported as 'degenerate' (cos undefined) rather than compared."""
+  if st["norm_a"] == 0.0 or st["norm_b"] == 0.0:
+    return "degenerate"
+  vals = (st["cos"], st["rel_err_vs_a"], st["norm_a"], st["norm_b"])
+  if any(not math.isfinite(v) for v in vals):
+    raise SystemExit(f"{where}: non-finite statistic {st}")
+  if abs(st["cos"]) > 1.0 + tol_cos:
+    raise SystemExit(f"{where}: |cosine| = {st['cos']!r} > 1 -- accumulation error, refusing to report")
+  r = st["norm_b"] / st["norm_a"]
+  res = abs(st["rel_err_vs_a"] ** 2 - (1.0 + r * r - 2.0 * r * st["cos"]))
+  if res > tol_res * max(1.0, st["rel_err_vs_a"] ** 2):
+    raise SystemExit(f"{where}: cosine/rel_err inconsistent (residual {res:.3e})")
+  return "ok"
 
 
 def pair_stats(a, b, chunk=1 << 23):
@@ -109,7 +127,7 @@ def main():
   ref = load_file(args.replay_grad)
   c1, c2 = 1.0 / (1.0 - args.beta1), (1.0 - args.beta2) / (1.0 - args.beta1) ** 2      # g = c1*m ; v = c2 * m^2
 
-  rows = []; num = den = dot = 0.0; ref_sq = 0.0; consistency_worst = 0.0
+  rows = []; num = den = dot = 0.0; ref_sq = 0.0; consistency_worst = 0.0; degenerate = []
   for idx, (uname, params) in enumerate(units):
     parts = []
     for r in range(W):
@@ -140,14 +158,22 @@ def main():
       if tuple(g_ref.shape) != tuple(g_run.shape):
         raise SystemExit(f"{name}: replay grad shape {tuple(g_ref.shape)} != {tuple(g_run.shape)}")
       st = pair_stats(g_run, g_ref)                            # a = verl (run), b = replay; chunked float64
-      rows.append({"name": name, "unit": uname, "numel": n_el, "run_norm": st["norm_a"], "replay_norm": st["norm_b"],
+      status = check_stats(st, name)
+      if status == "degenerate":
+        degenerate.append(name)
+      rows.append({"name": name, "unit": uname, "numel": n_el, "status": status, "run_norm": st["norm_a"], "replay_norm": st["norm_b"],
                    "norm_ratio": st["norm_b"] / st["norm_a"] if st["norm_a"] > 0 else float("nan"), "cos": st["cos"],
                    "rel_err": st["rel_err_vs_a"], "adam_consistency": cons})
       num += st["sq_diff"]; den += st["sq_a"]; dot += st["dot"]; ref_sq += st["sq_b"]
     print(f"  unit {idx:>2} {uname:<22} {len(params):>2} params, {numel:>10} elements, padding {pad} -> ok")
 
+  if den == 0.0 or ref_sq == 0.0:
+    raise SystemExit("global gradient norm is zero on one side -- nothing to compare")
   gcos = dot / ((den ** 0.5) * (ref_sq ** 0.5)); grel = (num / den) ** 0.5; r = (ref_sq / den) ** 0.5
   ident = abs(grel ** 2 - (1 + r * r - 2 * r * gcos))          # must be ~0: cos and rel_err from the same float64 sums
+  check_stats({"norm_a": den ** 0.5, "norm_b": ref_sq ** 0.5, "cos": gcos, "rel_err_vs_a": grel}, "GLOBAL")
+  if degenerate:
+    print(f"  note: {len(degenerate)} tensors with zero gradient on one side (cos undefined), excluded from ranking: {degenerate[:5]}")
   tot = {"global_cos": gcos, "global_rel_err": grel, "run_grad_norm": den ** 0.5, "replay_grad_norm": ref_sq ** 0.5,
          "identity_residual": ident, "adam_consistency_worst": consistency_worst}
   print(f"\nverl step-1 gradient (from exp_avg/{1 - args.beta1:g}) vs replay gradient [chunked float64]: global cosine {gcos:.6f} | rel err {grel:.3e} | "
@@ -162,12 +188,14 @@ def main():
     return "other"
   agg = {}
   for r in rows:
+    if r["status"] != "ok":
+      continue
     a = agg.setdefault(kind(r["name"]), {"n": 0, "cos_min": 1.0, "cos_mean": 0.0, "rel_err_max": 0.0})
     a["n"] += 1; a["cos_min"] = min(a["cos_min"], r["cos"]); a["cos_mean"] += r["cos"]; a["rel_err_max"] = max(a["rel_err_max"], r["rel_err"])
   for k, a in agg.items():
     a["cos_mean"] /= a["n"]
     print(f"  {k:<6} n={a['n']:>3} cos min {a['cos_min']:.5f} mean {a['cos_mean']:.5f} | rel_err max {a['rel_err_max']:.3e}")
-  worst = sorted(rows, key=lambda r: r["cos"])[:8]
+  worst = sorted([r for r in rows if r["status"] == "ok"], key=lambda r: r["cos"])[:8]
   print("  lowest-cosine tensors:")
   for r in worst:
     print(f"    {r['name']:<52} cos {r['cos']:.5f} rel_err {r['rel_err']:.3e} norm_ratio {r['norm_ratio']:.4f} numel {r['numel']}")

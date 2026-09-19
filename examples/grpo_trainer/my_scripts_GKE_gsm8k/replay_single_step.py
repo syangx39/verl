@@ -39,6 +39,23 @@ import torch
 from transformers import AutoModelForCausalLM
 
 
+def check_stats(st, where, tol_cos=1e-9, tol_res=1e-9):
+  """Abort on non-finite values, |cos| > 1 (beyond float64 rounding) or an inconsistent residual. Zero-norm inputs are
+  reported as 'degenerate' (cos undefined) rather than compared."""
+  if st["norm_a"] == 0.0 or st["norm_b"] == 0.0:
+    return "degenerate"
+  vals = (st["cos"], st["rel_err_vs_a"], st["norm_a"], st["norm_b"])
+  if any(not math.isfinite(v) for v in vals):
+    raise SystemExit(f"{where}: non-finite statistic {st}")
+  if abs(st["cos"]) > 1.0 + tol_cos:
+    raise SystemExit(f"{where}: |cosine| = {st['cos']!r} > 1 -- accumulation error, refusing to report")
+  r = st["norm_b"] / st["norm_a"]
+  res = abs(st["rel_err_vs_a"] ** 2 - (1.0 + r * r - 2.0 * r * st["cos"]))
+  if res > tol_res * max(1.0, st["rel_err_vs_a"] ** 2):
+    raise SystemExit(f"{where}: cosine/rel_err inconsistent (residual {res:.3e})")
+  return "ok"
+
+
 def pair_stats(a, b, chunk=1 << 23):
   """Chunked float64 accumulation of sum(a^2), sum(b^2), sum(a*b), sum((a-b)^2) over two tensors of the same shape.
   Returns dict(norm_a, norm_b, cos, rel_err_vs_a, dot, sq_a, sq_b, sq_diff). cos and rel_err come from the SAME
@@ -263,20 +280,26 @@ def main():
           raise SystemExit(f"parameter {n}: checkpoint shape {tuple(post[key].shape)} != model shape {tuple(p.shape)}")
         d_run = post[key].to(dev).float() - theta0[n]; d_rep = p.detach() - theta0[n]
         st = pair_stats(d_run, d_rep)                          # chunked float64; a = run, b = replay
+        status = check_stats(st, n)
         num += st["sq_diff"]; den += st["sq_a"]; dot += st["dot"]; rep_sq += st["sq_b"]
         if any(t in n for t in ("embed_tokens", "lm_head", "layers.0.self_attn.q_proj", "layers.13.mlp.down_proj", "model.norm.weight")):
-          per[n] = {"rel_err": st["rel_err_vs_a"], "cos": st["cos"]}
-    rep_norm = rep_sq ** 0.5; gcos = dot / ((den ** 0.5) * rep_norm) if den > 0 and rep_norm > 0 else float("nan")
-    grel = (num / den) ** 0.5 if den > 0 else float("nan"); r = rep_norm / (den ** 0.5) if den > 0 else float("nan")
-    report["delta_theta_vs_run"] = {"run_norm": den ** 0.5, "replay_norm": rep_norm, "rel_err": grel, "cosine": gcos,
-                                    "identity_residual": abs(grel ** 2 - (1 + r * r - 2 * r * gcos)) if den > 0 else None, "per_tensor": per}
-    print(f"\n[4] delta_theta (theta_after_last_step - theta0) [chunked float64]: run ||.|| {den ** 0.5:.4e} | replay ||.|| {rep_norm:.4e} | rel err {grel:.3e} | cosine {gcos:.6f} | residual {report['delta_theta_vs_run']['identity_residual']:.1e}")
-    for n, v in per.items():
-      print(f"    {n:<48} rel_err {v['rel_err']:.3e} cos {v['cos']:.6f}")
-    if den == 0.0:
-      print("    !! run delta is exactly zero: the trainer's post weights equal theta0 (lr 0 step?) -- compare a later step")
+          per[n] = {"rel_err": st["rel_err_vs_a"], "cos": st["cos"], "status": status}
+    rep_norm = rep_sq ** 0.5
+    if den == 0.0 or rep_norm == 0.0:
+      report["delta_theta_vs_run"] = {"run_norm": den ** 0.5, "replay_norm": rep_norm, "rel_err": None, "cosine": None, "identity_residual": None, "per_tensor": per}
+      print(f"\n[4] delta_theta: run ||.|| {den ** 0.5:.4e} | replay ||.|| {rep_norm:.4e} | cosine N/A | rel err N/A | residual N/A"
+            + ("  (run delta is zero: post weights equal theta0 -- an lr-0 step; compare a later step)" if den == 0.0 else ""))
     else:
-      report["delta_theta_vs_run"]["identity_residual"] = report["delta_theta_vs_run"]["identity_residual"]
+      gcos = dot / ((den ** 0.5) * rep_norm); grel = (num / den) ** 0.5; r = rep_norm / (den ** 0.5)
+      res = abs(grel ** 2 - (1 + r * r - 2 * r * gcos))
+      check_stats({"norm_a": den ** 0.5, "norm_b": rep_norm, "cos": gcos, "rel_err_vs_a": grel}, "GLOBAL delta_theta")
+      report["delta_theta_vs_run"] = {"run_norm": den ** 0.5, "replay_norm": rep_norm, "rel_err": grel, "cosine": gcos, "identity_residual": res, "per_tensor": per}
+      print(f"\n[4] delta_theta (theta_after_last_step - theta0) [chunked float64]: run ||.|| {den ** 0.5:.4e} | replay ||.|| {rep_norm:.4e} | rel err {grel:.3e} | cosine {gcos:.6f} | residual {res:.1e}")
+    for n, v in per.items():
+      if v["status"] == "ok":
+        print(f"    {n:<48} rel_err {v['rel_err']:.3e} cos {v['cos']:.6f}")
+      else:
+        print(f"    {n:<48} rel_err N/A cos N/A (zero delta on one side)")
   if args.save_post:
     os.makedirs(args.save_post, exist_ok=True)
     model.save_pretrained(args.save_post, safe_serialization=True)
