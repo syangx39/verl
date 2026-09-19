@@ -15,7 +15,8 @@ right after advantages are computed and BEFORE the actor update, the trainer:
      the rollout temperature and the resolved dtypes.
 Nothing else changes; normal runs (env unset) are untouched.
 
-Idempotent. Prints: LOGPROB-FIXTURE PATCH: APPLIED | already patched | FAILED <reason>
+Idempotent and upgradeable: a v1 hook (single step, no run identity) is upgraded in place.
+Prints: LOGPROB-FIXTURE PATCH: APPLIED | UPGRADED v1 -> v2 (...) | already patched (v2 ...) | FAILED <reason>
 Usage:
   python3 patch_verl_logprob_fixture.py /workspace/meta-RL/verl/verl/trainer/ppo/ray_trainer.py
 """
@@ -25,8 +26,39 @@ import sys
 path = sys.argv[1] if len(sys.argv) > 1 else "/workspace/meta-RL/verl/verl/trainer/ppo/ray_trainer.py"
 src = open(path, encoding="utf-8").read()
 MARK = "_LOGPROB_FIXTURE"
+# v2 features: multi-step LOGPROB_FIXTURE_STEP ("1,2") and run identity (experiment_name / checkpoint_dir) in the sidecar.
+# A v1 hook already on the pod is upgraded in place; "already patched" is printed only when both v2 features are present.
+OLD_COND = 'if _os.environ.get("LOGPROB_FIXTURE_DIR") and self.global_steps == int(_os.environ.get("LOGPROB_FIXTURE_STEP", "1")):'
+NEW_COND = ('if _os.environ.get("LOGPROB_FIXTURE_DIR") and str(self.global_steps) in '
+            '[x.strip() for x in _os.environ.get("LOGPROB_FIXTURE_STEP", "1").split(",")]:')
+OLD_META = '            "uid_groups": len(groups),'
+NEW_META = ('            "experiment_name": self.config.trainer.experiment_name,\n'
+            '            "checkpoint_dir": self.config.trainer.default_local_dir,\n'
+            '            "uid_groups": len(groups),')
 if MARK in src:
-  print("LOGPROB-FIXTURE PATCH: already patched")
+  upgraded = []
+  if NEW_COND not in src:
+    if src.count(OLD_COND) != 1:
+      print(f"LOGPROB-FIXTURE PATCH: FAILED old hook condition found {src.count(OLD_COND)} times (expected 1); cannot upgrade automatically")
+      sys.exit(1)
+    src = src.replace(OLD_COND, NEW_COND, 1)
+    upgraded.append("multi-step LOGPROB_FIXTURE_STEP")
+  if '"experiment_name": self.config.trainer.experiment_name' not in src:
+    if src.count(OLD_META) != 1:
+      print(f"LOGPROB-FIXTURE PATCH: FAILED sidecar anchor found {src.count(OLD_META)} times (expected 1); cannot upgrade automatically")
+      sys.exit(1)
+    src = src.replace(OLD_META, NEW_META, 1)
+    upgraded.append("sidecar experiment_name/checkpoint_dir")
+  if not upgraded:
+    print("LOGPROB-FIXTURE PATCH: already patched (v2: multi-step + run identity)")
+    sys.exit(0)
+  try:
+    ast.parse(src)
+  except SyntaxError as e:
+    print(f"LOGPROB-FIXTURE PATCH: FAILED upgraded file does not parse: {e}")
+    sys.exit(1)
+  open(path, "w", encoding="utf-8").write(src)
+  print("LOGPROB-FIXTURE PATCH: UPGRADED v1 -> v2 (" + ", ".join(upgraded) + ")")
   sys.exit(0)
 
 CALL_ANCHOR = '''                            norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
