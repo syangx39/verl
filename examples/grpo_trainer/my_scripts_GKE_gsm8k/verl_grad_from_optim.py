@@ -35,6 +35,22 @@ from safetensors.torch import load_file
 from transformers import AutoModelForCausalLM
 
 
+def pair_stats(a, b, chunk=1 << 23):
+  """Chunked float64 accumulation of sum(a^2), sum(b^2), sum(a*b), sum((a-b)^2) over two tensors of the same shape.
+  Returns dict(norm_a, norm_b, cos, rel_err_vs_a, dot, sq_a, sq_b, sq_diff). cos and rel_err come from the SAME
+  accumulators (rel_err^2 == 1 + r^2 - 2 r cos with r = norm_b/norm_a), and nothing is clamped."""
+  fa, fb = a.reshape(-1), b.reshape(-1)
+  if fa.numel() != fb.numel():
+    raise ValueError(f"shape mismatch {tuple(a.shape)} vs {tuple(b.shape)}")
+  sa = sb = sab = sd = 0.0
+  for i in range(0, fa.numel(), chunk):
+    x = fa[i:i + chunk].double(); y = fb[i:i + chunk].double()
+    sa += float((x * x).sum()); sb += float((y * y).sum()); sab += float((x * y).sum()); sd += float(((x - y) ** 2).sum())
+  na, nb = sa ** 0.5, sb ** 0.5
+  return {"sq_a": sa, "sq_b": sb, "dot": sab, "sq_diff": sd, "norm_a": na, "norm_b": nb,
+          "cos": sab / (na * nb) if na > 0 and nb > 0 else float("nan"), "rel_err_vs_a": (sd ** 0.5) / na if na > 0 else float("nan")}
+
+
 def main():
   ap = argparse.ArgumentParser()
   ap.add_argument("--actor_dir", required=True)
@@ -120,21 +136,23 @@ def main():
       g_run = (c1 * m[off:off + n_el]).reshape(shp); off += n_el
       if name not in ref:
         raise SystemExit(f"{name} missing from the replay gradient file")
-      g_ref = ref[name].float()
+      g_ref = ref[name]
       if tuple(g_ref.shape) != tuple(g_run.shape):
         raise SystemExit(f"{name}: replay grad shape {tuple(g_ref.shape)} != {tuple(g_run.shape)}")
-      d = g_ref - g_run
-      nr, nn = float(g_run.norm()), float(g_ref.norm())
-      cos = float((g_ref * g_run).sum() / max(1e-30, nr * nn))
-      rows.append({"name": name, "unit": uname, "numel": n_el, "run_norm": nr, "replay_norm": nn, "norm_ratio": nn / max(nr, 1e-30), "cos": cos,
-                   "rel_err": float(d.norm() / max(nr, 1e-30)), "adam_consistency": cons})
-      num += float((d * d).sum()); den += nr * nr; dot += float((g_ref * g_run).sum()); ref_sq += nn * nn
+      st = pair_stats(g_run, g_ref)                            # a = verl (run), b = replay; chunked float64
+      rows.append({"name": name, "unit": uname, "numel": n_el, "run_norm": st["norm_a"], "replay_norm": st["norm_b"],
+                   "norm_ratio": st["norm_b"] / st["norm_a"] if st["norm_a"] > 0 else float("nan"), "cos": st["cos"],
+                   "rel_err": st["rel_err_vs_a"], "adam_consistency": cons})
+      num += st["sq_diff"]; den += st["sq_a"]; dot += st["dot"]; ref_sq += st["sq_b"]
     print(f"  unit {idx:>2} {uname:<22} {len(params):>2} params, {numel:>10} elements, padding {pad} -> ok")
 
-  tot = {"global_cos": dot / max(1e-30, (den ** 0.5) * (ref_sq ** 0.5)), "global_rel_err": (num / max(den, 1e-30)) ** 0.5,
-         "run_grad_norm": den ** 0.5, "replay_grad_norm": ref_sq ** 0.5, "adam_consistency_worst": consistency_worst}
-  print(f"\nverl step-1 gradient (from exp_avg/{1 - args.beta1:g}) vs replay gradient: global cosine {tot['global_cos']:.6f} | rel err {tot['global_rel_err']:.3e} | "
-        f"norms run {tot['run_grad_norm']:.6f} replay {tot['replay_grad_norm']:.6f} | Adam moment identity worst rel dev {consistency_worst:.1e} (expect ~1e-6; certifies beta/step consistency only)")
+  gcos = dot / ((den ** 0.5) * (ref_sq ** 0.5)); grel = (num / den) ** 0.5; r = (ref_sq / den) ** 0.5
+  ident = abs(grel ** 2 - (1 + r * r - 2 * r * gcos))          # must be ~0: cos and rel_err from the same float64 sums
+  tot = {"global_cos": gcos, "global_rel_err": grel, "run_grad_norm": den ** 0.5, "replay_grad_norm": ref_sq ** 0.5,
+         "identity_residual": ident, "adam_consistency_worst": consistency_worst}
+  print(f"\nverl step-1 gradient (from exp_avg/{1 - args.beta1:g}) vs replay gradient [chunked float64]: global cosine {gcos:.6f} | rel err {grel:.3e} | "
+        f"norms run {den ** 0.5:.6f} replay {ref_sq ** 0.5:.6f} | consistency residual |rel^2-(1+r^2-2r cos)| = {ident:.1e} | "
+        f"Adam moment identity worst rel dev {consistency_worst:.1e} (certifies beta/step consistency only)")
   # per-type aggregation
   def kind(n):
     if "embed_tokens" in n: return "embed"

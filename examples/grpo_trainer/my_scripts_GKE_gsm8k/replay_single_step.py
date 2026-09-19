@@ -39,6 +39,22 @@ import torch
 from transformers import AutoModelForCausalLM
 
 
+def pair_stats(a, b, chunk=1 << 23):
+  """Chunked float64 accumulation of sum(a^2), sum(b^2), sum(a*b), sum((a-b)^2) over two tensors of the same shape.
+  Returns dict(norm_a, norm_b, cos, rel_err_vs_a, dot, sq_a, sq_b, sq_diff). cos and rel_err come from the SAME
+  accumulators (rel_err^2 == 1 + r^2 - 2 r cos with r = norm_b/norm_a), and nothing is clamped."""
+  fa, fb = a.reshape(-1), b.reshape(-1)
+  if fa.numel() != fb.numel():
+    raise ValueError(f"shape mismatch {tuple(a.shape)} vs {tuple(b.shape)}")
+  sa = sb = sab = sd = 0.0
+  for i in range(0, fa.numel(), chunk):
+    x = fa[i:i + chunk].double(); y = fb[i:i + chunk].double()
+    sa += float((x * x).sum()); sb += float((y * y).sum()); sab += float((x * y).sum()); sd += float(((x - y) ** 2).sum())
+  na, nb = sa ** 0.5, sb ** 0.5
+  return {"sq_a": sa, "sq_b": sb, "dot": sab, "sq_diff": sd, "norm_a": na, "norm_b": nb,
+          "cos": sab / (na * nb) if na > 0 and nb > 0 else float("nan"), "rel_err_vs_a": (sd ** 0.5) / na if na > 0 else float("nan")}
+
+
 def group_advantages(seq_reward, uids, eps=1e-6):
   A = np.zeros_like(seq_reward, dtype=np.float64)
   groups = {}
@@ -112,6 +128,7 @@ def main():
   ap.add_argument("--beta", type=float, default=3.0, help="IS truncation (token_truncate)"); ap.add_argument("--no_is", action="store_true")
   ap.add_argument("--max_grad_norm", type=float, default=1.0)
   ap.add_argument("--micro", type=int, default=8)
+  ap.add_argument("--attn", default=None, help="HF attn_implementation for the reference forward (eager|sdpa|flash_attention_2); default = HF's choice. Use two different values to measure the kernel-level numerics floor")
   ap.add_argument("--reported_loss", nargs="*", type=float, default=None, help="trainer's pg_loss per replayed step")
   ap.add_argument("--reported_grad_norm", nargs="*", type=float, default=None, help="trainer's pre-clip grad norm per replayed step")
   ap.add_argument("--post_weights", default=None, help="HF dir of the trainer's weights after the LAST replayed step")
@@ -135,7 +152,9 @@ def main():
     raise SystemExit(f"--post_weights {args.post_weights} does not belong to run {run_name} (path must contain the experiment name, or 'replay' for a saved replay)")
   print(f"model {args.model} sha256 {model_hash[:16]} | run {run_name} | replaying steps {steps} with lrs {args.lrs}")
 
-  model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=torch.float32).to(dev)
+  kw = {"attn_implementation": args.attn} if args.attn else {}
+  model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=torch.float32, **kw).to(dev)
+  print(f"reference attention implementation: {getattr(model.config, '_attn_implementation', 'default')}")
   model.gradient_checkpointing_enable(); model.train(); model.config.use_cache = False
   theta0 = {n: p.detach().clone() for n, p in model.named_parameters()}
   b1, b2 = (float(x) for x in args.betas.split(","))
@@ -193,7 +212,7 @@ def main():
         loss_mb = loss_mb + (-(float(A_seq[i]) * ratio * w)).sum() / N
       loss_mb.backward()
       loss_total += float(loss_mb.detach())
-    gn = float(torch.norm(torch.stack([p.grad.detach().float().norm() for p in model.parameters() if p.grad is not None])))
+    gn = math.sqrt(sum(float(torch.linalg.vector_norm(p.grad.detach(), dtype=torch.float64) ** 2) for p in model.parameters() if p.grad is not None))
     rep["loss"] = loss_total; rep["grad_norm_preclip"] = gn
     # log-prob comparison first (numerics), then loss / grad
     if "old_log_probs" in d:
@@ -232,7 +251,7 @@ def main():
   if args.post_weights:
     post = load_checkpoint_tensors(args.post_weights)
     tied = bool(getattr(model.config, "tie_word_embeddings", False))
-    num = den = dot = 0.0; per = {}
+    num = den = dot = rep_sq = 0.0; per = {}
     with torch.no_grad():
       for n, p in model.named_parameters():
         key = n
@@ -242,17 +261,22 @@ def main():
           raise SystemExit(f"parameter {n} missing from the checkpoint tensors in {args.post_weights}")
         if tuple(post[key].shape) != tuple(p.shape):
           raise SystemExit(f"parameter {n}: checkpoint shape {tuple(post[key].shape)} != model shape {tuple(p.shape)}")
-        d_run = (post[key].to(dev).float() - theta0[n]).float(); d_rep = (p.detach() - theta0[n]).float()
-        num += float(((d_rep - d_run) ** 2).sum()); den += float((d_run ** 2).sum()); dot += float((d_rep * d_run).sum())
+        d_run = post[key].to(dev).float() - theta0[n]; d_rep = p.detach() - theta0[n]
+        st = pair_stats(d_run, d_rep)                          # chunked float64; a = run, b = replay
+        num += st["sq_diff"]; den += st["sq_a"]; dot += st["dot"]; rep_sq += st["sq_b"]
         if any(t in n for t in ("embed_tokens", "lm_head", "layers.0.self_attn.q_proj", "layers.13.mlp.down_proj", "model.norm.weight")):
-          per[n] = {"rel_err": float((d_rep - d_run).norm() / max(1e-12, d_run.norm())), "cos": float((d_rep * d_run).sum() / max(1e-12, d_rep.norm() * d_run.norm()))}
-    rep_norm = math.sqrt(sum(float(((p.detach() - theta0[n]).float() ** 2).sum()) for n, p in model.named_parameters()))
-    report["delta_theta_vs_run"] = {"run_norm": math.sqrt(den), "replay_norm": rep_norm, "rel_err": math.sqrt(num / max(den, 1e-30)), "cosine": dot / max(1e-30, math.sqrt(den) * rep_norm), "per_tensor": per}
-    print(f"\n[4] delta_theta (theta_after_last_step - theta0): run ||.|| {math.sqrt(den):.4e} | replay ||.|| {rep_norm:.4e} | rel err {report['delta_theta_vs_run']['rel_err']:.3e} | cosine {report['delta_theta_vs_run']['cosine']:.6f}")
+          per[n] = {"rel_err": st["rel_err_vs_a"], "cos": st["cos"]}
+    rep_norm = rep_sq ** 0.5; gcos = dot / ((den ** 0.5) * rep_norm) if den > 0 and rep_norm > 0 else float("nan")
+    grel = (num / den) ** 0.5 if den > 0 else float("nan"); r = rep_norm / (den ** 0.5) if den > 0 else float("nan")
+    report["delta_theta_vs_run"] = {"run_norm": den ** 0.5, "replay_norm": rep_norm, "rel_err": grel, "cosine": gcos,
+                                    "identity_residual": abs(grel ** 2 - (1 + r * r - 2 * r * gcos)) if den > 0 else None, "per_tensor": per}
+    print(f"\n[4] delta_theta (theta_after_last_step - theta0) [chunked float64]: run ||.|| {den ** 0.5:.4e} | replay ||.|| {rep_norm:.4e} | rel err {grel:.3e} | cosine {gcos:.6f} | residual {report['delta_theta_vs_run']['identity_residual']:.1e}")
     for n, v in per.items():
       print(f"    {n:<48} rel_err {v['rel_err']:.3e} cos {v['cos']:.6f}")
     if den == 0.0:
       print("    !! run delta is exactly zero: the trainer's post weights equal theta0 (lr 0 step?) -- compare a later step")
+    else:
+      report["delta_theta_vs_run"]["identity_residual"] = report["delta_theta_vs_run"]["identity_residual"]
   if args.save_post:
     os.makedirs(args.save_post, exist_ok=True)
     model.save_pretrained(args.save_post, safe_serialization=True)
