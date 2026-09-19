@@ -61,6 +61,22 @@ def sha256(path):
   return h.hexdigest()
 
 
+def load_checkpoint_tensors(ckpt_dir):
+  """All tensors of an HF safetensors checkpoint (single file or sharded), by name, without instantiating a model."""
+  from safetensors.torch import load_file
+  idx = os.path.join(ckpt_dir, "model.safetensors.index.json")
+  files = sorted(set(json.load(open(idx))["weight_map"].values())) if os.path.exists(idx) else ["model.safetensors"]
+  out = {}
+  for f in files:
+    fp = os.path.join(ckpt_dir, f)
+    if not os.path.exists(fp):
+      raise SystemExit(f"checkpoint shard missing: {fp}")
+    out.update(load_file(fp))
+  if not out:
+    raise SystemExit(f"no tensors found in {ckpt_dir}")
+  return out
+
+
 def load_dump(path, groups, group_size, model_hash):
   z = np.load(path, allow_pickle=False)
   meta_path = path[:-4] + ".json"
@@ -107,9 +123,15 @@ def main():
   model_hash = sha256(os.path.join(args.model, "model.safetensors"))
   dumps = [load_dump(p, args.groups, args.group_size, model_hash) for p in args.dumps]
   steps = [st for _, _, st in dumps]
-  if any(st is None for st in steps) or steps != sorted(steps) or any(b - a != 1 for a, b in zip(steps, steps[1:])):
-    raise SystemExit(f"dumps must be consecutive ascending global steps; got {steps}")
-  print(f"model {args.model} sha256 {model_hash[:16]} | replaying steps {steps} with lrs {args.lrs}")
+  if steps != list(range(1, len(dumps) + 1)):
+    raise SystemExit(f"replay must start at step 1 and be consecutive (model and Adam state are initialized from theta0); got {steps}")
+  runs = {m.get("experiment_name") for _, m, _ in dumps}
+  if len(runs) != 1 or None in runs:
+    raise SystemExit(f"all dumps must come from the same run (sidecar experiment_name); got {runs}")
+  run_name = runs.pop()
+  if args.post_weights and run_name not in os.path.abspath(args.post_weights):
+    raise SystemExit(f"--post_weights {args.post_weights} does not belong to run {run_name} (path must contain the experiment name)")
+  print(f"model {args.model} sha256 {model_hash[:16]} | run {run_name} | replaying steps {steps} with lrs {args.lrs}")
 
   model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=torch.float32).to(dev)
   model.gradient_checkpointing_enable(); model.train(); model.config.use_cache = False
@@ -197,15 +219,22 @@ def main():
     print(f"[3] AdamW step at lr {lr:g}: ||theta - theta0|| = {dnorm:.4e}" + ("  (lr 0: weights unchanged, Adam state initialized)" if lr == 0 else ""))
     report["steps"].append(rep)
 
-  # [4] compare with the trainer's weights after the last replayed step
+  # [4] compare with the trainer's weights after the last replayed step -- read the checkpoint tensors directly
+  #     (from_pretrained would silently re-initialize missing parameters); tied lm_head resolves to embed_tokens
   if args.post_weights:
-    post = AutoModelForCausalLM.from_pretrained(args.post_weights, torch_dtype=torch.float32).state_dict()
+    post = load_checkpoint_tensors(args.post_weights)
+    tied = bool(getattr(model.config, "tie_word_embeddings", False))
     num = den = dot = 0.0; per = {}
     with torch.no_grad():
       for n, p in model.named_parameters():
-        if n not in post:
-          raise SystemExit(f"parameter {n} missing from --post_weights {args.post_weights}")
-        d_run = (post[n].to(dev) - theta0[n]).float(); d_rep = (p.detach() - theta0[n]).float()
+        key = n
+        if key not in post and tied and n == "lm_head.weight" and "model.embed_tokens.weight" in post:
+          key = "model.embed_tokens.weight"
+        if key not in post:
+          raise SystemExit(f"parameter {n} missing from the checkpoint tensors in {args.post_weights}")
+        if tuple(post[key].shape) != tuple(p.shape):
+          raise SystemExit(f"parameter {n}: checkpoint shape {tuple(post[key].shape)} != model shape {tuple(p.shape)}")
+        d_run = (post[key].to(dev).float() - theta0[n]).float(); d_rep = (p.detach() - theta0[n]).float()
         num += float(((d_rep - d_run) ** 2).sum()); den += float((d_run ** 2).sum()); dot += float((d_rep * d_run).sum())
         if any(t in n for t in ("embed_tokens", "lm_head", "layers.0.self_attn.q_proj", "layers.13.mlp.down_proj", "model.norm.weight")):
           per[n] = {"rel_err": float((d_rep - d_run).norm() / max(1e-12, d_run.norm())), "cos": float((d_rep * d_run).sum() / max(1e-12, d_rep.norm() * d_run.norm()))}
