@@ -144,6 +144,9 @@ def main():
   ap.add_argument("--groups", type=int, default=128); ap.add_argument("--group_size", type=int, default=16)
   ap.add_argument("--betas", default="0.9,0.999"); ap.add_argument("--eps", type=float, default=1e-8); ap.add_argument("--weight_decay", type=float, default=0.0)
   ap.add_argument("--beta", type=float, default=3.0, help="IS truncation (token_truncate)"); ap.add_argument("--no_is", action="store_true")
+  ap.add_argument("--is_from_dump", action="store_true",
+                  help="compute the IS weight from the dumped old_log_probs (the trainer's own values) instead of the reference forward's "
+                       "log-probs: then advantages, mask and IS weights are IDENTICAL to the trainer's and only forward/backward differ")
   ap.add_argument("--max_grad_norm", type=float, default=1.0)
   ap.add_argument("--micro", type=int, default=8)
   ap.add_argument("--attn", default=None, help="HF attn_implementation for the reference forward (eager|sdpa|flash_attention_2); default = HF's choice. Use two different values to measure the kernel-level numerics floor")
@@ -188,7 +191,7 @@ def main():
     seq_reward = d["token_level_scores"].sum(1).astype(np.float64)
     N = float(resp_len.sum())
     rep = {"step": step, "lr": lr, "B": int(B), "n_tokens": int(N)}
-    print(f"\n===== step {step} (lr {lr:g}, {int(N)} completion tokens) =====")
+    print(f"\n===== step {step} (lr {lr:g}, {int(N)} completion tokens; IS weights from {'DUMPED old_log_probs (trainer)' if args.is_from_dump else 'reference log-probs'}) =====")
 
     # [1] advantages on every valid token
     A_seq, n_groups = group_advantages(seq_reward, uids)
@@ -224,7 +227,13 @@ def main():
         logp_all[i, :rl] = lpk.detach().double().cpu().numpy()
         w = torch.ones_like(lpk)
         if not args.no_is:
-          w = torch.clamp(torch.exp(torch.clamp(lpk.detach() - torch.tensor(LS[i, :rl], device=dev), -20.0, 20.0)), max=args.beta)
+          if args.is_from_dump:
+            if "old_log_probs" not in d:
+              raise SystemExit("--is_from_dump needs old_log_probs in the dump")
+            base = torch.tensor(d["old_log_probs"][i, :rl], device=dev, dtype=torch.float32)
+          else:
+            base = lpk.detach()
+          w = torch.clamp(torch.exp(torch.clamp(base - torch.tensor(LS[i, :rl], device=dev), -20.0, 20.0)), max=args.beta)
           is_stats.append(w.cpu().numpy())
         ratio = torch.exp(lpk - lpk.detach())
         loss_mb = loss_mb + (-(float(A_seq[i]) * ratio * w)).sum() / N
