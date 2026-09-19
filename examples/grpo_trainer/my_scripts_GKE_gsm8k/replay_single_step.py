@@ -115,6 +115,8 @@ def main():
   ap.add_argument("--reported_loss", nargs="*", type=float, default=None, help="trainer's pg_loss per replayed step")
   ap.add_argument("--reported_grad_norm", nargs="*", type=float, default=None, help="trainer's pre-clip grad norm per replayed step")
   ap.add_argument("--post_weights", default=None, help="HF dir of the trainer's weights after the LAST replayed step")
+  ap.add_argument("--save_grad", default=None, help="save the PRE-CLIP gradient of the FIRST replayed step, per parameter, as safetensors (for comparison with the trainer's exp_avg/(1-beta1))")
+  ap.add_argument("--save_post", default=None, help="save the replayed weights after the last step as an HF dir (model.safetensors), e.g. for a replay-vs-replay numerics floor")
   ap.add_argument("--out", default="replay_report.json")
   args = ap.parse_args()
   if len(args.lrs) != len(args.dumps):
@@ -129,8 +131,8 @@ def main():
   if len(runs) != 1 or None in runs:
     raise SystemExit(f"all dumps must come from the same run (sidecar experiment_name); got {runs}")
   run_name = runs.pop()
-  if args.post_weights and run_name not in os.path.abspath(args.post_weights):
-    raise SystemExit(f"--post_weights {args.post_weights} does not belong to run {run_name} (path must contain the experiment name)")
+  if args.post_weights and run_name not in os.path.abspath(args.post_weights) and "replay" not in os.path.abspath(args.post_weights):
+    raise SystemExit(f"--post_weights {args.post_weights} does not belong to run {run_name} (path must contain the experiment name, or 'replay' for a saved replay)")
   print(f"model {args.model} sha256 {model_hash[:16]} | run {run_name} | replaying steps {steps} with lrs {args.lrs}")
 
   model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=torch.float32).to(dev)
@@ -210,6 +212,12 @@ def main():
       rg = args.reported_grad_norm[k]; rep["reported_grad_norm"] = rg
       print(f"     reported grad norm {rg:.6f} -> rel diff {abs(gn - rg) / max(1e-9, rg):.2e}")
 
+    if k == 0 and args.save_grad:
+      from safetensors.torch import save_file
+      os.makedirs(args.save_grad, exist_ok=True)
+      save_file({n: p.grad.detach().float().cpu().contiguous() for n, p in model.named_parameters() if p.grad is not None},
+                os.path.join(args.save_grad, "grad_step1.safetensors"))
+      print(f"     saved pre-clip step-1 gradient -> {args.save_grad}/grad_step1.safetensors")
     # [3] clip + AdamW step with the lr actually used
     torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
     opt.step()
@@ -245,6 +253,10 @@ def main():
       print(f"    {n:<48} rel_err {v['rel_err']:.3e} cos {v['cos']:.6f}")
     if den == 0.0:
       print("    !! run delta is exactly zero: the trainer's post weights equal theta0 (lr 0 step?) -- compare a later step")
+  if args.save_post:
+    os.makedirs(args.save_post, exist_ok=True)
+    model.save_pretrained(args.save_post, safe_serialization=True)
+    print(f"saved replayed weights -> {args.save_post}")
   json.dump(report, open(args.out, "w"), indent=1)
   print("saved", args.out)
 
