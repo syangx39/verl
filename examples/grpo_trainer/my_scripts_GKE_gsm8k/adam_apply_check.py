@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Optimizer-only check: given the trainer's ACTUAL Adam moments after step 2, does PyTorch's AdamW formula reproduce
 the trainer's saved theta_2 from theta_0?  This isolates "applying the update" from "forming the gradient".
+Scope: one update applied from theta_0 (valid because step 1 ran at lr 0 so theta_1 == theta_0); it does not
+generalize to step 3+ without theta_{t-1}. No pass threshold is asserted; the error is reported in fp32 ulps.
 
 Inputs (all from one run):
   theta_0   --model/model.safetensors                          (initial weights; theta_1 == theta_0 because step 1 ran at lr 0)
@@ -160,8 +162,16 @@ def main():
   print("  largest per-parameter rel err:")
   for name, rel, cos, mx, status in worst[:6]:
     print(f"    {name:<52} rel_err {rel:.3e} cos {cos:.9f} max|d| {mx:.2e} {status}")
-  verdict = "OPTIMIZER APPLY CONSISTENT (rounding-level)" if grel < 1e-4 else "OPTIMIZER APPLY DIFFERS -> check lr / bias correction / eps / mapping / save precision"
-  print(verdict)
+  # No calibrated pass threshold: CPU and CUDA optimizer kernels round differently. Report the error against the fp32
+  # resolution of the weights (ulp at the largest |theta|) and let the reader judge; a mismatch in lr / bias correction /
+  # eps / mapping would show up as a rel err of order 1 or a wrong ||pred|| / ||actual|| ratio, not as a few ulps.
+  theta_scale = max(float(t.float().abs().max()) for t in theta0.values())
+  ulp = theta_scale * 2.0 ** -23
+  verdict = (f"delta rel err {grel:.2e}, ||pred||/||actual|| = {r:.6f}, max |theta_2 - theta_2_pred| = {max_abs_theta:.2e} "
+             f"= {max_abs_theta / ulp:.1f} fp32 ulps at |theta|max {theta_scale:.3g}")
+  print("SUMMARY:", verdict)
+  print("  read as: a few ulps and ||pred||/||actual|| ~ 1 -> consistent with CPU-vs-CUDA rounding given the trainer's moments; "
+        "rel err ~O(0.1-1) or a norm ratio far from 1 -> lr / bias correction / eps / mapping / save precision problem")
   json.dump({"global_cos": gcos, "global_rel_err": grel, "max_abs_theta_diff": max_abs_theta, "residual": res, "verdict": verdict,
              "per_param": [{"name": n, "rel_err": rl, "cos": c, "max_abs_diff": m_, "status": s} for n, rl, c, m_, s in worst]}, open(args.out, "w"), indent=1)
   print("saved", args.out)

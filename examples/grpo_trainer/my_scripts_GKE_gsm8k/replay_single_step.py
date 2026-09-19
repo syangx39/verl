@@ -145,8 +145,10 @@ def main():
   ap.add_argument("--betas", default="0.9,0.999"); ap.add_argument("--eps", type=float, default=1e-8); ap.add_argument("--weight_decay", type=float, default=0.0)
   ap.add_argument("--beta", type=float, default=3.0, help="IS truncation (token_truncate)"); ap.add_argument("--no_is", action="store_true")
   ap.add_argument("--is_from_dump", action="store_true",
-                  help="compute the IS weight from the dumped old_log_probs (the trainer's own values) instead of the reference forward's "
-                       "log-probs: then advantages, mask and IS weights are IDENTICAL to the trainer's and only forward/backward differ")
+                  help="fixed-IS, ratio=1 CONTROL: take the IS weight from the dumped old_log_probs (the trainer's own values) instead of the "
+                       "reference forward's log-probs. This fixes the IS weights to the trainer's; the PPO ratio is still forced to 1 here "
+                       "(verl uses exp(training_logp - old_log_probs)) and advantages are still recomputed (they match the dump to ~1e-7), "
+                       "so remaining differences are forward/backward plus the ratio term, not forward/backward alone")
   ap.add_argument("--max_grad_norm", type=float, default=1.0)
   ap.add_argument("--micro", type=int, default=8)
   ap.add_argument("--attn", default=None, help="HF attn_implementation for the reference forward (eager|sdpa|flash_attention_2); default = HF's choice. Use two different values to measure the kernel-level numerics floor")
@@ -191,7 +193,7 @@ def main():
     seq_reward = d["token_level_scores"].sum(1).astype(np.float64)
     N = float(resp_len.sum())
     rep = {"step": step, "lr": lr, "B": int(B), "n_tokens": int(N)}
-    print(f"\n===== step {step} (lr {lr:g}, {int(N)} completion tokens; IS weights from {'DUMPED old_log_probs (trainer)' if args.is_from_dump else 'reference log-probs'}) =====")
+    print(f"\n===== step {step} (lr {lr:g}, {int(N)} completion tokens; IS weights from {'DUMPED old_log_probs -- fixed-IS, ratio=1 control' if args.is_from_dump else 'reference log-probs'}) =====")
 
     # [1] advantages on every valid token
     A_seq, n_groups = group_advantages(seq_reward, uids)
