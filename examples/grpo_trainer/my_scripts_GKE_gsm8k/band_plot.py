@@ -61,6 +61,7 @@ def main():
                        "e.g. '0:300:10' (Track A) or '0:240:20,250' (Meta: eval every 20 steps plus the final step 250)")
   ap.add_argument("--allow_partial", action="store_true", help="do not fail on missing checkpoints (exploratory only)")
   ap.add_argument("--metrics", nargs="*", default=DEFAULT_METRICS, help="TB tag=title entries (default: Track A metrics)")
+  ap.add_argument("--title", default=None, help="figure title (default: 'GB200 reference band: <labels>')")
   args = ap.parse_args()
   METRICS.extend(tuple(m.split("=", 1)) if "=" in m else (m, m) for m in args.metrics)
 
@@ -154,7 +155,7 @@ def main():
       M = np.array([[r[k][s] for s in steps] for r in runs])
       print(f"  {tag:28s} mean {M.mean():9.4f}  spread {np.mean(M.max(0) - M.min(0)):9.4f}")
 
-  fig.suptitle(f"GB200 reference band: {', '.join(labels)}")
+  fig.suptitle(args.title or f"GB200 reference band: {', '.join(labels)}")
   fig.tight_layout()
   fig.savefig(args.out + ".png", dpi=120)
   with open(args.out + ".json", "w") as f:
@@ -164,4 +165,3 @@ def main():
 
 if __name__ == "__main__":
   main()
-  
