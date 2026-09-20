@@ -34,7 +34,8 @@ ppo_mini_batch_size=128              # ppo_epochs=1, one update per rollout (mu=
 micro_bsz_per_gpu=${MICRO_BSZ:-8}    # micro_batch_size: 8 per GPU (fixed; dynamic bsz OFF to match)
 max_prompt_length=512                # max_seq_length 2560 = 512 prompt + 2048 completion
 max_response_length=2048
-actor_lr=2.0e-5                      # learning_rate
+actor_lr=${META_ACTOR_LR:-2.0e-5}    # learning_rate (Meta: 2.0e-5). META_ACTOR_LR is for the LR-sensitivity control only;
+                                     # the pre-flight, the [recipe] line and the resolved config all read this same variable
 lr_scheduler=cosine                  # lr_scheduler_type: cosine, decays to 0 at max_steps
 lr_warmup_steps=10                   # warmup_steps: 10
 TOTAL_STEPS=${TOTAL_STEPS:-250}      # max_steps: 250
