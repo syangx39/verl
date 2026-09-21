@@ -196,18 +196,23 @@ def main():
     if ca != cb:
       only_a = sum(v for k, v in ca.items() if cb.get(k, 0) != v); only_b = sum(v for k, v in cb.items() if ca.get(k, 0) != v)
       raise SystemExit(f"step {st}: injected token rows differ as multisets ({only_a} rows unmatched in A, {only_b} in B)")
-    worst = {"token_level_scores": 0.0, "advantages": 0.0, "rollout_log_probs": 0.0}
+    # whole-record multiset per token group: each row's (scores, advantages, rollout_log_probs) vectors are compared as ONE
+    # record (rounded to 1e-6), so row correspondence and field correspondence are both preserved; duplicates keep their counts
+    from collections import Counter
+
+    def record(z, i):
+      return b"|".join(np.round(z[key][i].astype(np.float64), 6).tobytes() for key in ("token_level_scores", "advantages", "rollout_log_probs"))
+
+    n_dup = 0; n_rows = 0
     for k, ia in ga_.items():
       ib = gb_[k]
-      for key in worst:
-        va = np.sort(za[key][ia].reshape(len(ia), -1), axis=0); vb = np.sort(zb[key][ib].reshape(len(ib), -1), axis=0)
-        worst[key] = max(worst[key], float(np.abs(va - vb).max()))
-    bad = {k: v for k, v in worst.items() if v > 1e-6}
-    if bad:
-      raise SystemExit(f"step {st}: identical tokens but values differ: {bad}")
-    n_dup = sum(1 for v in ga_.values() if len(v) > 1)
-    print(f"precondition: step {st}: {za['responses'].shape[0]} rows match as a multiset ({n_dup} keys with duplicate responses); "
-          f"rewards / advantages / rollout log-probs identical (max |d| {max(worst.values()):.1e})")
+      ca_, cb_ = Counter(record(za, i) for i in ia), Counter(record(zb, i) for i in ib)
+      if ca_ != cb_:
+        raise SystemExit(f"step {st}: token group qid={k[0]} has identical tokens but different (scores, advantages, rollout_log_probs) records "
+                         f"({sum((ca_ - cb_).values())} records only in A, {sum((cb_ - ca_).values())} only in B)")
+      n_dup += int(len(ia) > 1); n_rows += len(ia)
+    print(f"precondition: step {st}: {n_rows} rows match as a whole-record multiset ({n_dup} token keys with duplicate responses); "
+          f"rewards / advantages / rollout log-probs identical per row (1e-6 rounding)")
 
   ga = load_grads(os.path.join(args.run_a, f"global_step_{args.grad_step}", "actor"), model, args.beta1)
   gb = load_grads(os.path.join(args.run_b, f"global_step_{args.grad_step}", "actor"), model, args.beta1)
