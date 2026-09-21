@@ -182,7 +182,12 @@ def main():
 
   da_files, db_files = load_dumps(args.dump_a, args.run_a, args.label_a), load_dumps(args.dump_b, args.run_b, args.label_b)
   for st in range(1, args.delta_step + 1):
-    za, zb = np.load(da_files[st], allow_pickle=False), np.load(db_files[st], allow_pickle=False)
+    # np.load(.npz) is lazy: every z[key] re-reads and decompresses the whole array, so read each needed array ONCE
+    keys = ("responses", "response_mask", "nt__qid", "token_level_scores", "advantages", "rollout_log_probs")
+    with np.load(da_files[st], allow_pickle=False) as z:
+      za = {k: z[k] for k in keys}
+    with np.load(db_files[st], allow_pickle=False) as z:
+      zb = {k: z[k] for k in keys}
 
     def groups(z):
       g = {}
