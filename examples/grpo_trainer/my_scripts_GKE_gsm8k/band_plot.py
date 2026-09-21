@@ -116,9 +116,12 @@ def main():
       continue
     M = np.array([[r[k][s] for s in steps] for r in runs])         # seeds x steps
     lo, hi, mean = M.min(0), M.max(0), M.mean(0)
-    band[tag] = [{"step": int(s), "min": float(l), "max": float(h), "mean": float(m),
-                  "per_seed": [float(v) for v in M[:, i]]}
-                 for i, (s, l, h, m) in enumerate(zip(steps, lo, hi, mean))]
+    if args.no_band:                                       # independent runs: record the curves only, no band statistics
+      band[tag] = [{"step": int(s), "per_run": [float(v) for v in M[:, i]]} for i, s in enumerate(steps)]
+    else:
+      band[tag] = [{"step": int(s), "min": float(l), "max": float(h), "mean": float(m),
+                    "per_seed": [float(v) for v in M[:, i]]}
+                   for i, (s, l, h, m) in enumerate(zip(steps, lo, hi, mean))]
     if args.no_band:
       for i, lab in enumerate(labels):
         ax.plot(steps, M[i], lw=2, marker="o", ms=4, label=lab)
@@ -154,9 +157,10 @@ def main():
       print(f"  overlay {lab}: matched {len(es)}/{len(steps)} checkpoints; inside band at {inside}/{len(es) if es else 0} of the matched "
             f"(descriptive -- not the parity criterion)")
 
-  # aux: seed-to-seed spread of training diagnostics (for the rulebook)
-  print("\ntraining diagnostics, seed-to-seed spread (mean over steps of max-min across seeds):")
-  for tag in AUX:
+  # aux: seed-to-seed spread of training diagnostics (for the rulebook) -- meaningless for independent runs
+  if not args.no_band:
+    print("\ntraining diagnostics, seed-to-seed spread (mean over steps of max-min across seeds):")
+  for tag in ([] if args.no_band else AUX):
     k = key(tag)
     steps = sorted(set.intersection(*[set(r.get(k, {})) for r in runs]))
     if steps:
@@ -167,7 +171,8 @@ def main():
   fig.tight_layout()
   fig.savefig(args.out + ".png", dpi=120)
   with open(args.out + ".json", "w") as f:
-    json.dump({"seeds": args.tb, "labels": labels, "band": band}, f, indent=1)
+    json.dump({"runs" if args.no_band else "seeds": args.tb, "labels": labels, "extras": args.extra or [], "extra_labels": extra_labels,
+               "curves" if args.no_band else "band": band, "mode": "independent_curves" if args.no_band else "min_max_band"}, f, indent=1)
   print(f"\nsaved {args.out}.png and {args.out}.json")
 
 
