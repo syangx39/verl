@@ -50,11 +50,25 @@ kl_loss_coef=0.0                     # kl_coeff 0.0: no KL, no reference model
 # detached. Gradient = -adv * w * grad(log pi), the same as Meta's IF Meta's w is detached (asked, PENDING).
 # verl's rollout-correction backend also clamps the log-ratio to +-20 before exponentiating (same overflow guard as Meta).
 IS_THRESHOLD=${IS_THRESHOLD:-3.0}
+# SINGLE_FWD=1: single-forward path (bypass_mode + loss_type=reinforce). The trainer skips the separate no-grad
+# old-log-prob pass; the loss is -A * w * log pi with w = min(exp(clamp(logp_current.detach() - logp_rollout)), 3.0)
+# computed under no_grad from the TRAINING pass (core_algos.compute_policy_loss_bypass_mode -> _reinforce). Gradient is
+# identical in form to the two-pass path (ratio == 1 there); the loss scalar differs. Valid only because one optimizer
+# update happens per rollout batch (mini == batch, ppo_epochs 1). actor/entropy then comes from the update pass
+# (actor.calculate_entropy=True) instead of the skipped pass. SINGLE_FWD=0 (default): two-pass path as validated.
+SINGLE_FWD=${SINGLE_FWD:-0}
+if [ "${SINGLE_FWD}" = "1" ]; then
+  BYPASS=True; LOSS_TYPE=reinforce; CALC_ENTROPY=True
+else
+  BYPASS=False; LOSS_TYPE=ppo_clip; CALC_ENTROPY=False
+fi
 IS_ARGS=( "algorithm.rollout_correction.rollout_is=token"                 # per-token IS (TIS), verl v0.8 rollout_correction.yaml
           "algorithm.rollout_correction.rollout_is_threshold=${IS_THRESHOLD}"   # upper truncation only
           "algorithm.rollout_correction.rollout_rs=null"                    # no rejection sampling
           "algorithm.rollout_correction.rollout_is_batch_normalize=False"   # raw weights
-          "algorithm.rollout_correction.bypass_mode=False" )                # decoupled: rollout / old(trainer) / current
+          "algorithm.rollout_correction.bypass_mode=${BYPASS}"              # False: decoupled (rollout / old(trainer) / current); True: single forward
+          "algorithm.rollout_correction.loss_type=${LOSS_TYPE}"             # reinforce with bypass (ppo_clip with bypass = sampler-denominator PPO: NOT our semantics)
+          "actor_rollout_ref.actor.calculate_entropy=${CALC_ENTROPY}" )     # entropy from the update pass when the old-logp pass is skipped
 # the resolved-config pre-flight below aborts if the fork spells these keys differently
 export REWARD_PENALTY_SOURCES=${META_PENALTY_SOURCES:-gsm8k_boxed_train}   # overlong penalty is TRAINING-only (Meta evaluates the raw reward)
 temperature=1.0                      # generator.temperature
@@ -221,7 +235,8 @@ except Exception as e:  # noqa: BLE001
 expect = {
   "algorithm.rollout_correction.rollout_is": "token", "algorithm.rollout_correction.rollout_is_threshold": ${IS_THRESHOLD},
   "algorithm.rollout_correction.rollout_rs": None, "algorithm.rollout_correction.rollout_is_batch_normalize": False,
-  "algorithm.rollout_correction.bypass_mode": False, "algorithm.adv_estimator": "grpo", "algorithm.use_kl_in_reward": False,
+  "algorithm.rollout_correction.bypass_mode": ${BYPASS}, "algorithm.rollout_correction.loss_type": "${LOSS_TYPE}",
+  "actor_rollout_ref.actor.calculate_entropy": ${CALC_ENTROPY}, "algorithm.adv_estimator": "grpo", "algorithm.use_kl_in_reward": False,
   "actor_rollout_ref.actor.clip_ratio_low": ${clip_ratio_low}, "actor_rollout_ref.actor.clip_ratio_high": ${clip_ratio_high},
   "actor_rollout_ref.actor.clip_ratio_c": ${clip_ratio_c}, "actor_rollout_ref.actor.loss_agg_mode": "${loss_agg_mode}",
   "actor_rollout_ref.actor.use_dynamic_bsz": False, "actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu": ${micro_bsz_per_gpu},
@@ -280,7 +295,7 @@ on_exit() {
 }
 trap on_exit EXIT
 
-echo "[recipe] model=Qwen3-0.6B-Base IS=token/${IS_THRESHOLD}(no-bypass,no-norm,no-rs) dual_clip=${clip_ratio_c} eps=1e-8 fused=False lr=${actor_lr} sched=${lr_scheduler} warmup=${lr_warmup_steps} steps=${TOTAL_STEPS} batch=${train_batch_size}x${rollout_n} mini=${ppo_mini_batch_size} (mu=1) micro/gpu=${micro_bsz_per_gpu} dyn_bsz=False clip=${clip_ratio_low}/${clip_ratio_high} kl=${kl_loss_coef} T=${temperature} top_p=${top_p} top_k=${top_k} prompt=${max_prompt_length} cap=${max_response_length} fmt_score=${REWARD_FORMAT_SCORE} overlong=${REWARD_OVERLONG_BUFFER}/${REWARD_OVERLONG_PENALTY} penalty_sources=${REWARD_PENALTY_SOURCES} wd=${weight_decay} loss_agg=${loss_agg_mode} stop=[151645,151643] fp32-master eval=test512@${TEST_FREQ}"
+echo "[recipe] model=$(basename ${MODEL_PATH}) fwd=$([ "${SINGLE_FWD}" = "1" ] && echo single/bypass+reinforce || echo two-pass) IS=token/${IS_THRESHOLD}(no-norm,no-rs) dual_clip=${clip_ratio_c} eps=1e-8 fused=False lr=${actor_lr} sched=${lr_scheduler} warmup=${lr_warmup_steps} steps=${TOTAL_STEPS} batch=${train_batch_size}x${rollout_n} mini=${ppo_mini_batch_size} (mu=1) micro/gpu=${micro_bsz_per_gpu} dyn_bsz=False clip=${clip_ratio_low}/${clip_ratio_high} kl=${kl_loss_coef} T=${temperature} top_p=${top_p} top_k=${top_k} prompt=${max_prompt_length} cap=${max_response_length} fmt_score=${REWARD_FORMAT_SCORE} overlong=${REWARD_OVERLONG_BUFFER}/${REWARD_OVERLONG_PENALTY} penalty_sources=${REWARD_PENALTY_SOURCES} wd=${weight_decay} loss_agg=${loss_agg_mode} stop=[151645,151643] fp32-master eval=test512@${TEST_FREQ}"
 echo "[meta] tensorboard -> ${TB_DIR}"; echo "[meta] tb mirror -> ${TB_MIRROR}"; echo "[meta] resolved config -> ${CFG_LOG}"
 
 ########################### launch ####################################################
