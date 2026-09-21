@@ -172,7 +172,7 @@ def main():
       if args.once:
         return
       continue
-    ent = m.get("actor/entropy", [])
+    ent = m.get("actor/entropy") or m.get("actor/entropy_loss", [])     # update-pass entropy (single-forward runs) is logged as actor/entropy_loss
     cap = m.get("response_length/clip_ratio", [])
     gn = m.get("actor/grad_norm", [])
     acc = rollout_acc(args.rollout, expect_groups=args.groups, group_size=args.group_size) if args.rollout and os.path.isdir(args.rollout) else []

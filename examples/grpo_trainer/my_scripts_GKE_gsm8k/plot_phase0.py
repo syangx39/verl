@@ -340,6 +340,8 @@ def main():
   # mu=1 and only informative in multi-update ablations -> printed, not plotted.
   ax = axes[4]
   st, v = tb_get(tb, "actor/entropy")
+  if not st:
+    st, v = tb_get(tb, "actor/entropy_loss")                              # single-forward runs: entropy from the update pass
   if len(st):
     ax.plot(st, v, color="#08519c", lw=1.5, label="actor/entropy")
     ax.set_ylabel("entropy (nats/token)")

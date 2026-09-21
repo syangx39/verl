@@ -245,9 +245,12 @@ def main():
     rep["loss"] = loss_total; rep["grad_norm_preclip"] = gn
     # log-prob comparison first (numerics), then loss / grad
     if "old_log_probs" in d:
-      dd = np.abs(logp_all - d["old_log_probs"].astype(np.float64)) * RM
-      rep["logp_vs_dump"] = {"mean_abs": float(dd.sum() / N), "p99": float(np.percentile(dd[RM > 0], 99)), "max_abs": float(dd.max())}
-      print(f"[2a] actor logp (HF autocast) vs dumped old_log_probs (FSDP): mean|d| {rep['logp_vs_dump']['mean_abs']:.2e} p99 {rep['logp_vs_dump']['p99']:.2e} max {rep['logp_vs_dump']['max_abs']:.2e}  <- read this before the gradient numbers")
+      bypass = np.array_equal(d["old_log_probs"], d["rollout_log_probs"])     # bypass dumps: old == sampler; the trainer forward is old_log_probs_repeat
+      trainer_key = "old_log_probs_repeat" if (bypass and "old_log_probs_repeat" in d) else "old_log_probs"
+      dd = np.abs(logp_all - d[trainer_key].astype(np.float64)) * RM
+      rep["logp_vs_dump"] = {"against": trainer_key, "mean_abs": float(dd.sum() / N), "p99": float(np.percentile(dd[RM > 0], 99)), "max_abs": float(dd.max())}
+      what = "FSDP trainer forward (diagnostic pass; this dump is from a bypass run where old_log_probs == sampler)" if bypass else "FSDP trainer, pre-update"
+      print(f"[2a] actor logp (HF autocast) vs {trainer_key} ({what}): mean|d| {rep['logp_vs_dump']['mean_abs']:.2e} p99 {rep['logp_vs_dump']['p99']:.2e} max {rep['logp_vs_dump']['max_abs']:.2e}  <- read this before the gradient numbers")
     print(f"[2b] loss {loss_total:.6f} | pre-clip grad norm {gn:.6f} | {time.time() - t0:.0f}s")
     if is_stats:
       wv = np.concatenate(is_stats)

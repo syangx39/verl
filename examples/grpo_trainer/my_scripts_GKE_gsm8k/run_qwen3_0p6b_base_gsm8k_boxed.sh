@@ -69,6 +69,12 @@ IS_ARGS=( "algorithm.rollout_correction.rollout_is=token"                 # per-
           "algorithm.rollout_correction.bypass_mode=${BYPASS}"              # False: decoupled (rollout / old(trainer) / current); True: single forward
           "algorithm.rollout_correction.loss_type=${LOSS_TYPE}"             # reinforce with bypass (ppo_clip with bypass = sampler-denominator PPO: NOT our semantics)
           "actor_rollout_ref.actor.calculate_entropy=${CALC_ENTROPY}" )     # entropy from the update pass when the old-logp pass is skipped
+if [ "${SINGLE_FWD}" = "1" ]; then
+  # The WORKER captures actor.policy_loss at init; the driver-side apply_bypass_mode() cannot change it afterwards.
+  # Without these two the worker silently runs loss_mode=vanilla with old=rollout, i.e. sampler-denominator clipped PPO.
+  IS_ARGS+=( "actor_rollout_ref.actor.policy_loss.loss_mode=bypass_mode"
+             '+actor_rollout_ref.actor.policy_loss.rollout_correction=${algorithm.rollout_correction}' )
+fi
 # the resolved-config pre-flight below aborts if the fork spells these keys differently
 export REWARD_PENALTY_SOURCES=${META_PENALTY_SOURCES:-gsm8k_boxed_train}   # overlong penalty is TRAINING-only (Meta evaluates the raw reward)
 temperature=1.0                      # generator.temperature
@@ -237,6 +243,7 @@ expect = {
   "algorithm.rollout_correction.rollout_rs": None, "algorithm.rollout_correction.rollout_is_batch_normalize": False,
   "algorithm.rollout_correction.bypass_mode": ${BYPASS}, "algorithm.rollout_correction.loss_type": "${LOSS_TYPE}",
   "actor_rollout_ref.actor.calculate_entropy": ${CALC_ENTROPY}, "algorithm.adv_estimator": "grpo", "algorithm.use_kl_in_reward": False,
+  "actor_rollout_ref.actor.policy_loss.loss_mode": "$([ "${SINGLE_FWD}" = "1" ] && echo bypass_mode || echo vanilla)",
   "actor_rollout_ref.actor.clip_ratio_low": ${clip_ratio_low}, "actor_rollout_ref.actor.clip_ratio_high": ${clip_ratio_high},
   "actor_rollout_ref.actor.clip_ratio_c": ${clip_ratio_c}, "actor_rollout_ref.actor.loss_agg_mode": "${loss_agg_mode}",
   "actor_rollout_ref.actor.use_dynamic_bsz": False, "actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu": ${micro_bsz_per_gpu},
@@ -252,6 +259,9 @@ expect = {
   "data.train_batch_size": ${train_batch_size}, "data.max_prompt_length": ${max_prompt_length}, "data.max_response_length": ${max_response_length},
   "trainer.total_training_steps": ${TOTAL_STEPS}, "trainer.test_freq": ${TEST_FREQ}, "trainer.nnodes": ${NNODES}, "trainer.n_gpus_per_node": ${GPUS_PER_NODE},
 }
+if ${BYPASS}:   # worker-side copy must mirror algorithm.rollout_correction (hydra interpolation resolved)
+    for k in ("bypass_mode", "loss_type", "rollout_is", "rollout_is_threshold"):
+        expect[f"actor_rollout_ref.actor.policy_loss.rollout_correction.{k}"] = expect[f"algorithm.rollout_correction.{k}"]
 bad = []
 for key, want in expect.items():
     got = OmegaConf.select(cfg, key, default="<MISSING>")
