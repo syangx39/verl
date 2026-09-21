@@ -156,32 +156,58 @@ def main():
       raise SystemExit(f"{lab}: logged grad norm {gn} >= max_grad_norm {args.max_grad_norm}: clipping engaged, exp_avg is post-clip")
     else:
       print(f"precondition: {lab} grad norm {gn} < {args.max_grad_norm}: no clipping")
-  # (4) identical injected batches: tokens, rewards, advantages (rows matched by (qid, response bytes))
-  if args.dump_a and args.dump_b:
-    import numpy as np
-    if len(args.dump_a) != len(args.dump_b):
-      raise SystemExit("--dump_a/--dump_b must have the same number of files")
-    for fa, fb in zip(args.dump_a, args.dump_b):
-      za, zb = np.load(fa, allow_pickle=False), np.load(fb, allow_pickle=False)
-      def rows(z):
-        keyed = {}
-        for i in range(z["responses"].shape[0]):
-          k = (int(z["nt__qid"][i]), z["responses"][i].tobytes(), z["response_mask"][i].tobytes())
-          if k in keyed:
-            raise SystemExit(f"duplicate (qid, response) row in {fa if z is za else fb}")
-          keyed[k] = i
-        return keyed
-      ra, rb = rows(za), rows(zb)
-      if set(ra) != set(rb):
-        raise SystemExit(f"{fa} vs {fb}: injected token rows differ ({len(set(ra) - set(rb))} only in A, {len(set(rb) - set(ra))} only in B)")
-      ia = np.array([ra[k] for k in sorted(ra)]); ib = np.array([rb[k] for k in sorted(rb)])
-      for key in ("token_level_scores", "advantages", "rollout_log_probs"):
-        d = np.abs(za[key][ia] - zb[key][ib]).max()
-        if d > 1e-6:
-          raise SystemExit(f"{fa} vs {fb}: {key} differ (max |d| {d:.3e}) despite identical tokens")
-      print(f"precondition: {os.path.basename(fa)} vs {os.path.basename(fb)}: {len(ra)} rows identical in tokens, masks, rewards, advantages, rollout log-probs")
-  else:
-    print("precondition: no --dump_a/--dump_b given -> identical-batch NOT verified (pass the fixture dumps of both runs)")
+  # (4) identical injected batches: the dumps must be this run's own outputs for steps 1..delta_step, and rows must
+  #     match as a MULTISET keyed by (qid, response tokens, mask) -- identical responses within a 16-sample group are legal
+  if not (args.dump_a and args.dump_b):
+    raise SystemExit("pass --dump_a/--dump_b: the fixture dumps of BOTH runs for steps 1..delta_step (identical-batch check is required)")
+  import numpy as np
+
+  def load_dumps(files, run_dir, label):
+    by_step = {}
+    for f in files:
+      meta_path = f[:-4] + ".json"
+      if not os.path.exists(meta_path):
+        raise SystemExit(f"{label}: {f} has no sidecar json (dump not produced by the fixture patch)")
+      meta = json.load(open(meta_path))
+      if meta.get("experiment_name") != os.path.basename(os.path.normpath(run_dir)):
+        raise SystemExit(f"{label}: {f} belongs to run {meta.get('experiment_name')!r}, not {os.path.basename(os.path.normpath(run_dir))!r}")
+      st = int(meta.get("global_step", -1))
+      if st in by_step:
+        raise SystemExit(f"{label}: two dumps for step {st}")
+      by_step[st] = f
+    need = list(range(1, args.delta_step + 1))
+    if sorted(by_step) != need:
+      raise SystemExit(f"{label}: dumps cover steps {sorted(by_step)}, need exactly {need} (delta_step={args.delta_step})")
+    return by_step
+
+  da_files, db_files = load_dumps(args.dump_a, args.run_a, args.label_a), load_dumps(args.dump_b, args.run_b, args.label_b)
+  for st in range(1, args.delta_step + 1):
+    za, zb = np.load(da_files[st], allow_pickle=False), np.load(db_files[st], allow_pickle=False)
+
+    def groups(z):
+      g = {}
+      for i in range(z["responses"].shape[0]):
+        k = (int(z["nt__qid"][i]), z["responses"][i].tobytes(), z["response_mask"][i].tobytes())
+        g.setdefault(k, []).append(i)
+      return g
+
+    ga_, gb_ = groups(za), groups(zb)
+    ca, cb = {k: len(v) for k, v in ga_.items()}, {k: len(v) for k, v in gb_.items()}
+    if ca != cb:
+      only_a = sum(v for k, v in ca.items() if cb.get(k, 0) != v); only_b = sum(v for k, v in cb.items() if ca.get(k, 0) != v)
+      raise SystemExit(f"step {st}: injected token rows differ as multisets ({only_a} rows unmatched in A, {only_b} in B)")
+    worst = {"token_level_scores": 0.0, "advantages": 0.0, "rollout_log_probs": 0.0}
+    for k, ia in ga_.items():
+      ib = gb_[k]
+      for key in worst:
+        va = np.sort(za[key][ia].reshape(len(ia), -1), axis=0); vb = np.sort(zb[key][ib].reshape(len(ib), -1), axis=0)
+        worst[key] = max(worst[key], float(np.abs(va - vb).max()))
+    bad = {k: v for k, v in worst.items() if v > 1e-6}
+    if bad:
+      raise SystemExit(f"step {st}: identical tokens but values differ: {bad}")
+    n_dup = sum(1 for v in ga_.values() if len(v) > 1)
+    print(f"precondition: step {st}: {za['responses'].shape[0]} rows match as a multiset ({n_dup} keys with duplicate responses); "
+          f"rewards / advantages / rollout log-probs identical (max |d| {max(worst.values()):.1e})")
 
   ga = load_grads(os.path.join(args.run_a, f"global_step_{args.grad_step}", "actor"), model, args.beta1)
   gb = load_grads(os.path.join(args.run_b, f"global_step_{args.grad_step}", "actor"), model, args.beta1)
