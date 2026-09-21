@@ -57,12 +57,20 @@ IS_THRESHOLD=${IS_THRESHOLD:-3.0}
 # update happens per rollout batch (mini == batch, ppo_epochs 1). actor/entropy then comes from the update pass
 # (actor.calculate_entropy=True) instead of the skipped pass. SINGLE_FWD=0 (default): two-pass path as validated.
 SINGLE_FWD=${SINGLE_FWD:-0}
+# IS_MODE (single-forward only): how the sampler/trainer mismatch enters the loss
+#   tis  (default): ratio == 1 (reinforce) + detached truncated IS weight w = min(exp(logp_train - logp_sampler), 3)   [Meta GPU / Google]
+#   ppo           : old = sampler log-probs, ratio = pi_theta/pi_sampler inside the clipped PPO surrogate (0.2/0.28) with
+#                   dual clip; NO TIS weight                                                                              [Meta TPU a26d]
+#   Inside the clip range both give the per-token gradient -A*ratio*grad(log pi); they differ only on outlier tokens
+#   (TIS caps the weight at 3 and keeps the gradient; PPO clip zeroes it).
+IS_MODE=${IS_MODE:-tis}
 if [ "${SINGLE_FWD}" = "1" ]; then
-  BYPASS=True; LOSS_TYPE=reinforce; CALC_ENTROPY=True
+  BYPASS=True; CALC_ENTROPY=True
+  if [ "${IS_MODE}" = "ppo" ]; then LOSS_TYPE=ppo_clip; ROLLOUT_IS=null; clip_ratio_c=${META_CLIP_C:-10.0}; else LOSS_TYPE=reinforce; ROLLOUT_IS=token; fi
 else
-  BYPASS=False; LOSS_TYPE=ppo_clip; CALC_ENTROPY=False
+  BYPASS=False; LOSS_TYPE=ppo_clip; CALC_ENTROPY=False; ROLLOUT_IS=token
 fi
-IS_ARGS=( "algorithm.rollout_correction.rollout_is=token"                 # per-token IS (TIS), verl v0.8 rollout_correction.yaml
+IS_ARGS=( "algorithm.rollout_correction.rollout_is=${ROLLOUT_IS}"           # token: per-token TIS; null: off (PPO-IS mode)
           "algorithm.rollout_correction.rollout_is_threshold=${IS_THRESHOLD}"   # upper truncation only
           "algorithm.rollout_correction.rollout_rs=null"                    # no rejection sampling
           "algorithm.rollout_correction.rollout_is_batch_normalize=False"   # raw weights
@@ -246,7 +254,7 @@ except Exception as e:  # noqa: BLE001
     print(f"--- {sys.argv[2]} tail:"); print("".join(open(sys.argv[2]).readlines()[-30:]))
     sys.exit(1)
 expect = {
-  "algorithm.rollout_correction.rollout_is": "token", "algorithm.rollout_correction.rollout_is_threshold": ${IS_THRESHOLD},
+  "algorithm.rollout_correction.rollout_is": $([ "${ROLLOUT_IS}" = "null" ] && echo None || echo "\"${ROLLOUT_IS}\""), "algorithm.rollout_correction.rollout_is_threshold": ${IS_THRESHOLD},
   "algorithm.rollout_correction.rollout_rs": None, "algorithm.rollout_correction.rollout_is_batch_normalize": False,
   "algorithm.rollout_correction.bypass_mode": ${BYPASS}, "algorithm.rollout_correction.loss_type": "${LOSS_TYPE}",
   "actor_rollout_ref.actor.calculate_entropy": ${CALC_ENTROPY}, "algorithm.adv_estimator": "grpo", "algorithm.use_kl_in_reward": False,
@@ -312,7 +320,7 @@ on_exit() {
 }
 trap on_exit EXIT
 
-echo "[recipe] model=$(basename ${MODEL_PATH}) fwd=$([ "${SINGLE_FWD}" = "1" ] && echo single/bypass+reinforce || echo two-pass) IS=token/${IS_THRESHOLD}(no-norm,no-rs) dual_clip=${clip_ratio_c} eps=1e-8 fused=False lr=${actor_lr} sched=${lr_scheduler} warmup=${lr_warmup_steps} steps=${TOTAL_STEPS} batch=${train_batch_size}x${rollout_n} mini=${ppo_mini_batch_size} (mu=1) micro/gpu=${micro_bsz_per_gpu} dyn_bsz=False clip=${clip_ratio_low}/${clip_ratio_high} kl=${kl_loss_coef} T=${temperature} top_p=${top_p} top_k=${top_k} prompt=${max_prompt_length} cap=${max_response_length} fmt_score=${REWARD_FORMAT_SCORE} overlong=${REWARD_OVERLONG_BUFFER}/${REWARD_OVERLONG_PENALTY} penalty_sources=${REWARD_PENALTY_SOURCES} wd=${weight_decay} loss_agg=${loss_agg_mode} stop=[151645,151643] fp32-master eval=test512@${TEST_FREQ}"
+echo "[recipe] model=$(basename ${MODEL_PATH}) fwd=$([ "${SINGLE_FWD}" = "1" ] && echo "single/bypass+${LOSS_TYPE}" || echo two-pass) IS=$([ "${ROLLOUT_IS}" = "null" ] && echo "none(PPO-IS: sampler-denominator clip)" || echo "token/${IS_THRESHOLD}(no-norm,no-rs)") dual_clip=${clip_ratio_c} eps=1e-8 fused=False lr=${actor_lr} sched=${lr_scheduler} warmup=${lr_warmup_steps} steps=${TOTAL_STEPS} batch=${train_batch_size}x${rollout_n} mini=${ppo_mini_batch_size} (mu=1) micro/gpu=${micro_bsz_per_gpu} dyn_bsz=False clip=${clip_ratio_low}/${clip_ratio_high} kl=${kl_loss_coef} T=${temperature} top_p=${top_p} top_k=${top_k} prompt=${max_prompt_length} cap=${max_response_length} fmt_score=${REWARD_FORMAT_SCORE} overlong=${REWARD_OVERLONG_BUFFER}/${REWARD_OVERLONG_PENALTY} penalty_sources=${REWARD_PENALTY_SOURCES} wd=${weight_decay} loss_agg=${loss_agg_mode} stop=[151645,151643] fp32-master eval=test512@${TEST_FREQ}"
 echo "[meta] tensorboard -> ${TB_DIR}"; echo "[meta] tb mirror -> ${TB_MIRROR}"; echo "[meta] resolved config -> ${CFG_LOG}"
 
 ########################### launch ####################################################
