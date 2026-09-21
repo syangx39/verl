@@ -218,6 +218,8 @@ TRAIN_ARGS=(
     "+ray_kwargs.ray_init.runtime_env.env_vars.REWARD_PENALTY_SOURCES='${REWARD_PENALTY_SOURCES}'"
     "+ray_kwargs.ray_init.runtime_env.env_vars.LOGPROB_FIXTURE_DIR='${LOGPROB_FIXTURE_DIR:-}'"
     "+ray_kwargs.ray_init.runtime_env.env_vars.LOGPROB_FIXTURE_STEP='${LOGPROB_FIXTURE_STEP:-1}'"
+    "+ray_kwargs.ray_init.runtime_env.env_vars.INJECT_BATCH_NPZ='${INJECT_BATCH_NPZ:-}'"
+    "+ray_kwargs.ray_init.runtime_env.env_vars.INJECT_BATCH_STEP='${INJECT_BATCH_STEP:-1}'"
 )
 
 ########################### resolved-config pre-flight (hydra --cfg job; no Ray, no GPU) ############
