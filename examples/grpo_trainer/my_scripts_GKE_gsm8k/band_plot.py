@@ -62,6 +62,7 @@ def main():
   ap.add_argument("--allow_partial", action="store_true", help="do not fail on missing checkpoints (exploratory only)")
   ap.add_argument("--metrics", nargs="*", default=DEFAULT_METRICS, help="TB tag=title entries (default: Track A metrics)")
   ap.add_argument("--title", default=None, help="figure title (default: 'GB200 reference band: <labels>')")
+  ap.add_argument("--no_band", action="store_true", help="draw every run (--tb and --extra) as an independent labelled curve: no band, no mean, no band statistics")
   args = ap.parse_args()
   METRICS.extend(tuple(m.split("=", 1)) if "=" in m else (m, m) for m in args.metrics)
 
@@ -118,19 +119,26 @@ def main():
     band[tag] = [{"step": int(s), "min": float(l), "max": float(h), "mean": float(m),
                   "per_seed": [float(v) for v in M[:, i]]}
                  for i, (s, l, h, m) in enumerate(zip(steps, lo, hi, mean))]
-    ax.fill_between(steps, lo, hi, color="#9ecae1", alpha=0.5, label=f"min-max band ({len(runs)} seeds)")
-    for i, lab in enumerate(labels):
-      ax.plot(steps, M[i], lw=1, alpha=0.8, label=lab)
-    ax.plot(steps, mean, color="k", lw=2, label="mean")
-    for e, lab in zip(extras, extra_labels):
+    if args.no_band:
+      for i, lab in enumerate(labels):
+        ax.plot(steps, M[i], lw=2, marker="o", ms=4, label=lab)
+    else:
+      ax.fill_between(steps, lo, hi, color="#9ecae1", alpha=0.5, label=f"min-max band ({len(runs)} seeds)")
+      for i, lab in enumerate(labels):
+        ax.plot(steps, M[i], lw=1, alpha=0.8, label=lab)
+      ax.plot(steps, mean, color="k", lw=2, label="mean")
+    for j, (e, lab) in enumerate(zip(extras, extra_labels)):
       es = sorted(s for s in e.get(k, {}) if s in set(steps))
       if es:
-        ax.plot(es, [e[k][s] for s in es], color="#d62728", lw=2, ls="--", marker="o", ms=4, label=lab)
+        ax.plot(es, [e[k][s] for s in es], lw=2, ls="--", marker="s", ms=4, label=lab, **({} if args.no_band else {"color": "#d62728"}))
     ax.set_title(title)
     ax.set_xlabel("training step")
     ax.grid(alpha=0.3)
     ax.legend(fontsize=8)
 
+    if args.no_band:
+      print(f"\n{title}: independent curves, no band statistics")
+      continue
     width = hi - lo
     print(f"\n{title}")
     print(f"  {'step':>5} {'min':>7} {'max':>7} {'mean':>7} {'width':>7}   per seed")
@@ -155,7 +163,7 @@ def main():
       M = np.array([[r[k][s] for s in steps] for r in runs])
       print(f"  {tag:28s} mean {M.mean():9.4f}  spread {np.mean(M.max(0) - M.min(0)):9.4f}")
 
-  fig.suptitle(args.title or f"GB200 reference band: {', '.join(labels)}")
+  fig.suptitle(args.title or (f"runs: {', '.join(labels + extra_labels)}" if args.no_band else f"GB200 reference band: {', '.join(labels)}"))
   fig.tight_layout()
   fig.savefig(args.out + ".png", dpi=120)
   with open(args.out + ".json", "w") as f:
