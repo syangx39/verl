@@ -123,6 +123,11 @@ if [ "${SKIP_IDLE_CHECK:-0}" != "1" ] && command -v ray >/dev/null 2>&1; then
 fi
 RT=$(python3 -c "import verl.trainer.ppo.ray_trainer as m; print(m.__file__)" 2>/dev/null | tail -1)
 grep -q "_DUMP_UID" "${RT}" || { echo "[meta] ABORT: ${RT} lacks the uid dump patch (patch_verl_dump_uid.py)"; exit 2; }
+if [ -n "${INJECT_BATCH_NPZ:-}" ]; then
+  grep -q 'def _inject_batch(self, batch: DataProto, npz_path: str)' "${RT}" || { echo "[meta] ABORT: INJECT_BATCH_NPZ set but ${RT} lacks the v2 injection hook (patch_verl_inject_batch.py) -- refusing to run a normally-sampled job by mistake"; exit 2; }
+  for f in $(echo "${INJECT_BATCH_NPZ}" | tr ',' '\n' | sed 's/^[0-9]*://'); do test -s "$f" || { echo "[meta] ABORT: injection dump missing: $f"; exit 2; }; done
+  echo "[meta] batch injection ENABLED: ${INJECT_BATCH_NPZ}"
+fi
 if [ "${REWARD_OVERLONG_BUFFER}" != "0" ]; then
   RM=$(python3 -c "import verl.experimental.reward_loop.reward_manager.naive as m; print(m.__file__)" 2>/dev/null | tail -1)
   grep -q "_RESP_LEN" "${RM}" || { echo "[meta] ABORT: ${RM} lacks the response_len patch (patch_verl_reward_response_len.py)"; exit 2; }

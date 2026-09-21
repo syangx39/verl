@@ -4,12 +4,16 @@
 Purpose: compare two trainer paths (e.g. single-forward bypass+reinforce vs two-pass) on IDENTICAL tokens inside
 the native trainer, so their step-1 gradients (exp_avg/(1-beta1)) and post-update weights can be compared directly.
 
-When INJECT_BATCH_NPZ is set, at global step INJECT_BATCH_STEP (default 1), right after the generated output is
-merged into the batch (and before response_mask / balance_batch), the trainer replaces, per prompt, the 16 generated
-responses with the 16 rows of the dump that carry the same question index (extra_info.index == dump nt__qid):
-    responses, attention_mask, position_ids, response_mask, rollout_log_probs, input_ids (= prompts ++ responses)
-Prompts are asserted equal token-for-token (same data.seed -> same prompts at that step), uids stay those of the
-current batch, and rewards are recomputed by the trainer's own reward function on the injected responses.
+INJECT_BATCH_NPZ names the dumps: either "1:/path/step1.npz,2:/path/step2.npz" (one per step, so consecutive steps can
+all be fixed and post-update weights compared), or a single path (applies at INJECT_BATCH_STEP, default 1). At each
+listed step, right after the generated output is merged into the batch (before response_mask / balance_batch), the
+trainer replaces, per prompt, the n generated responses with the n dump rows carrying the same question index
+(extra_info.index == dump nt__qid):
+    responses, attention_mask, position_ids, response_mask, rollout_log_probs, input_ids (= prompts ++ responses),
+    rm_scores (<- dump token_level_scores)  and every reward extra listed in meta_info["reward_extra_keys"] (<- nt__<key>)
+Rewards are NOT recomputed later in this fork (extract_reward only reads rm_scores / the extras), so they are injected
+from the dump, where the same scorer produced them for exactly these responses. Prompts are asserted equal token-for-
+token (same data.seed -> same prompts at that step); uids stay those of the current batch.
 Requirements: the dump must come from a run with the same data.seed, batch size, rollout.n, prompt/response lengths
 (patch_verl_logprob_fixture.py produces it); every current prompt must have exactly rollout.n dump rows.
 
@@ -24,8 +28,17 @@ path = sys.argv[1] if len(sys.argv) > 1 else "/workspace/meta-RL/verl/verl/train
 src = open(path, encoding="utf-8").read()
 MARK = "_INJECT_BATCH"
 if MARK in src:
-  print("INJECT-BATCH PATCH: already patched")
-  sys.exit(0)
+  if 'def _inject_batch(self, batch: DataProto, npz_path: str)' in src and '"rm_scores" not in batch.batch.keys()' in src:
+    print("INJECT-BATCH PATCH: already patched (v2: multi-step + reward injection)")
+    sys.exit(0)
+  # v1 hook present: remove it and re-apply v2 (the v1 method and call block are self-contained)
+  import re
+  src = re.sub(r"\n                    # _INJECT_BATCH: env-gated replacement.*?batch = self\._inject_batch\(batch\)\n", "", src, count=1, flags=re.S)
+  src = re.sub(r"    def _inject_batch\(self, batch: DataProto\) -> DataProto:  # _INJECT_BATCH.*?\n        return batch\n\n", "", src, count=1, flags=re.S)
+  if MARK in src:
+    print("INJECT-BATCH PATCH: FAILED could not remove the v1 hook cleanly; restore the file and re-apply")
+    sys.exit(1)
+  print("INJECT-BATCH PATCH: removed v1 hook, applying v2")
 
 CALL_ANCHOR = '''                    batch = batch.union(gen_batch_output)
 
@@ -42,19 +55,23 @@ CALL_INSERT = '''                    batch = batch.union(gen_batch_output)
 
                     # _INJECT_BATCH: env-gated replacement of the generated responses by a fixed dump (see _inject_batch)
                     import os as _os
-                    if _os.environ.get("INJECT_BATCH_NPZ") and self.global_steps == int(_os.environ.get("INJECT_BATCH_STEP", "1")):
-                        batch = self._inject_batch(batch)
+                    _spec = _os.environ.get("INJECT_BATCH_NPZ", "")
+                    if _spec:
+                        _map = ({int(x.split(":", 1)[0]): x.split(":", 1)[1] for x in _spec.split(",")} if ":" in _spec
+                                else {int(_os.environ.get("INJECT_BATCH_STEP", "1")): _spec})
+                        if self.global_steps in _map:
+                            batch = self._inject_batch(batch, _map[self.global_steps])
 
                     if "response_mask" not in batch.batch.keys():
 '''
-METHOD_INSERT = '''    def _inject_batch(self, batch: DataProto) -> DataProto:  # _INJECT_BATCH
-        """Replace generated responses with the rows of INJECT_BATCH_NPZ that carry the same question index."""
+METHOD_INSERT = '''    def _inject_batch(self, batch: DataProto, npz_path: str) -> DataProto:  # _INJECT_BATCH
+        """Replace generated responses AND their rewards with the rows of npz_path that carry the same question index."""
         import os
         import numpy as np
         import torch
 
-        z = np.load(os.environ["INJECT_BATCH_NPZ"], allow_pickle=False)
-        need = ["prompts", "responses", "attention_mask", "position_ids", "response_mask", "rollout_log_probs", "nt__qid"]
+        z = np.load(npz_path, allow_pickle=False)
+        need = ["prompts", "responses", "attention_mask", "position_ids", "response_mask", "rollout_log_probs", "nt__qid", "token_level_scores"]
         missing = [k for k in need if k not in z.files]
         if missing:
             raise RuntimeError(f"_INJECT_BATCH: dump lacks {missing}")
@@ -87,9 +104,22 @@ METHOD_INSERT = '''    def _inject_batch(self, batch: DataProto) -> DataProto:  
                 raise RuntimeError(f"_INJECT_BATCH: shape mismatch for {k}: dump {tuple(t.shape)} vs batch {tuple(batch.batch[k].shape)}")
             batch.batch[k] = t
         batch.batch["input_ids"] = torch.cat([batch.batch["prompts"], batch.batch["responses"]], dim=1)
-        n_tok = int(batch.batch["response_mask"].sum())
-        print(f"[_INJECT_BATCH] step {self.global_steps}: replaced {len(cur_qid)} rows ({len(by_q)} questions x {n_rep}) from {os.environ['INJECT_BATCH_NPZ']}; "
-              f"prompts identical; injected completion tokens {n_tok}")
+        # rewards: this fork scores during rollout and extract_reward() only reads rm_scores + the extras -> inject them too
+        if "rm_scores" not in batch.batch.keys():
+            raise RuntimeError("_INJECT_BATCH: batch has no rm_scores (rollout-phase reward expected); cannot keep rewards consistent")
+        rm = torch.as_tensor(z["token_level_scores"][src_idx], device=dev, dtype=batch.batch["rm_scores"].dtype)
+        if rm.shape != batch.batch["rm_scores"].shape:
+            raise RuntimeError(f"_INJECT_BATCH: rm_scores shape {tuple(batch.batch['rm_scores'].shape)} vs dump {tuple(rm.shape)}")
+        batch.batch["rm_scores"] = rm
+        extra_keys = list(batch.meta_info.get("reward_extra_keys", []))
+        missing = [k for k in extra_keys if f"nt__{k}" not in z.files]
+        if missing:
+            raise RuntimeError(f"_INJECT_BATCH: dump lacks reward extras {missing} (present extras: {[k[4:] for k in z.files if k.startswith('nt__')]})")
+        for k in extra_keys:
+            batch.non_tensor_batch[k] = z[f"nt__{k}"][src_idx]
+        n_tok = int(batch.batch["response_mask"].sum()); seq_r = float(rm.sum(dim=1).mean())
+        print(f"[_INJECT_BATCH] step {self.global_steps}: replaced {len(cur_qid)} rows ({len(by_q)} questions x {n_rep}) from {npz_path}; "
+              f"prompts identical; injected completion tokens {n_tok}; injected rm_scores mean(seq reward) {seq_r:.6f}; extras {extra_keys}")
         return batch
 
 '''

@@ -120,12 +120,68 @@ def main():
   ap.add_argument("--label_a", default="A"); ap.add_argument("--label_b", default="B")
   ap.add_argument("--grad_step", type=int, default=1); ap.add_argument("--delta_step", type=int, default=2)
   ap.add_argument("--beta1", type=float, default=0.9); ap.add_argument("--out", default="compare_two_runs.json")
+  ap.add_argument("--dump_a", nargs="*", default=None, help="fixture dumps of run A for the compared steps (to assert identical tokens/rewards/advantages)")
+  ap.add_argument("--dump_b", nargs="*", default=None)
+  ap.add_argument("--grad_norm_a", type=float, default=None); ap.add_argument("--grad_norm_b", type=float, default=None)
+  ap.add_argument("--max_grad_norm", type=float, default=1.0)
   args = ap.parse_args()
   model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=torch.float32)
   names = [n for n, _ in model.named_parameters()]
   tied = {"lm_head.weight": "model.embed_tokens.weight"} if getattr(model.config, "tie_word_embeddings", False) else {}
   theta0 = load_weights(args.model)
   report = {"model": args.model, "run_a": args.run_a, "run_b": args.run_b}
+
+  # ---- preconditions
+  # (1) step-1 checkpoints equal theta_0 on both sides (first update at lr 0)
+  for lab, run in ((args.label_a, args.run_a), (args.label_b, args.run_b)):
+    w1 = load_weights(os.path.join(run, "global_step_1", "actor", "huggingface"))
+    mx = max(float((w1[k].float() - theta0[k].float()).abs().max()) for k in theta0 if k in w1)
+    if mx != 0.0:
+      raise SystemExit(f"{lab}: theta_1 != theta_0 (max |d| {mx:.3e}); the first update was not at lr 0 -> gradient recovery from exp_avg is not valid")
+    print(f"precondition: {lab} theta_1 == theta_0 (lr 0 first step) ok")
+  # (2) optimizer hyperparameters identical between runs
+  def pg(run):
+    f = sorted(glob.glob(os.path.join(run, "global_step_1", "actor", "optim_world_size_*_rank_0.pt")))[0]
+    g = torch.load(f, map_location="cpu", weights_only=False)["param_groups"][0]
+    return {k: g.get(k) for k in ("lr", "betas", "eps", "weight_decay")}
+  pa, pb = pg(args.run_a), pg(args.run_b)
+  if pa != pb:
+    raise SystemExit(f"optimizer param_groups differ: {pa} vs {pb}")
+  print(f"precondition: optimizer param_groups identical {pa}")
+  # (3) no clipping at the gradient step
+  for lab, gn in ((args.label_a, args.grad_norm_a), (args.label_b, args.grad_norm_b)):
+    if gn is None:
+      print(f"precondition: {lab} pre-clip grad norm not given (--grad_norm_*); cannot certify no clipping -> pass the logged actor/grad_norm")
+    elif gn >= args.max_grad_norm:
+      raise SystemExit(f"{lab}: logged grad norm {gn} >= max_grad_norm {args.max_grad_norm}: clipping engaged, exp_avg is post-clip")
+    else:
+      print(f"precondition: {lab} grad norm {gn} < {args.max_grad_norm}: no clipping")
+  # (4) identical injected batches: tokens, rewards, advantages (rows matched by (qid, response bytes))
+  if args.dump_a and args.dump_b:
+    import numpy as np
+    if len(args.dump_a) != len(args.dump_b):
+      raise SystemExit("--dump_a/--dump_b must have the same number of files")
+    for fa, fb in zip(args.dump_a, args.dump_b):
+      za, zb = np.load(fa, allow_pickle=False), np.load(fb, allow_pickle=False)
+      def rows(z):
+        keyed = {}
+        for i in range(z["responses"].shape[0]):
+          k = (int(z["nt__qid"][i]), z["responses"][i].tobytes(), z["response_mask"][i].tobytes())
+          if k in keyed:
+            raise SystemExit(f"duplicate (qid, response) row in {fa if z is za else fb}")
+          keyed[k] = i
+        return keyed
+      ra, rb = rows(za), rows(zb)
+      if set(ra) != set(rb):
+        raise SystemExit(f"{fa} vs {fb}: injected token rows differ ({len(set(ra) - set(rb))} only in A, {len(set(rb) - set(ra))} only in B)")
+      ia = np.array([ra[k] for k in sorted(ra)]); ib = np.array([rb[k] for k in sorted(rb)])
+      for key in ("token_level_scores", "advantages", "rollout_log_probs"):
+        d = np.abs(za[key][ia] - zb[key][ib]).max()
+        if d > 1e-6:
+          raise SystemExit(f"{fa} vs {fb}: {key} differ (max |d| {d:.3e}) despite identical tokens")
+      print(f"precondition: {os.path.basename(fa)} vs {os.path.basename(fb)}: {len(ra)} rows identical in tokens, masks, rewards, advantages, rollout log-probs")
+  else:
+    print("precondition: no --dump_a/--dump_b given -> identical-batch NOT verified (pass the fixture dumps of both runs)")
 
   ga = load_grads(os.path.join(args.run_a, f"global_step_{args.grad_step}", "actor"), model, args.beta1)
   gb = load_grads(os.path.join(args.run_b, f"global_step_{args.grad_step}", "actor"), model, args.beta1)
