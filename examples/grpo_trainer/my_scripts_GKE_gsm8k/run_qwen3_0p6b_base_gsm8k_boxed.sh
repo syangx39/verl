@@ -85,7 +85,8 @@ if [ "${SINGLE_FWD}" = "1" ]; then
              '+actor_rollout_ref.actor.policy_loss.rollout_correction=${algorithm.rollout_correction}' )
 fi
 # the resolved-config pre-flight below aborts if the fork spells these keys differently
-export REWARD_PENALTY_SOURCES=${META_PENALTY_SOURCES:-gsm8k_boxed_train}   # overlong penalty is TRAINING-only (Meta evaluates the raw reward)
+export REWARD_PENALTY_SOURCES=${META_PENALTY_SOURCES-gsm8k_boxed_train}    # overlong penalty is TRAINING-only (Meta evaluates the raw reward).
+                                                                             # META_PENALTY_SOURCES="" (set but empty) disables the penalty everywhere
 temperature=1.0                      # generator.temperature
 grad_clip=1.0                        # max_grad_norm
 TEST_FREQ=${TEST_FREQ:-20}           # eval_steps: 20
@@ -141,10 +142,12 @@ if [ "${REWARD_OVERLONG_BUFFER}" != "0" ]; then
   RM=$(python3 -c "import verl.experimental.reward_loop.reward_manager.naive as m; print(m.__file__)" 2>/dev/null | tail -1)
   grep -q "_RESP_LEN" "${RM}" || { echo "[meta] ABORT: ${RM} lacks the response_len patch (patch_verl_reward_response_len.py)"; exit 2; }
 fi
-# Meta's overlong fixtures are written against cap 2048: validate the RULE at 2048 regardless of the run's cap
-REWARD_MAX_RESP_LEN=2048 python3 "${REWARD_FN_PATH}" > "${LOG_DIR}/reward_fixtures_check.log" 2>&1 \
+# Meta's overlong fixtures are written against cap 2048 with the penalty on the train source: validate the RULE under
+# those settings regardless of what the run uses
+REWARD_MAX_RESP_LEN=2048 REWARD_PENALTY_SOURCES=gsm8k_boxed_train python3 "${REWARD_FN_PATH}" > "${LOG_DIR}/reward_fixtures_check.log" 2>&1 \
   || { echo "[meta] ABORT: reward failed Meta's fixtures:"; grep -E "FAIL|RESULT" "${LOG_DIR}/reward_fixtures_check.log"; exit 2; }
 [ "${max_response_length}" != "2048" ] && echo "[meta] NOTE: response cap ${max_response_length} (Meta: 2048) -- cap-sensitivity run, not the reference recipe; overlong penalty ramps from $((max_response_length-512))"
+[ -z "${REWARD_PENALTY_SOURCES}" ] && echo "[meta] NOTE: overlong penalty DISABLED (REWARD_PENALTY_SOURCES empty): training reward = raw boxed reward"
 grep -q "buffer': 512" "${LOG_DIR}/reward_fixtures_check.log" || { echo "[meta] ABORT: overlong buffer is not 512 (env leak?)"; grep knobs "${LOG_DIR}/reward_fixtures_check.log"; exit 2; }
 echo "[meta] reward pre-flight: $(grep RESULT "${LOG_DIR}/reward_fixtures_check.log") (Meta's 15 reward + 6 overlong fixtures, penalty train-only)"
 
