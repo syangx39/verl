@@ -146,8 +146,13 @@ fi
 # those settings regardless of what the run uses
 REWARD_MAX_RESP_LEN=2048 REWARD_PENALTY_SOURCES=gsm8k_boxed_train python3 "${REWARD_FN_PATH}" > "${LOG_DIR}/reward_fixtures_check.log" 2>&1 \
   || { echo "[meta] ABORT: reward failed Meta's fixtures:"; grep -E "FAIL|RESULT" "${LOG_DIR}/reward_fixtures_check.log"; exit 2; }
-[ "${max_response_length}" != "2048" ] && echo "[meta] NOTE: response cap ${max_response_length} (Meta: 2048) -- cap-sensitivity run, not the reference recipe; overlong penalty ramps from $((max_response_length-512))"
-[ -z "${REWARD_PENALTY_SOURCES}" ] && echo "[meta] NOTE: overlong penalty DISABLED (REWARD_PENALTY_SOURCES empty): training reward = raw boxed reward"
+if [ -z "${REWARD_PENALTY_SOURCES}" ]; then
+  PEN_NOTE="overlong penalty DISABLED (REWARD_PENALTY_SOURCES empty): training reward = raw boxed reward"
+else
+  PEN_NOTE="overlong penalty on ${REWARD_PENALTY_SOURCES}, ramps from $((max_response_length-512)) to cap ${max_response_length}"
+fi
+[ "${max_response_length}" != "2048" ] && echo "[meta] NOTE: response cap ${max_response_length} (Meta: 2048) -- cap-sensitivity run, not the reference recipe"
+echo "[meta] NOTE: ${PEN_NOTE}"
 grep -q "buffer': 512" "${LOG_DIR}/reward_fixtures_check.log" || { echo "[meta] ABORT: overlong buffer is not 512 (env leak?)"; grep knobs "${LOG_DIR}/reward_fixtures_check.log"; exit 2; }
 echo "[meta] reward pre-flight: $(grep RESULT "${LOG_DIR}/reward_fixtures_check.log") (Meta's 15 reward + 6 overlong fixtures, penalty train-only)"
 
