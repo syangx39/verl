@@ -33,7 +33,8 @@ rollout_n=16                         # num_generations: 16  -> 2048 sequences/st
 ppo_mini_batch_size=128              # ppo_epochs=1, one update per rollout (mu=1)
 micro_bsz_per_gpu=${MICRO_BSZ:-8}    # micro_batch_size: 8 per GPU (fixed; dynamic bsz OFF to match)
 max_prompt_length=512                # max_seq_length 2560 = 512 prompt + 2048 completion
-max_response_length=2048
+max_response_length=${META_RESP_CAP:-2048}   # Meta: 2048. META_RESP_CAP is for the cap-sensitivity appendix run only; the reward's
+                                             # cap (REWARD_MAX_RESP_LEN) and the pre-flight follow it, overlong buffer stays 512
 actor_lr=${META_ACTOR_LR:-2.0e-5}    # learning_rate (Meta: 2.0e-5). META_ACTOR_LR is for the LR-sensitivity control only;
                                      # the pre-flight, the [recipe] line and the resolved config all read this same variable
 lr_scheduler=cosine                  # lr_scheduler_type: cosine, decays to 0 at max_steps
@@ -93,7 +94,7 @@ SAVE_FREQ=${SAVE_FREQ:-50}           # save_steps: 50
 export REWARD_FORMAT_SCORE=${META_FORMAT_SCORE:-0.1}        # always set here -> inherited REWARD_* values cannot leak in
 export REWARD_OVERLONG_BUFFER=${META_OVERLONG_BUFFER:-512}
 export REWARD_OVERLONG_PENALTY=${META_OVERLONG_PENALTY:-1.0}
-export REWARD_MAX_RESP_LEN=2048
+export REWARD_MAX_RESP_LEN=${max_response_length}
 unset REWARD_FMT_WEIGHT REWARD_MATH_VERIFY_MAX_CHARS REWARD_MV_PROCS REWARD_MV_TIMEOUT 2>/dev/null || true
 # stop set: Meta vllm_stop_token_ids=[151645] + tokenizer eos 151643 -> both are in MODEL_PATH/generation_config.json
 ########################### NOT specified by Meta -- confirm before freezing ###########
@@ -140,8 +141,10 @@ if [ "${REWARD_OVERLONG_BUFFER}" != "0" ]; then
   RM=$(python3 -c "import verl.experimental.reward_loop.reward_manager.naive as m; print(m.__file__)" 2>/dev/null | tail -1)
   grep -q "_RESP_LEN" "${RM}" || { echo "[meta] ABORT: ${RM} lacks the response_len patch (patch_verl_reward_response_len.py)"; exit 2; }
 fi
-python3 "${REWARD_FN_PATH}" > "${LOG_DIR}/reward_fixtures_check.log" 2>&1 \
+# Meta's overlong fixtures are written against cap 2048: validate the RULE at 2048 regardless of the run's cap
+REWARD_MAX_RESP_LEN=2048 python3 "${REWARD_FN_PATH}" > "${LOG_DIR}/reward_fixtures_check.log" 2>&1 \
   || { echo "[meta] ABORT: reward failed Meta's fixtures:"; grep -E "FAIL|RESULT" "${LOG_DIR}/reward_fixtures_check.log"; exit 2; }
+[ "${max_response_length}" != "2048" ] && echo "[meta] NOTE: response cap ${max_response_length} (Meta: 2048) -- cap-sensitivity run, not the reference recipe; overlong penalty ramps from $((max_response_length-512))"
 grep -q "buffer': 512" "${LOG_DIR}/reward_fixtures_check.log" || { echo "[meta] ABORT: overlong buffer is not 512 (env leak?)"; grep knobs "${LOG_DIR}/reward_fixtures_check.log"; exit 2; }
 echo "[meta] reward pre-flight: $(grep RESULT "${LOG_DIR}/reward_fixtures_check.log") (Meta's 15 reward + 6 overlong fixtures, penalty train-only)"
 
