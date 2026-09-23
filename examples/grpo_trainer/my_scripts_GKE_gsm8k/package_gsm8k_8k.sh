@@ -158,7 +158,8 @@ grad_step1.safetensors: per-parameter PRE-CLIP gradient of the reference impleme
 micro-batch 8) on fixtures/fixture_step1.npz, loss = token-mean(-A * w * exp(logp - logp.detach())) with w = min(exp(logp.detach()-logp_sampler), 3).
 Its gradient equals that of the single-forward REINFORCE loss -A*w*logp used by the trainer; the loss SCALARS differ by construction and
 must not be compared. Compare a TPU gradient on the same batch with compare_grads.py (global/per-parameter cosine, relative error, float64).
-GB200 trainer (exp_avg/0.1 at step 1) vs this file: see replay_step1_reference_8k.log and band/summary.json.
+GB200 trainer (exp_avg/0.1 at step 1) vs this file: fixtures/grad_compare_8k.log (global / per-layer summary) and
+fixtures/grad_compare_8k.json (full per-parameter cosine / relative error).
 TXT
 rm -rf $H/checkpoints/fixture_seed1_step2 && mkdir -p $H/checkpoints/fixture_seed1_step2 && cp -r $CKPT_DIR/$EF/global_step_2/actor/huggingface/. $H/checkpoints/fixture_seed1_step2/
 cat > $H/checkpoints/fixture_seed1_step2/README.txt <<'TXT'
