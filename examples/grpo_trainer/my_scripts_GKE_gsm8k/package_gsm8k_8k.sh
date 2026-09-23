@@ -203,7 +203,7 @@ for i,(lab,g) in enumerate(R.items()):
         if j==0: ax[j].plot(s,v,color=c,alpha=0.15); ax[j].plot(s[4:],sm(v),color=c,lw=2,label=lab)
         elif j==3: ax[j].plot(s,np.minimum(v,np.percentile(v,95)),color=c,lw=1.2,label=lab)
         else: ax[j].plot(s,v,color=c,lw=1.5,label=lab)
-for a,t in zip(ax,("train score (raw reward, T=1), 5-step mean","response length (tokens)","policy entropy (update pass)","step time (s; eval/ckpt steps clipped at p95)")): a.set_title(t); a.set_xlabel("training step"); a.grid(alpha=0.3); a.legend()
+for a,t in zip(ax,("train score (raw reward, T=1), 5-step mean","response length (tokens)","policy entropy (update pass)","step time (s, plot clipped at p95)")): a.set_title(t); a.set_xlabel("training step"); a.grid(alpha=0.3); a.legend()
 fig.suptitle("GB200 reference runs, training diagnostics: Qwen3-0.6B, GSM8K, cap 8192, no length penalty, 64 GPUs"); fig.tight_layout(); fig.savefig("$H/band/gb200_train_gsm8k_8k.png",dpi=130); print("saved band/gb200_train_gsm8k_8k.png")
 EOF
 python3 - <<EOF > $H/band/summary.json
