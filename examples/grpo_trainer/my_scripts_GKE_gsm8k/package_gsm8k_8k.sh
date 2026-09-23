@@ -134,7 +134,7 @@ test -s $LOG_DIR/fx8k/raw/fixture_step1.npz || { echo "fixture dumps missing ($L
 python3 $G0/make_logprob_fixture.py --dump $LOG_DIR/fx8k/raw/fixture_step1.npz --out $H/fixtures/logprob_fixture_8k --n 96 --n_long 24 --n_trunc 8 | tail -3   # tool appends .json
 test -s $H/fixtures/logprob_fixture_8k.json || { echo "logprob fixture not written"; exit 2; }
 cp $LOG_DIR/fx8k/raw/fixture_step{1,2}.npz $LOG_DIR/fx8k/raw/fixture_step{1,2}.json $H/fixtures/
-GN=$(grep -o "actor/grad_norm:[0-9.e-]*" $LOG_DIR/fx8k.log | head -1 | cut -d: -f2)
+GN=$(grep -o "actor/grad_norm:[0-9.e-]*" "$LOG_DIR/fx8k.log" | head -1 | cut -d: -f2) || GN=      # no match must not trip set -e/pipefail
 [ -n "$GN" ] || GN=$(python3 -c "
 from tensorboard.backend.event_processing import event_accumulator as ea
 import glob; d=sorted(glob.glob('$TBROOT/$EF'))
@@ -169,11 +169,15 @@ test -s $LOG_DIR/fx8k/replay_delta_8k.json || { echo "two-step replay missing; r
 cp $LOG_DIR/fx8k/replay_step1_reference_8k.json $LOG_DIR/fx8k/replay_step1_reference_8k.log $LOG_DIR/fx8k/grad_compare_8k.json $LOG_DIR/fx8k/grad_compare_8k.log \
    $LOG_DIR/fx8k/replay_delta_8k.json $LOG_DIR/fx8k/replay_delta_8k.log $H/fixtures/
 rm -rf $H/fixtures/replay_grad_step1 && mkdir -p $H/fixtures/replay_grad_step1 && cp $LOG_DIR/fx8k/replay_grad/grad_step1.safetensors $H/fixtures/replay_grad_step1/
-cat > $H/fixtures/replay_grad_step1/README.txt <<'TXT'
-grad_step1.safetensors: per-parameter PRE-CLIP gradient of the reference implementation (pure PyTorch/HF, fp32 master, bf16 autocast,
-micro-batch 2 -- the trainer used 8; micro-batching changes bf16 accumulation order only) on fixtures/fixture_step1.npz, loss = token-mean(-A * w * exp(logp - logp.detach())) with w = min(exp(logp.detach()-logp_sampler), 3).
-Its gradient equals that of the single-forward REINFORCE loss -A*w*logp used by the trainer; the loss SCALARS differ by construction and
-must not be compared. Compare a TPU gradient on the same batch with compare_grads.py (global/per-parameter cosine, relative error, float64).
+cat > $H/fixtures/replay_grad_step1/README.txt <<TXT
+grad_step1.safetensors: per-parameter PRE-CLIP gradient of the reference implementation (pure PyTorch/HF, fp32 master weights,
+bf16 autocast, sdpa attention) on fixtures/fixture_step1.npz, computed with REPLAY_MICRO=${REPLAY_MICRO} sequence(s) per
+forward/backward and accumulated over all 2048 completions with the global token denominator (the trainer used micro-batch 8 per GPU).
+The mathematical objective is identical regardless of the micro-batching; the batching can change forward/backward floating-point
+values, so small numerical differences are expected. Loss = token-mean(-A * w * exp(logp - logp.detach())) with
+w = min(exp(logp.detach() - logp_sampler), 3): its gradient equals that of the trainer's single-forward REINFORCE loss -A*w*logp;
+the loss SCALARS differ by construction and must not be compared.
+Compare a TPU gradient on the same batch with code/compare_grads.py (global / per-parameter cosine and relative error, float64).
 GB200 trainer (exp_avg/0.1 at step 1) vs this file: fixtures/grad_compare_8k.log (global / per-layer summary) and
 fixtures/grad_compare_8k.json (full per-parameter cosine / relative error).
 TXT
