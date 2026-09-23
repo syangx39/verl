@@ -189,6 +189,23 @@ python3 $G/band_plot.py --tb $T1 $T2 $T3 --labels "seed1" "seed2" "seed3" --step
 python3 $G/band_plot.py --tb $T1 $T2 $T3 --labels "seed1" "seed2" "seed3" --no_band --steps 0:240:20,250 \
   --metrics "val-core/gsm8k_boxed_test/acc/mean@1=GSM8K test (1,319) accuracy, greedy" --title "GB200 reference runs: Qwen3-0.6B, GSM8K, cap 8192, no length penalty" --out $H/band/gb200_curves_gsm8k_8k >/dev/null
 for S in 1 2 3; do python3 $G/plot_phase0.py --tb $TBROOT/${E[$S]} --rollout $LOG_DIR/${E[$S]}/rollout_dump --groups 128 --group_size 16 --cap 8192 --out $H/band/diagnostics_seed${S}.png > $H/band/diagnostics_seed${S}.txt 2>&1; done
+python3 - <<EOF
+from tensorboard.backend.event_processing import event_accumulator as ea
+import numpy as np, matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
+def load(tb):
+    a=ea.EventAccumulator(tb, size_guidance={ea.SCALARS:0}); a.Reload(); return lambda t:(np.array([e.step for e in a.Scalars(t)]), np.array([e.value for e in a.Scalars(t)]))
+R={"seed1":load("$T1"),"seed2":load("$T2"),"seed3":load("$T3")}; sm=lambda v:np.convolve(v,np.ones(5)/5,mode="valid")
+fig,ax=plt.subplots(1,4,figsize=(20,4.5))
+for i,(lab,g) in enumerate(R.items()):
+    c=f"C{i}"
+    for j,tag in enumerate(("critic/score/mean","response_length/mean","actor/entropy_loss","timing_s/step")):
+        s,v=g(tag)
+        if j==0: ax[j].plot(s,v,color=c,alpha=0.15); ax[j].plot(s[4:],sm(v),color=c,lw=2,label=lab)
+        elif j==3: ax[j].plot(s,np.minimum(v,np.percentile(v,95)),color=c,lw=1.2,label=lab)
+        else: ax[j].plot(s,v,color=c,lw=1.5,label=lab)
+for a,t in zip(ax,("train score (raw reward, T=1), 5-step mean","response length (tokens)","policy entropy (update pass)","step time (s; eval/ckpt steps clipped at p95)")): a.set_title(t); a.set_xlabel("training step"); a.grid(alpha=0.3); a.legend()
+fig.suptitle("GB200 reference runs, training diagnostics: Qwen3-0.6B, GSM8K, cap 8192, no length penalty, 64 GPUs"); fig.tight_layout(); fig.savefig("$H/band/gb200_train_gsm8k_8k.png",dpi=130); print("saved band/gb200_train_gsm8k_8k.png")
+EOF
 python3 - <<EOF > $H/band/summary.json
 from tensorboard.backend.event_processing import event_accumulator as ea
 import numpy as np, json
