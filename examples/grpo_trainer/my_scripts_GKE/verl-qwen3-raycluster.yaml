@@ -152,6 +152,7 @@ spec:
               {"interfaceName":"eth5","network":"rdma-3"}
             ]
       spec:
+        priorityClassName: verl-bench-high
         serviceAccountName: verl-runner
         resourceClaims:
         - name: compute-domain-channel

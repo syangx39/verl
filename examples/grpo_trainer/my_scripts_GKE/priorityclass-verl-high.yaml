@@ -1,0 +1,8 @@
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: verl-bench-high
+value: 1000000            # 默认 pod 是 0；越大越优先。上限 10^9，系统类是 2×10^9
+globalDefault: false
+preemptionPolicy: PreemptLowerPriority   # 资源不够时可驱逐优先级更低的 pod（默认值，写出来更清楚）
+description: "verl parity benchmark: top priority on the a4x pool"
