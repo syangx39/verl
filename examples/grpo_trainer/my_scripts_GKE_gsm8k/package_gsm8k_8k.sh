@@ -13,7 +13,7 @@ unset TB_ROOT LOGPROB_FIXTURE_DIR LOGPROB_FIXTURE_STEP INJECT_BATCH_NPZ INJECT_B
 G=/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gsm8k
 G0=/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE
 H=${HANDOFF:-/workspace/meta-RL/handoff/gsm8k_8k}          # gcsfuse mount -> gs://xiaotongyang-bucket/meta-rl/GKE_repro/meta-RL/handoff/gsm8k_8k
-TBROOT=/tmp/tb_local/meta_gsm8k_boxed
+TBROOT=${TBROOT:-/tmp/tb_local/meta_gsm8k_boxed}          # pod-local mirror; on a fresh pod point this at the persistent copy under $LOG_DIR
 mkdir -p $H/{model,data,fixtures,code,env,runs,band,checkpoints}
 rm -f $H/PACKAGE_MANIFEST.sha256
 
@@ -25,7 +25,9 @@ for S in 1 2 3; do
   grep -q "driver exited with rc=0" $L || { echo "seed $S did not finish cleanly: $L"; exit 2; }
   [ "$(grep -cE 'injection ENABLED|_LOGPROB_FIXTURE\] wrote' $L)" = "0" ] || { echo "seed $S log shows injection/fixture activity -- not a clean reference run"; exit 2; }
   echo "seed $S -> ${E[$S]}  ($L)"; cp $L $H/runs/launch_seed${S}.log
+  ls $TBROOT/${E[$S]}/events.out.tfevents* >/dev/null 2>&1 || { echo "no TensorBoard events for seed $S under $TBROOT/${E[$S]} -- set TBROOT to the persistent copy (find $LOG_DIR -name 'events.out.tfevents*' | grep ${E[$S]})"; exit 2; }
 done
+command -v python3 >/dev/null && python3 -c "import matplotlib" 2>/dev/null || pip install -q matplotlib 2>/dev/null || pip install -q matplotlib --break-system-packages
 
 # ---------------------------------------------------------------- 1. model (weights + configs + hashes)
 cp $MODEL_PATH/{config.json,generation_config.json,tokenizer_config.json,tokenizer.json,vocab.json,merges.txt} $H/model/ 2>/dev/null || true
