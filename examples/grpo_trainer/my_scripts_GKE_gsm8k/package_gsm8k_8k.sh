@@ -135,21 +135,35 @@ python3 $G0/make_logprob_fixture.py --dump $LOG_DIR/fx8k/raw/fixture_step1.npz -
 test -s $H/fixtures/logprob_fixture_8k.json || { echo "logprob fixture not written"; exit 2; }
 cp $LOG_DIR/fx8k/raw/fixture_step{1,2}.npz $LOG_DIR/fx8k/raw/fixture_step{1,2}.json $H/fixtures/
 GN=$(grep -o "actor/grad_norm:[0-9.e-]*" $LOG_DIR/fx8k.log | head -1 | cut -d: -f2)
+[ -n "$GN" ] || GN=$(python3 -c "
+from tensorboard.backend.event_processing import event_accumulator as ea
+import glob; d=sorted(glob.glob('$TBROOT/$EF'))
+a=ea.EventAccumulator(d[-1], size_guidance={ea.SCALARS:0}); a.Reload(); s=a.Scalars('actor/grad_norm'); print(s[0].value)" 2>/dev/null || true)
+echo "fixture-job step-1 grad norm: ${GN:-unknown}"
+REPLAY_MICRO=${REPLAY_MICRO:-1}      # 8K responses: fp32 logits are [micro, 8704, 151936]; micro 8 (37 GB per log-softmax copy) OOMs a GB200 -> 1 sequence per forward/backward, accumulated over all 2048 with the global token denominator (same objective)
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 if [ "$SKIP_GPU" != "1" ]; then
   # reference replay of step 1: ratio-form loss -A*w*exp(logp-logp.detach()) has the SAME gradient as the single-forward
   # REINFORCE loss; the loss scalars differ by construction. --save_grad writes the per-parameter gradient (safetensors, ~2.4 GB)
   rm -rf $LOG_DIR/fx8k/replay_grad
-  CUDA_VISIBLE_DEVICES=0 python3 $G/replay_single_step.py --dumps $LOG_DIR/fx8k/raw/fixture_step1.npz --lrs 0 --model $MODEL_PATH --micro 8 --reported_grad_norm $GN \
-    --save_grad $LOG_DIR/fx8k/replay_grad --out $LOG_DIR/fx8k/replay_step1_reference_8k.json 2>&1 | grep -E "^\[2a\]|^\[2b\]|reported grad" | tee $LOG_DIR/fx8k/replay_step1_reference_8k.log
+  [ -n "$GN" ] || echo "WARNING: actor/grad_norm not found in $LOG_DIR/fx8k.log; replay runs without --reported_grad_norm"
+  CUDA_VISIBLE_DEVICES=0 python3 $G/replay_single_step.py --dumps $LOG_DIR/fx8k/raw/fixture_step1.npz --lrs 0 --model $MODEL_PATH --micro $REPLAY_MICRO ${GN:+--reported_grad_norm $GN} \
+    --save_grad $LOG_DIR/fx8k/replay_grad --out $LOG_DIR/fx8k/replay_step1_reference_8k.json > $LOG_DIR/fx8k/replay_step1_reference_8k.full.log 2>&1 \
+    || { echo "replay FAILED:"; tail -30 $LOG_DIR/fx8k/replay_step1_reference_8k.full.log; exit 2; }
+  grep -E "^\[2a\]|^\[2b\]|reported grad" $LOG_DIR/fx8k/replay_step1_reference_8k.full.log | tee $LOG_DIR/fx8k/replay_step1_reference_8k.log
 fi
 test -s $LOG_DIR/fx8k/replay_grad/grad_step1.safetensors || { echo "replay gradient missing; run without SKIP_GPU"; exit 2; }
 # GB200 trainer step-1 gradient (Adam exp_avg/0.1 of the fixture job) vs the reference gradient: CPU, ~3 min
 python3 $G/verl_grad_from_optim.py --actor_dir $CKPT_DIR/$EF/global_step_1/actor --model $MODEL_PATH \
-  --replay_grad $LOG_DIR/fx8k/replay_grad/grad_step1.safetensors --out $LOG_DIR/fx8k/grad_compare_8k.json 2>&1 | grep -A6 "global cosine" | tee $LOG_DIR/fx8k/grad_compare_8k.log
+  --replay_grad $LOG_DIR/fx8k/replay_grad/grad_step1.safetensors --out $LOG_DIR/fx8k/grad_compare_8k.json > $LOG_DIR/fx8k/grad_compare_8k.full.log 2>&1 \
+  || { echo "grad comparison FAILED:"; tail -30 $LOG_DIR/fx8k/grad_compare_8k.full.log; exit 2; }
+grep -A6 "global cosine" $LOG_DIR/fx8k/grad_compare_8k.full.log | tee $LOG_DIR/fx8k/grad_compare_8k.log
 if [ "$SKIP_GPU" != "1" ]; then
-  # two-step replay (lr 0, then 2e-7) vs the trainer's theta_2: GPU, ~4 min
-  CUDA_VISIBLE_DEVICES=0 python3 $G/replay_single_step.py --dumps $LOG_DIR/fx8k/raw/fixture_step{1,2}.npz --lrs 0 2e-7 --model $MODEL_PATH --micro 8 \
-    --post_weights $CKPT_DIR/$EF/global_step_2/actor/huggingface --out $LOG_DIR/fx8k/replay_delta_8k.json 2>&1 | grep -E "^\[4\]|rel_err|cos" | tee $LOG_DIR/fx8k/replay_delta_8k.log
+  # two-step replay (lr 0, then 2e-7) vs the trainer's theta_2: GPU (micro 1 for 8K sequences), ~15 min
+  CUDA_VISIBLE_DEVICES=0 python3 $G/replay_single_step.py --dumps $LOG_DIR/fx8k/raw/fixture_step{1,2}.npz --lrs 0 2e-7 --model $MODEL_PATH --micro $REPLAY_MICRO \
+    --post_weights $CKPT_DIR/$EF/global_step_2/actor/huggingface --out $LOG_DIR/fx8k/replay_delta_8k.json > $LOG_DIR/fx8k/replay_delta_8k.full.log 2>&1 \
+    || { echo "two-step replay FAILED:"; tail -30 $LOG_DIR/fx8k/replay_delta_8k.full.log; exit 2; }
+  grep -E "^\[4\]|rel_err|cos" $LOG_DIR/fx8k/replay_delta_8k.full.log | tee $LOG_DIR/fx8k/replay_delta_8k.log
 fi
 test -s $LOG_DIR/fx8k/replay_delta_8k.json || { echo "two-step replay missing; run without SKIP_GPU"; exit 2; }
 cp $LOG_DIR/fx8k/replay_step1_reference_8k.json $LOG_DIR/fx8k/replay_step1_reference_8k.log $LOG_DIR/fx8k/grad_compare_8k.json $LOG_DIR/fx8k/grad_compare_8k.log \
@@ -157,7 +171,7 @@ cp $LOG_DIR/fx8k/replay_step1_reference_8k.json $LOG_DIR/fx8k/replay_step1_refer
 rm -rf $H/fixtures/replay_grad_step1 && mkdir -p $H/fixtures/replay_grad_step1 && cp $LOG_DIR/fx8k/replay_grad/grad_step1.safetensors $H/fixtures/replay_grad_step1/
 cat > $H/fixtures/replay_grad_step1/README.txt <<'TXT'
 grad_step1.safetensors: per-parameter PRE-CLIP gradient of the reference implementation (pure PyTorch/HF, fp32 master, bf16 autocast,
-micro-batch 8) on fixtures/fixture_step1.npz, loss = token-mean(-A * w * exp(logp - logp.detach())) with w = min(exp(logp.detach()-logp_sampler), 3).
+micro-batch 2 -- the trainer used 8; micro-batching changes bf16 accumulation order only) on fixtures/fixture_step1.npz, loss = token-mean(-A * w * exp(logp - logp.detach())) with w = min(exp(logp.detach()-logp_sampler), 3).
 Its gradient equals that of the single-forward REINFORCE loss -A*w*logp used by the trainer; the loss SCALARS differ by construction and
 must not be compared. Compare a TPU gradient on the same batch with compare_grads.py (global/per-parameter cosine, relative error, float64).
 GB200 trainer (exp_avg/0.1 at step 1) vs this file: fixtures/grad_compare_8k.log (global / per-layer summary) and
