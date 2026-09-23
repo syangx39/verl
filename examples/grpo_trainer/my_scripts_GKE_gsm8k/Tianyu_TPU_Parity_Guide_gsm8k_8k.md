@@ -1,6 +1,6 @@
 # TPU 侧复现指南 — GSM8K / Qwen3-0.6B / 8K response cap（recipe `gsm8k_8k_v1`）
 
-给 Tianyu。目标：在 TPU 上用**同一个 recipe**跑出和 GB200 三条参考 run 相容的 250 步曲线，并按 rulebook 的判据报告。这轮和上一轮（OMI2 `stab_kl0`）的做法一样：先过 5 道门，每道门都便宜、都能把问题定位到一层；门没过之前不要开长 run。
+给 Tianyu。目标：在 TPU 上用**同一个 recipe**跑出和 GB200 三条参考 run 相容的 250 步曲线，并按 rulebook 的判据报告。这轮和上一轮（OMI2 `stab_kl0`）的做法一样：先过 5 道门，每道门都便宜、都能把问题定位到一层。门的性质不同：门 1、2 是**硬性一致**（token id、scorer 输出必须逐项相等，不等就是实现错误，先修）；门 3、4 是**诊断参考**（报告数值和 GPU 参考对照，超出范围按 rulebook 的调查规则查原因，不是自动失败）；门 5 是**推荐检查**（能做就做，定位梯度层面的差异）。门 1、2 没过之前不要开长 run。
 
 包在 `gs://xiaotongyang-bucket/meta-rl/GKE_repro/meta-RL/handoff/gsm8k_8k/`，先校验：
 
@@ -120,7 +120,7 @@ GPU 参考（**同一权重的三次 greedy**）：0.7453 / 0.7400 / 0.7582，�
 (a) 用 TPU 的 trainer 在同一权重上对这 96 条算逐 token logp（fp32），和 `logp_trainer` 比：mean |Δ|、p95、max。
 (b) 用 TPU 自己的 sampler 在冻结采样设置下采一批，算 sampler-vs-trainer 的同样统计。
 
-GPU 参考值在 fixture 文件头和 `band/summary.json`（250 步均值：probability MAE ≈ 0.005，`rollout_corr/kl` ≈ 0.0007）。触发调查的阈值：非负误差量（MAE、mean |Δlogp|、尾分位）比 GPU 大一个数量级。这是调查触发器，不是通过标准；常见原因：温度/概率归一化不同、mask 不同、logp 没在 fp32 算、权重同步没完成。
+GPU 参考值在 fixture 文件头和 `band/summary.json`。三条参考 run 是单前向，**没有记录** probability MAE（`training/rollout_probs_diff_*` 来自被省掉的那遍前向）；记录的是 `actor/rollout_corr/k3_kl`（非负）、`actor/rollout_corr/kl`（有符号）、`actor/rollout_corr/log_ppl_abs_diff`，250 步均值：k3_kl 0.00066 / 0.00069 / 0.00067，log_ppl_abs_diff 0.00091 / 0.00098 / 0.00091（三 seed）。fixture 上 HF 参考 vs FSDP trainer 的逐 token logp 差：mean 0.0157、p99 0.136、max 1.25 nats。触发调查的阈值：非负误差量（mean |Δlogp|、k3_kl、尾分位）比 GPU 大一个数量级。这是调查触发器，不是通过标准；常见原因：温度/概率归一化不同、mask 不同、logp 没在 fp32 算、权重同步没完成。
 
 **TIS 的实现在这一步一起核**：w 必须用 (b) 里的 sampler logp 和训练 pass 的 logp（detach）算，截到 3.0。检查三件事：`sampler` 返回的是采样 token 在 T=1 下的 logp（不是 greedy 的）；w 不带梯度；**截断前** ratio = exp(logπ_θ − logπ_sampler) 超过 3 的 token 比例应接近 0（截断后的 w 永远 ≤ 3，统计它没有意义）。**不要**把 sampler logp 放进 PPO ratio 的分母（Meta TPU 组 a26d 的做法）——我们在同一批上验过，那和 TIS 不等价（梯度余弦 0.99、方向差 14%，250 步慢 60 步）。
 
@@ -131,7 +131,7 @@ GPU 参考值在 fixture 文件头和 `band/summary.json`（250 步均值：prob
 `fixtures/fixture_step1.npz`（+ `.json` sidecar）是 GPU seed-1 fixture job 第 1 步的**完整批**：`prompts`、`responses`、`attention_mask`、`response_mask`、`position_ids`、`rollout_log_probs`、`old_log_probs`（trainer 更新前）、`token_level_scores`、`advantages`、`nt__uid`、`nt__qid`。
 
 (a) **advantage**：按 uid 分组用 `token_level_scores` 重算，和 `advantages` 比（GPU vs 独立参考：max |Δ| 4e-7）。这一步核 ddof、eps、广播。
-(b) **loss / 梯度**：把这一批原样注入你们的 trainer（同权重），算 −A·w·logπ 的 token-mean 和梯度；梯度和 `fixtures/replay_grad_step1/grad_step1.safetensors` 比（`code/compare_grads.py`：全局/逐参数余弦、rel err），范数和 `replay_step1_reference_8k.json` 比。GPU 自己对参考实现的量级（来自同模型的 2K fixture，历史值，仅作定向）：余弦 ≈ 0.99、rel err ≈ 14%，是 post-trained 低 entropy 下的 bf16 kernel 差；**8K fixture 的实际值以包里的 `fixtures/grad_compare_8k.log`（trainer 梯度 vs 参考）和 `fixtures/replay_delta_8k.log`（两步 Δθ）为准**。**loss 标量不要比**：参考实现用的是 ratio 形式 −A·w·exp(logπ−logπ.detach())，梯度和 REINFORCE 形式相同，标量不同。
+(b) **loss / 梯度**：把这一批原样注入你们的 trainer（同权重），算 −A·w·logπ 的 token-mean 和梯度；梯度和 `fixtures/replay_grad_step1/grad_step1.safetensors` 比（`code/compare_grads.py`：全局/逐参数余弦、rel err），范数和 `replay_step1_reference_8k.json` 比。GPU 自己对参考实现（8K fixture，`fixtures/grad_compare_8k.log`、`fixtures/replay_delta_8k.log`）：梯度范数 0.1306 vs 0.1315，方向余弦 0.9825、rel err 18.8%（embed 0.992 / mlp 0.976 / attn 0.962）；两步 Δθ 余弦 0.948、rel err 32%。这是 GPU 内部一次对比的实测参考，不是 TPU 的接受阈值；差异原因**尚未隔离**（bf16、kernel、micro-batch 切分都可能贡献，逐参数结果在 `grad_compare_8k.json` 里）。判读规则以 rulebook 门 5 为准。**loss 标量不要比**：参考实现用的是 ratio 形式 −A·w·exp(logπ−logπ.detach())，梯度和 REINFORCE 形式相同，标量不同。
 (c) **optimizer**：从 θ₀ 出发按顺序做两次更新——第 1 次用 `fixture_step1.npz`、lr 0（权重不变，Adam 矩被初始化），第 2 次用 `fixture_step2.npz`、lr 2e-7——得到的 θ₂ 和 `checkpoints/fixture_seed1_step2/` 比 Δθ（GPU 自身 Adam 应用误差：1 ulp）。两步都要做，只做第 2 步得不到同一个 θ₂。
 
 ---
@@ -164,7 +164,7 @@ seed k:  data order = data/train_order_seed{k}.parquet；eval 每 20 步 + 250�
 
 **rollout_dump/<step>.jsonl**（每步 2048 行）：`uid`（同 prompt 的 16 条共享）、`qid`、`acc`、`score`、`fmt`。
 
-**TensorBoard 标量**（tag 名要完全一致）：`val-core/gsm8k_boxed_test/acc/mean@1`、`val-aux/gsm8k_boxed_test/fmt/mean@1`、`critic/score/mean`、`actor/entropy_loss`（或 `actor/entropy`）、`actor/grad_norm`、`actor/lr`、`response_length/mean`、`response_length/clip_ratio`、`timing_s/step`、`training/rollout_probs_diff_mean`、`rollout_corr/kl`。
+**TensorBoard 标量**（tag 名要完全一致）：`val-core/gsm8k_boxed_test/acc/mean@1`、`val-aux/gsm8k_boxed_test/fmt/mean@1`、`critic/score/mean`、`actor/entropy_loss`（或 `actor/entropy`）、`actor/grad_norm`、`actor/lr`、`response_length/mean`、`response_length/clip_ratio`、`timing_s/step`、`actor/rollout_corr/k3_kl`、`actor/rollout_corr/kl`、`actor/rollout_corr/log_ppl_abs_diff`。`training/rollout_probs_diff_mean`（probability MAE）**可选**——它需要额外一遍 old-logp 前向，GPU 参考 run 没有记录，不要为它加前向。
 
 拿到这些后我这边一条命令出对照图：
 
@@ -187,4 +187,4 @@ python3 code/band_plot.py --tb runs/seed1/tensorboard runs/seed2/tensorboard run
 7. **greedy eval 本身不可复现**：同一权重在 GPU 上三次 greedy 只有 16–18% 的题输出相同（输入、权重、配置已核对一致，原因未定）；逐题输出对不上不是 bug，看均值和分布。
 8. **没有长度惩罚、没有 KL**：长度会慢慢漂（GB200 250 步内到 2.3–2.6k），这是预期；跑更长的话要另议。
 
-有任何一道门过不去，先发我该门的输出，别往下跑。
+门 1、2 不一致就是实现错误，先发我输出再修；门 3、4 的数值超出参考范围，按 rulebook 的调查规则查原因、把发现写进报告；门 5 是推荐项，做了就附上结果。
