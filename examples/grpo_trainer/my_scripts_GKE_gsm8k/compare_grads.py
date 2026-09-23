@@ -18,6 +18,7 @@ if set(A) != set(B):
   raise SystemExit(f"parameter sets differ: {set(A) ^ set(B)}")
 num = den = dot = sq_b = 0.0; rows = []
 for n in A:
+  assert A[n].shape == B[n].shape, (n, tuple(A[n].shape), tuple(B[n].shape))   # never compare flattened tensors of different shapes
   sa, sb, sab, sd = pair_stats(A[n], B[n]); num += sd; den += sa; dot += sab; sq_b += sb
   if sa > 0 and sb > 0:
     rows.append((n, sab / math.sqrt(sa * sb), math.sqrt(sd / sa)))

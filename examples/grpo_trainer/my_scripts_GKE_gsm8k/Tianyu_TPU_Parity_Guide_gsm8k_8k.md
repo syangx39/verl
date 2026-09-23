@@ -131,7 +131,7 @@ GPU 参考值在 fixture 文件头和 `band/summary.json`（250 步均值：prob
 `fixtures/fixture_step1.npz`（+ `.json` sidecar）是 GPU seed-1 fixture job 第 1 步的**完整批**：`prompts`、`responses`、`attention_mask`、`response_mask`、`position_ids`、`rollout_log_probs`、`old_log_probs`（trainer 更新前）、`token_level_scores`、`advantages`、`nt__uid`、`nt__qid`。
 
 (a) **advantage**：按 uid 分组用 `token_level_scores` 重算，和 `advantages` 比（GPU vs 独立参考：max |Δ| 4e-7）。这一步核 ddof、eps、广播。
-(b) **loss / 梯度**：把这一批原样注入你们的 trainer（同权重），算 −A·w·logπ 的 token-mean 和梯度；梯度和 `fixtures/replay_grad_step1/grad_step1.safetensors` 比（`code/compare_grads.py`：全局/逐参数余弦、rel err），范数和 `replay_step1_reference_8k.json` 比。GPU 自己对这个参考：余弦 ≈ 0.99、rel err ≈ 14%（post-trained 低 entropy 下的 bf16 kernel 差）。**loss 标量不要比**：参考实现用的是 ratio 形式 −A·w·exp(logπ−logπ.detach())，梯度和 REINFORCE 形式相同，标量不同。
+(b) **loss / 梯度**：把这一批原样注入你们的 trainer（同权重），算 −A·w·logπ 的 token-mean 和梯度；梯度和 `fixtures/replay_grad_step1/grad_step1.safetensors` 比（`code/compare_grads.py`：全局/逐参数余弦、rel err），范数和 `replay_step1_reference_8k.json` 比。GPU 自己对参考实现的量级（来自同模型的 2K fixture，历史值，仅作定向）：余弦 ≈ 0.99、rel err ≈ 14%，是 post-trained 低 entropy 下的 bf16 kernel 差；**8K fixture 的实际值以包里的 `fixtures/grad_compare_8k.log`（trainer 梯度 vs 参考）和 `fixtures/replay_delta_8k.log`（两步 Δθ）为准**。**loss 标量不要比**：参考实现用的是 ratio 形式 −A·w·exp(logπ−logπ.detach())，梯度和 REINFORCE 形式相同，标量不同。
 (c) **optimizer**：从 θ₀ 出发按顺序做两次更新——第 1 次用 `fixture_step1.npz`、lr 0（权重不变，Adam 矩被初始化），第 2 次用 `fixture_step2.npz`、lr 2e-7——得到的 θ₂ 和 `checkpoints/fixture_seed1_step2/` 比 Δθ（GPU 自身 Adam 应用误差：1 ulp）。两步都要做，只做第 2 步得不到同一个 θ₂。
 
 ---

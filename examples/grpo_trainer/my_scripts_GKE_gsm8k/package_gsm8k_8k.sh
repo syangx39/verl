@@ -141,7 +141,17 @@ if [ "$SKIP_GPU" != "1" ]; then
     --save_grad $LOG_DIR/fx8k/replay_grad --out $LOG_DIR/fx8k/replay_step1_reference_8k.json 2>&1 | grep -E "^\[2a\]|^\[2b\]|reported grad" | tee $LOG_DIR/fx8k/replay_step1_reference_8k.log
 fi
 test -s $LOG_DIR/fx8k/replay_grad/grad_step1.safetensors || { echo "replay gradient missing; run without SKIP_GPU"; exit 2; }
-cp $LOG_DIR/fx8k/replay_step1_reference_8k.json $LOG_DIR/fx8k/replay_step1_reference_8k.log $H/fixtures/
+# GB200 trainer step-1 gradient (Adam exp_avg/0.1 of the fixture job) vs the reference gradient: CPU, ~3 min
+python3 $G/verl_grad_from_optim.py --actor_dir $CKPT_DIR/$EF/global_step_1/actor --model $MODEL_PATH \
+  --replay_grad $LOG_DIR/fx8k/replay_grad/grad_step1.safetensors --out $LOG_DIR/fx8k/grad_compare_8k.json 2>&1 | grep -A6 "global cosine" | tee $LOG_DIR/fx8k/grad_compare_8k.log
+if [ "$SKIP_GPU" != "1" ]; then
+  # two-step replay (lr 0, then 2e-7) vs the trainer's theta_2: GPU, ~4 min
+  CUDA_VISIBLE_DEVICES=0 python3 $G/replay_single_step.py --dumps $LOG_DIR/fx8k/raw/fixture_step{1,2}.npz --lrs 0 2e-7 --model $MODEL_PATH --micro 8 \
+    --post_weights $CKPT_DIR/$EF/global_step_2/actor/huggingface --out $LOG_DIR/fx8k/replay_delta_8k.json 2>&1 | grep -E "^\[4\]|rel_err|cos" | tee $LOG_DIR/fx8k/replay_delta_8k.log
+fi
+test -s $LOG_DIR/fx8k/replay_delta_8k.json || { echo "two-step replay missing; run without SKIP_GPU"; exit 2; }
+cp $LOG_DIR/fx8k/replay_step1_reference_8k.json $LOG_DIR/fx8k/replay_step1_reference_8k.log $LOG_DIR/fx8k/grad_compare_8k.json $LOG_DIR/fx8k/grad_compare_8k.log \
+   $LOG_DIR/fx8k/replay_delta_8k.json $LOG_DIR/fx8k/replay_delta_8k.log $H/fixtures/
 rm -rf $H/fixtures/replay_grad_step1 && mkdir -p $H/fixtures/replay_grad_step1 && cp $LOG_DIR/fx8k/replay_grad/grad_step1.safetensors $H/fixtures/replay_grad_step1/
 cat > $H/fixtures/replay_grad_step1/README.txt <<'TXT'
 grad_step1.safetensors: per-parameter PRE-CLIP gradient of the reference implementation (pure PyTorch/HF, fp32 master, bf16 autocast,
