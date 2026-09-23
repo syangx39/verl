@@ -61,8 +61,8 @@ data order   : seed k 用 data/train_order_seed{k}.parquet（250 步 × 128 题�
 ```python
 import json
 from transformers import AutoTokenizer
-tok = AutoTokenizer.from_pretrained("gsm8k_8k/model")
-fx = json.load(open("gsm8k_8k/fixtures/prompt_fixture.json"))
+tok = AutoTokenizer.from_pretrained("model")                       # 已在 gsm8k_8k/ 目录下
+fx = json.load(open("fixtures/prompt_fixture.json"))
 bad = 0
 for r in fx["rows"]:
     ids = tok.apply_chat_template(r["messages"], add_generation_prompt=True, tokenize=True)   # enable_thinking 用模板默认
@@ -80,11 +80,11 @@ print("mismatch rows:", bad, "/", len(fx["rows"]))
 `code/boxed_math_reward.py` 是纯 Python 字符串逻辑，直接 import 或逐字 port。两组 fixture 都要逐行相等：
 
 ```bash
-cd gsm8k_8k/code
+# 仍在 gsm8k_8k/ 目录下；用子 shell 进 code/，不影响后续命令
 # (a) Meta 的 21 条规则用例：这一组按 cap 2048 + 惩罚开启验证规则本身（惩罚只在这一组里用到）
-REWARD_MAX_RESP_LEN=2048 REWARD_PENALTY_SOURCES=gsm8k_boxed_train python3 boxed_math_reward.py      # 期望 RESULT PASS 21/21
+(cd code && REWARD_MAX_RESP_LEN=2048 REWARD_PENALTY_SOURCES=gsm8k_boxed_train python3 boxed_math_reward.py)      # 期望 RESULT PASS 21/21
 # (b) 800 条真实回答（step 0 / 250），8K 无惩罚规则下的期望 acc/fmt/score
-REWARD_MAX_RESP_LEN=8192 REWARD_PENALTY_SOURCES="" python3 - <<'EOF'
+(cd code && REWARD_MAX_RESP_LEN=8192 REWARD_PENALTY_SOURCES="" python3 - <<'EOF'
 import json, importlib
 R = importlib.import_module("boxed_math_reward"); bad = 0; n = 0
 for l in open("../fixtures/scorer_fixture_8k.jsonl"):
@@ -93,6 +93,7 @@ for l in open("../fixtures/scorer_fixture_8k.jsonl"):
     if any(abs(s[k] - r["expected"][k]) > 1e-9 for k in r["expected"]): bad += 1
 print("scorer fixture mismatches:", bad, "/", n)
 EOF
+)
 ```
 
 如果你们 port 到 JAX/Python 侧，把上面的 `R.compute_score` 换成你们的函数。注意三条规则：取**最后一个** `\boxed{`；括号不配平（被截断）→ 0；`18.0` 和 `18` 不相等（不做数值归一）。
@@ -106,7 +107,7 @@ EOF
 GPU 参考（**同一权重的三次 greedy**）：0.7453 / 0.7400 / 0.7582，均值 0.748；格式率 0.92–0.93。
 
 - 参考范围：TPU 的 acc 落在 **[0.728, 0.768]** 内（GPU 均值 ±2pp；这个数是建议口径，尚未双方约定）。
-- 同时报告逐题 agreement（和 `runs/seed1/val_dump/0.jsonl` 比：输出完全相同的题数、acc 翻转的题数）。这只是诊断，不是判据——GPU 自己三次之间也只有 215–241 题输出相同、约 130 题翻转（rulebook "Evaluation variability"）。
+- 同时报告逐题 agreement（和 `runs/seed1/val_dump/0.jsonl` 比（路径相对 gsm8k_8k/）：输出完全相同的题数、acc 翻转的题数）。这只是诊断，不是判据——GPU 自己三次之间也只有 215–241 题输出相同、约 130 题翻转（rulebook "Evaluation variability"）。
 
 超出范围先查：thinking 是否被关（格式率会变，长度分布会变）、cap 是否 8192、stop token、tokenizer 版本。
 
@@ -121,7 +122,7 @@ GPU 参考（**同一权重的三次 greedy**）：0.7453 / 0.7400 / 0.7582，�
 
 GPU 参考值在 fixture 文件头和 `band/summary.json`（250 步均值：probability MAE ≈ 0.005，`rollout_corr/kl` ≈ 0.0007）。触发调查的阈值：非负误差量（MAE、mean |Δlogp|、尾分位）比 GPU 大一个数量级。这是调查触发器，不是通过标准；常见原因：温度/概率归一化不同、mask 不同、logp 没在 fp32 算、权重同步没完成。
 
-**TIS 的实现在这一步一起核**：w 必须用 (b) 里的 sampler logp 和训练 pass 的 logp（detach）算，截到 3.0。检查三件事：`sampler` 返回的是采样 token 在 T=1 下的 logp（不是 greedy 的）；w 不带梯度；出界比例（w>3）应接近 0。**不要**把 sampler logp 放进 PPO ratio 的分母（Meta TPU 组 a26d 的做法）——我们在同一批上验过，那和 TIS 不等价（梯度余弦 0.99、方向差 14%，250 步慢 60 步）。
+**TIS 的实现在这一步一起核**：w 必须用 (b) 里的 sampler logp 和训练 pass 的 logp（detach）算，截到 3.0。检查三件事：`sampler` 返回的是采样 token 在 T=1 下的 logp（不是 greedy 的）；w 不带梯度；**截断前** ratio = exp(logπ_θ − logπ_sampler) 超过 3 的 token 比例应接近 0（截断后的 w 永远 ≤ 3，统计它没有意义）。**不要**把 sampler logp 放进 PPO ratio 的分母（Meta TPU 组 a26d 的做法）——我们在同一批上验过，那和 TIS 不等价（梯度余弦 0.99、方向差 14%，250 步慢 60 步）。
 
 ---
 

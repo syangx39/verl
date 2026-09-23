@@ -42,7 +42,7 @@ EOF
 # ---------------------------------------------------------------- 2. data (Meta jsonl + our parquets + reference csv)
 cp $DATA_DIR/gsm8k_boxed_train.parquet $DATA_DIR/gsm8k_boxed_test.parquet $DATA_DIR/gsm8k_boxed_test512.parquet $H/data/
 cp $META/data/*.jsonl $H/data/ 2>/dev/null || true
-cp -r $META/reference $H/data/meta_reference
+rm -rf $H/data/meta_reference && mkdir -p $H/data/meta_reference && cp -r $META/reference/. $H/data/meta_reference/
 python3 - <<EOF > $H/data/DATA_COUNTS.json
 import pandas as pd, json
 tr=pd.read_parquet("$DATA_DIR/gsm8k_boxed_train.parquet"); te=pd.read_parquet("$DATA_DIR/gsm8k_boxed_test.parquet")
@@ -73,7 +73,9 @@ for S,e in ((1,"${E[1]}"),(2,"${E[2]}"),(3,"${E[3]}")):
 EOF
 
 # ---------------------------------------------------------------- 3. code + env
+rm -rf $H/code && mkdir -p $H/code
 cp $G/*.py $G/*.sh $G/*.md $H/code/ 2>/dev/null || true; cp $G0/make_logprob_fixture.py $G0/scorer_fault_injection.py $H/code/ 2>/dev/null || true
+for f in compare_grads.py replay_single_step.py boxed_math_reward.py band_plot.py compare_two_runs.py; do test -s $H/code/$f || { echo "code/$f missing from $G -- commit and sync it before packaging"; exit 2; }; done
 RT=$(python3 -c "import verl.trainer.ppo.ray_trainer as m; print(m.__file__)" | tail -1)
 ( cd $(dirname $RT)/../../.. && git rev-parse HEAD 2>/dev/null || echo unknown ) > $H/env/verl_commit.txt
 cp $RT $H/env/ray_trainer_executed.py; grep -c "_DUMP_UID\|_LOGPROB_FIXTURE\|_INJECT_BATCH" $RT > $H/env/ray_trainer_patch_markers.txt
