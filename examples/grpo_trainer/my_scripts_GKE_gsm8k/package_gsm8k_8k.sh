@@ -277,7 +277,7 @@ Verify: sha256sum -c --quiet PACKAGE_MANIFEST.sha256
 | fixtures/ | prompt_fixture.json (gate 1); meta_reward_fixtures.json + scorer_fixture_8k.jsonl + reward self-test logs (gate 2); logprob_fixture_8k.json (gate 4); fixture_step{1,2}.npz/.json full step batches, replay_step1_reference_8k.*, replay_grad_step1/ reference gradient, grad_compare_8k.*, replay_delta_8k.* (gate 5) |
 | code/ | launcher, reward, data builder, verl patches, replay / gradient / band tools (see rulebook "handoff package") |
 | env/ | verl commit, executed ray_trainer.py + patch markers, versions.txt, pip_freeze.txt, gpu.txt, resolved_config_seed{1,2,3}.yaml, CONFIG_DIFF.txt |
-| runs/seed{1,2,3}/ | launch log, tensorboard/, val_dump/<step>.jsonl (14), rollout_dump/<step>.jsonl (250), collapse_guard.log, start/end epoch |
+| runs/ | launch_seed{1,2,3}.log; seed{1,2,3}/: tensorboard/, val_dump/<step>.jsonl (14), rollout_dump/<step>.jsonl (250), collapse_guard.log, start/end epoch, EXPERIMENT_NAME |
 | band/ | gb200_band_gsm8k_8k.png/.json, gb200_curves_gsm8k_8k.png, gb200_train_gsm8k_8k.png, diagnostics_seed{1,2,3}.png, summary.json (all reference numbers), step0_greedy_variability.json |
 | checkpoints/ | seed{1,2,3}_step250/ (HF safetensors), fixture_seed1_step2/ (theta_2 of the fixture job, README) |
 

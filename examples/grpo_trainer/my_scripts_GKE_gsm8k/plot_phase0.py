@@ -386,8 +386,8 @@ def main():
   # correction metrics are logged by the actor as actor/rollout_corr/* (k3_kl is the non-negative estimator; kl can be negative).
   for tags, c, lab in ((("training/rollout_probs_diff_mean",), "#de2d26", "mean |p_trainer - p_rollout|  (probability MAE)"),
                        (("training/rollout_probs_diff_max",), "#fd8d3c", "max |p_trainer - p_rollout|"),
-                       (("actor/rollout_corr/k3_kl",), "#08519c", "rollout_corr/k3_kl  = trainer vs rollout (non-negative, log domain)"),
-                       (("rollout_corr/kl", "actor/rollout_corr/kl"), "#3182bd", "rollout_corr/kl  = trainer vs rollout (signed, log domain)"),
+                       (("actor/rollout_corr/k3_kl", "rollout_corr/k3_kl"), "#08519c", "rollout_corr/k3_kl  = trainer vs rollout (non-negative, log domain)"),
+                       # signed rollout_corr/kl is NOT drawn: negative/zero values vanish on a log axis; it stays in summary.json
                        (("rollout_corr/log_ppl_abs_diff", "actor/rollout_corr/log_ppl_abs_diff"), "#6baed6", "rollout_corr/log_ppl_abs_diff  (log domain)"),
                        (("actor/kl_loss",), "#31a354", "actor/kl_loss  = policy vs REFERENCE (k3), drift from init")):
     for tag in tags:
