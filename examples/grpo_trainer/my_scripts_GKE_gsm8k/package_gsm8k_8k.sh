@@ -15,6 +15,7 @@ G0=/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE
 H=${HANDOFF:-/workspace/meta-RL/handoff/gsm8k_8k}          # gcsfuse mount -> gs://xiaotongyang-bucket/meta-rl/GKE_repro/meta-RL/handoff/gsm8k_8k
 TBROOT=/tmp/tb_local/meta_gsm8k_boxed
 mkdir -p $H/{model,data,fixtures,code,env,runs,band,checkpoints}
+rm -f $H/PACKAGE_MANIFEST.sha256
 
 # ---------------------------------------------------------------- 0. the three reference runs
 declare -A E
@@ -45,9 +46,13 @@ cp -r $META/reference $H/data/meta_reference
 python3 - <<EOF > $H/data/DATA_COUNTS.json
 import pandas as pd, json
 tr=pd.read_parquet("$DATA_DIR/gsm8k_boxed_train.parquet"); te=pd.read_parquet("$DATA_DIR/gsm8k_boxed_test.parquet")
-qt=lambda p:p[0]["content"] if isinstance(p,(list,tuple)) else p
-trq={qt(r) for r in tr["prompt"]}; teq={qt(r) for r in te["prompt"]}
-print(json.dumps({"train_rows":len(tr),"test_rows":len(te),"train_test_prompt_overlap":len(trq&teq),"test_index_base":int(te["extra_info"].iloc[0]["index"])},indent=1))
+def q(row):                                   # question text: extra_info.question if present, else the last (user) turn
+    ei=row["extra_info"]
+    if isinstance(ei,dict) and ei.get("question"): return " ".join(str(ei["question"]).split())
+    msgs=list(row["prompt"]); return " ".join(str(msgs[-1]["content"]).split())
+trq={q(r) for _,r in tr.iterrows()}; teq={q(r) for _,r in te.iterrows()}
+print(json.dumps({"train_rows":len(tr),"test_rows":len(te),"train_unique_questions":len(trq),"test_unique_questions":len(teq),
+                  "train_test_question_overlap":len(trq&teq),"test_index_base":int(te["extra_info"].iloc[0]["index"])},indent=1))
 EOF
 # per-seed data order (which 128 questions each step consumed), recovered from the rollout dumps
 python3 - <<EOF
@@ -112,7 +117,8 @@ with open("$H/fixtures/scorer_fixture_8k.jsonl","w") as f:
     for o in out: f.write(json.dumps(o, ensure_ascii=False)+"\n")
 print("scorer fixture rows:", len(out), "| acc mean", sum(o["expected"]["acc"] for o in out)/len(out))
 EOF
-if [ "${SKIP_FIXTURE_JOB:-0}" != "1" ]; then
+SKIP_GPU=${SKIP_GPU:-0}                       # 1 = do not touch GPUs: reuse an existing fixture job + replay output (error if absent)
+if [ "$SKIP_GPU" != "1" ] && [ "${SKIP_FIXTURE_JOB:-0}" != "1" ]; then
   # 2-step fixture job under the frozen recipe (two-pass so old_log_probs is the trainer's pre-update log-prob), dumps step 1+2, saves both checkpoints
   RUN_TAG=fx8k SINGLE_FWD=0 IS_MODE=tis META_ACTOR_LR=2e-6 META_RESP_CAP=8192 META_PENALTY_SOURCES="" SEED=1 NNODES=16 GPUS_PER_NODE=4 TOTAL_STEPS=2 TEST_FREQ=-1 SAVE_FREQ=1 EVAL_FULL=0 COLLAPSE_GUARD=0 \
     LOGPROB_FIXTURE_DIR=$LOG_DIR/fx8k/raw LOGPROB_FIXTURE_STEP=1,2 \
@@ -120,23 +126,44 @@ if [ "${SKIP_FIXTURE_JOB:-0}" != "1" ]; then
   grep -q "driver exited with rc=0" $LOG_DIR/fx8k.log || { echo "fixture job failed"; tail -20 $LOG_DIR/fx8k.log; exit 2; }
 fi
 EF=$(grep -o 'qwen3_0p6b_base_fx8k_seed1_[0-9a-z_]*' $LOG_DIR/fx8k.log | tail -1)
-python3 $G0/make_logprob_fixture.py --dump $LOG_DIR/fx8k/raw/fixture_step1.npz --out $H/fixtures/logprob_fixture_8k.json --n 96 --n_long 24 --n_trunc 8 | tail -3
+test -s $LOG_DIR/fx8k/raw/fixture_step1.npz || { echo "fixture dumps missing ($LOG_DIR/fx8k/raw); run without SKIP_GPU/SKIP_FIXTURE_JOB"; exit 2; }
+python3 $G0/make_logprob_fixture.py --dump $LOG_DIR/fx8k/raw/fixture_step1.npz --out $H/fixtures/logprob_fixture_8k --n 96 --n_long 24 --n_trunc 8 | tail -3   # tool appends .json
+test -s $H/fixtures/logprob_fixture_8k.json || { echo "logprob fixture not written"; exit 2; }
 cp $LOG_DIR/fx8k/raw/fixture_step{1,2}.npz $LOG_DIR/fx8k/raw/fixture_step{1,2}.json $H/fixtures/
 GN=$(grep -o "actor/grad_norm:[0-9.e-]*" $LOG_DIR/fx8k.log | head -1 | cut -d: -f2)
-CUDA_VISIBLE_DEVICES=0 python3 $G/replay_single_step.py --dumps $LOG_DIR/fx8k/raw/fixture_step1.npz --lrs 0 --model $MODEL_PATH --micro 8 --reported_grad_norm $GN \
-  --out $H/fixtures/replay_step1_reference_8k.json 2>&1 | grep -E "^\[2a\]|^\[2b\]|reported grad" | tee $H/fixtures/replay_step1_reference_8k.log
-mkdir -p $H/checkpoints/fixture_seed1_step2_after_first_nonzero_update && cp -r $CKPT_DIR/$EF/global_step_2/actor/huggingface/* $H/checkpoints/fixture_seed1_step2_after_first_nonzero_update/
-echo "lr used by update 1: 0 (warmup step 1); by update 2: 2e-7 (= 2e-6/10). theta_1 == theta_0." > $H/checkpoints/fixture_seed1_step2_after_first_nonzero_update/README.txt
+if [ "$SKIP_GPU" != "1" ]; then
+  # reference replay of step 1: ratio-form loss -A*w*exp(logp-logp.detach()) has the SAME gradient as the single-forward
+  # REINFORCE loss; the loss scalars differ by construction. --save_grad writes the per-parameter gradient (safetensors, ~2.4 GB)
+  rm -rf $LOG_DIR/fx8k/replay_grad
+  CUDA_VISIBLE_DEVICES=0 python3 $G/replay_single_step.py --dumps $LOG_DIR/fx8k/raw/fixture_step1.npz --lrs 0 --model $MODEL_PATH --micro 8 --reported_grad_norm $GN \
+    --save_grad $LOG_DIR/fx8k/replay_grad --out $LOG_DIR/fx8k/replay_step1_reference_8k.json 2>&1 | grep -E "^\[2a\]|^\[2b\]|reported grad" | tee $LOG_DIR/fx8k/replay_step1_reference_8k.log
+fi
+test -s $LOG_DIR/fx8k/replay_grad/grad_step1.safetensors || { echo "replay gradient missing; run without SKIP_GPU"; exit 2; }
+cp $LOG_DIR/fx8k/replay_step1_reference_8k.json $LOG_DIR/fx8k/replay_step1_reference_8k.log $H/fixtures/
+rm -rf $H/fixtures/replay_grad_step1 && mkdir -p $H/fixtures/replay_grad_step1 && cp $LOG_DIR/fx8k/replay_grad/grad_step1.safetensors $H/fixtures/replay_grad_step1/
+cat > $H/fixtures/replay_grad_step1/README.txt <<'TXT'
+grad_step1.safetensors: per-parameter PRE-CLIP gradient of the reference implementation (pure PyTorch/HF, fp32 master, bf16 autocast,
+micro-batch 8) on fixtures/fixture_step1.npz, loss = token-mean(-A * w * exp(logp - logp.detach())) with w = min(exp(logp.detach()-logp_sampler), 3).
+Its gradient equals that of the single-forward REINFORCE loss -A*w*logp used by the trainer; the loss SCALARS differ by construction and
+must not be compared. Compare a TPU gradient on the same batch with compare_grads.py (global/per-parameter cosine, relative error, float64).
+GB200 trainer (exp_avg/0.1 at step 1) vs this file: see replay_step1_reference_8k.log and band/summary.json.
+TXT
+rm -rf $H/checkpoints/fixture_seed1_step2 && mkdir -p $H/checkpoints/fixture_seed1_step2 && cp -r $CKPT_DIR/$EF/global_step_2/actor/huggingface/. $H/checkpoints/fixture_seed1_step2/
+cat > $H/checkpoints/fixture_seed1_step2/README.txt <<'TXT'
+theta_2 of the fixture job = theta_0 -> update 1 on fixture_step1.npz at lr 0 (weights unchanged, Adam moments initialised from the
+step-1 gradient) -> update 2 on fixture_step2.npz at lr 2e-7 (= 2e-6/10, warmup step 2). To reproduce, both steps must be replayed
+in order with the same Adam hyperparameters (betas 0.9/0.999, eps 1e-8, wd 0, bias correction at steps 1 and 2).
+TXT
 
 # ---------------------------------------------------------------- 5. runs: TB, val dumps, rollout dumps, guard log, timing anchors
 for S in 1 2 3; do
-  R=$H/runs/seed${S}; mkdir -p $R
-  cp -r $TBROOT/${E[$S]} $R/tensorboard
-  cp -r $LOG_DIR/${E[$S]}/val_dump $R/val_dump; cp -r $LOG_DIR/${E[$S]}/rollout_dump $R/rollout_dump
+  R=$H/runs/seed${S}; rm -rf $R; mkdir -p $R
+  cp -r $TBROOT/${E[$S]}/. $R/tensorboard/
+  cp -r $LOG_DIR/${E[$S]}/val_dump/. $R/val_dump/; cp -r $LOG_DIR/${E[$S]}/rollout_dump/. $R/rollout_dump/
   cp $LOG_DIR/${E[$S]}/collapse_guard.log $R/ 2>/dev/null || true
   cp $LOG_DIR/sf_tis_16n_cap8k_nopen_seed${S}_start_epoch.txt $R/start_epoch.txt; cp $LOG_DIR/sf_tis_16n_cap8k_nopen_seed${S}_end_epoch.txt $R/end_epoch.txt 2>/dev/null || true
   echo "${E[$S]}" > $R/EXPERIMENT_NAME
-  mkdir -p $H/checkpoints/seed${S}_step250 && cp -r $CKPT_DIR/${E[$S]}/global_step_250/actor/huggingface/* $H/checkpoints/seed${S}_step250/
+  rm -rf $H/checkpoints/seed${S}_step250 && mkdir -p $H/checkpoints/seed${S}_step250 && cp -r $CKPT_DIR/${E[$S]}/global_step_250/actor/huggingface/. $H/checkpoints/seed${S}_step250/
 done
 
 # ---------------------------------------------------------------- 6. band + summary
@@ -154,12 +181,12 @@ S={}
 for s,tb,ep in ((1,"$T1","sf_tis_16n_cap8k_nopen_seed1"),(2,"$T2","sf_tis_16n_cap8k_nopen_seed2"),(3,"$T3","sf_tis_16n_cap8k_nopen_seed3")):
     a=ea.EventAccumulator(tb, size_guidance={ea.SCALARS:0}); a.Reload(); t=lambda k:{e.step:e.value for e in a.Scalars(k)} if k in a.Tags()["scalars"] else {}
     ev=a.Scalars("val-core/gsm8k_boxed_test/acc/mean@1"); st=a.Scalars("timing_s/step"); t0=int(open(f"$LOG_DIR/{ep}_start_epoch.txt").read())
-    steady=[x.value for x in st if x.value<np.percentile([x.value for x in st],80)]
+    steady=[x.value for x in st if 20<=x.step<=250 and x.step%20!=0 and x.step%50!=0 and x.step!=250]   # rulebook window: steps 20-250 minus eval/ckpt steps
     def hit(thr):
         h=next((ev[i] for i in range(1,len(ev)) if ev[i].value>=thr and ev[i-1].value>=thr), None)
         return None if h is None else {"step":h.step,"e2e_min":(h.wall_time-t0)/60,"gpu_hours_64":64*(h.wall_time-t0)/3600}
     m=lambda d,lo,hi: float(np.mean([v for k,v in d.items() if lo<=k<=hi])) if d else None
-    S[f"seed{s}"]={"eval":{e.step:e.value for e in ev},"fmt_step0":t("val-aux/gsm8k_boxed_test/fmt/mean@1").get(0),"steady_step_s_median":float(np.median(steady)),
+    S[f"seed{s}"]={"eval":{e.step:e.value for e in ev},"fmt_step0":t("val-aux/gsm8k_boxed_test/fmt/mean@1").get(0),"steady_step_s_median":float(np.median(steady)),"steady_step_s_p10_p90":[float(np.percentile(steady,10)),float(np.percentile(steady,90))],"steady_n_steps":len(steady),
         "time_to_0.78":hit(0.78),"time_to_0.80":hit(0.80),"e2e_total_min":(st[-1].wall_time-t0)/60,
         "diag_mean_1_250":{"entropy":m(t("actor/entropy_loss"),1,250),"response_length":m(t("response_length/mean"),1,250),"cap_hit":m(t("response_length/clip_ratio"),1,250),"grad_norm":m(t("actor/grad_norm"),1,250),"train_score":m(t("critic/score/mean"),1,250),"rollout_probs_diff_mean":m(t("training/rollout_probs_diff_mean"),1,250),"rollout_corr_kl":m(t("rollout_corr/kl"),1,250)},
         "diag_last10":{"entropy":m(t("actor/entropy_loss"),241,250),"response_length":m(t("response_length/mean"),241,250),"grad_norm":m(t("actor/grad_norm"),241,250),"train_score":m(t("critic/score/mean"),241,250)}}
@@ -181,6 +208,8 @@ for a,b in itertools.combinations((1,2,3),2):
 acc=np.array([[D[s][q]["acc"] for q in sorted(qs)] for s in (1,2,3)]); out["unstable_questions_1_or_2_of_3"]=int(((acc.sum(0)>0)&(acc.sum(0)<3)).sum()); out["identical_across_all_three"]=sum(1 for q in qs if D[1][q]["output"]==D[2][q]["output"]==D[3][q]["output"])
 print(json.dumps(out, indent=1))
 EOF
-cp $H/../../verl/examples/grpo_trainer/my_scripts_GKE_gsm8k/handoff/*.md $H/ 2>/dev/null || true     # rulebook + guide if synced there
+for D in TPU_GPU_RL_Parity_Rulebook_gsm8k_8k.md Tianyu_TPU_Parity_Guide_gsm8k_8k.md; do
+  if [ -s $G/handoff/$D ]; then cp $G/handoff/$D $H/; elif [ -s $G/$D ]; then cp $G/$D $H/; else echo "WARNING: $D not found under $G or $G/handoff"; fi
+done
 ( cd $H && find . -type f ! -name PACKAGE_MANIFEST.sha256 -print0 | sort -z | xargs -0 sha256sum ) > $H/PACKAGE_MANIFEST.sha256
 ( cd $H && sha256sum -c --quiet PACKAGE_MANIFEST.sha256 ) && echo "PACKAGE OK: $(wc -l < $H/PACKAGE_MANIFEST.sha256) files -> $H" && du -sh $H

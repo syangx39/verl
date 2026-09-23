@@ -105,7 +105,7 @@ EOF
 
 GPU 参考（**同一权重的三次 greedy**）：0.7453 / 0.7400 / 0.7582，均值 0.748；格式率 0.92–0.93。
 
-- 要求：TPU 的 acc 在 **[0.728, 0.768]** 内。
+- 参考范围：TPU 的 acc 落在 **[0.728, 0.768]** 内（GPU 均值 ±2pp；这个数是建议口径，尚未双方约定）。
 - 同时报告逐题 agreement（和 `runs/seed1/val_dump/0.jsonl` 比：输出完全相同的题数、acc 翻转的题数）。这只是诊断，不是判据——GPU 自己三次之间也只有 215–241 题输出相同、约 130 题翻转（rulebook "Evaluation variability"）。
 
 超出范围先查：thinking 是否被关（格式率会变，长度分布会变）、cap 是否 8192、stop token、tokenizer 版本。
@@ -114,7 +114,7 @@ GPU 参考（**同一权重的三次 greedy**）：0.7453 / 0.7400 / 0.7582，�
 
 ## 5. 门 4 · Trainer vs sampler 数值（TPU，~30 分钟）
 
-`fixtures/logprob_fixture_8k.json`：96 条序列（含 24 条长、8 条到 cap 的），每条有 `prompt_ids`、`response_ids`、`response_mask`、`position_ids`、`logp_sampler`（vLLM）、`logp_trainer`（FSDP，更新前）。
+`fixtures/logprob_fixture_8k.json`：96 条序列（含 24 条长、8 条到 cap 的），每条有 `prompt_ids`、`response_ids`、`response_mask`、`position_ids_response`、`logp_sampler`（vLLM）、`logp_trainer`（FSDP，更新前）。
 
 (a) 用 TPU 的 trainer 在同一权重上对这 96 条算逐 token logp（fp32），和 `logp_trainer` 比：mean |Δ|、p95、max。
 (b) 用 TPU 自己的 sampler 在冻结采样设置下采一批，算 sampler-vs-trainer 的同样统计。
@@ -130,8 +130,8 @@ GPU 参考值在 fixture 文件头和 `band/summary.json`（250 步均值：prob
 `fixtures/fixture_step1.npz`（+ `.json` sidecar）是 GPU seed-1 fixture job 第 1 步的**完整批**：`prompts`、`responses`、`attention_mask`、`response_mask`、`position_ids`、`rollout_log_probs`、`old_log_probs`（trainer 更新前）、`token_level_scores`、`advantages`、`nt__uid`、`nt__qid`。
 
 (a) **advantage**：按 uid 分组用 `token_level_scores` 重算，和 `advantages` 比（GPU vs 独立参考：max |Δ| 4e-7）。这一步核 ddof、eps、广播。
-(b) **loss / 梯度**：把这一批原样注入你们的 trainer（同权重），算 −A·w·logπ 的 token-mean 和梯度，和 `fixtures/replay_step1_reference_8k.json` 比：梯度范数、方向余弦（GPU vs 参考：余弦 ≈ 0.99、rel err ≈ 14%，post-trained 低 entropy 下的 bf16 kernel 差）。loss 标量只在同一 loss 形式下才可比。
-(c) **optimizer**：从 θ₀ 用第 1 步（lr 0）和第 2 步（lr 2e-7，`fixture_step2.npz`）各更新一次，和 `checkpoints/fixture_seed1_step2_after_first_nonzero_update/` 比 Δθ（GPU 自身 Adam 应用误差：1 ulp）。
+(b) **loss / 梯度**：把这一批原样注入你们的 trainer（同权重），算 −A·w·logπ 的 token-mean 和梯度；梯度和 `fixtures/replay_grad_step1/grad_step1.safetensors` 比（`code/compare_grads.py`：全局/逐参数余弦、rel err），范数和 `replay_step1_reference_8k.json` 比。GPU 自己对这个参考：余弦 ≈ 0.99、rel err ≈ 14%（post-trained 低 entropy 下的 bf16 kernel 差）。**loss 标量不要比**：参考实现用的是 ratio 形式 −A·w·exp(logπ−logπ.detach())，梯度和 REINFORCE 形式相同，标量不同。
+(c) **optimizer**：从 θ₀ 出发按顺序做两次更新——第 1 次用 `fixture_step1.npz`、lr 0（权重不变，Adam 矩被初始化），第 2 次用 `fixture_step2.npz`、lr 2e-7——得到的 θ₂ 和 `checkpoints/fixture_seed1_step2/` 比 Δθ（GPU 自身 Adam 应用误差：1 ulp）。两步都要做，只做第 2 步得不到同一个 θ₂。
 
 ---
 
@@ -183,7 +183,7 @@ python3 code/band_plot.py --tb runs/seed1/tensorboard runs/seed2/tensorboard run
 4. **终止 token 在 loss 里**：`<|im_end|>` 那个位置 mask=1。
 5. **lr 调度**：第 1 次 update 的 lr 是 0（θ₁=θ₀），第 2 次 2e-7；打印实际进 optimizer 的 lr 核一次。
 6. **fp32 logp**：logits 转 fp32 再 log_softmax；bf16 下 logp 会差 0.02 nats 量级，门 4 会变大。
-7. **greedy eval 本身不可复现**：逐题输出对不上不是 bug；看均值和分布。
+7. **greedy eval 本身不可复现**：同一权重在 GPU 上三次 greedy 只有 16–18% 的题输出相同（输入、权重、配置已核对一致，原因未定）；逐题输出对不上不是 bug，看均值和分布。
 8. **没有长度惩罚、没有 KL**：长度会慢慢漂（GB200 250 步内到 2.3–2.6k），这是预期；跑更长的话要另议。
 
 有任何一道门过不去，先发我该门的输出，别往下跑。
