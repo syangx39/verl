@@ -339,11 +339,13 @@ def main():
   # exploding past step ~100), so it gets the panel; pg_clipfrac is 0 by design at
   # mu=1 and only informative in multi-update ablations -> printed, not plotted.
   ax = axes[4]
-  st, v = tb_get(tb, "actor/entropy")
+  ent_tag = "actor/entropy"
+  st, v = tb_get(tb, ent_tag)
   if len(st) == 0:                                                        # st is a numpy array: truthiness is ambiguous
-    st, v = tb_get(tb, "actor/entropy_loss")                              # single-forward runs: entropy from the update pass
+    ent_tag = "actor/entropy_loss"                                        # single-forward runs: entropy from the update pass
+    st, v = tb_get(tb, ent_tag)
   if len(st):
-    ax.plot(st, v, color="#08519c", lw=1.5, label="actor/entropy")
+    ax.plot(st, v, color="#08519c", lw=1.5, label=ent_tag)
     ax.set_ylabel("entropy (nats/token)")
     ax.set_yscale("log")
     lo, hi = first_last(v)
@@ -379,19 +381,26 @@ def main():
   #   rollout_corr/kl  = TRAINER vs ROLLOUT engine on the same weights (numerics / sampling)
   #   actor/kl_loss    = CURRENT POLICY vs REFERENCE model (k3 / low_var_kl), the term
   #                      that use_kl_loss adds to the actor loss -- policy drift
-  for tag, c, lab in (("training/rollout_probs_diff_mean", "#de2d26", "mean |p_trainer - p_rollout|  (probability MAE)"),
-                      ("training/rollout_probs_diff_max", "#fd8d3c", "max |p_trainer - p_rollout|"),
-                      ("rollout_corr/kl", "#08519c", "rollout_corr/kl  = trainer vs rollout (log domain)"),
-                      ("rollout_corr/log_ppl_abs_diff", "#6baed6", "rollout_corr/log_ppl_abs_diff  (log domain)"),
-                      ("actor/kl_loss", "#31a354", "actor/kl_loss  = policy vs REFERENCE (k3), drift from init")):
-    st, v = tb_get(tb, tag)
+  # Two-pass trainer: training/rollout_probs_diff_* (from the old-log-prob pass) + rollout_corr/*.
+  # Single-forward (bypass) trainer: the old-log-prob pass is skipped, so training/rollout_probs_diff_* does not exist and the
+  # correction metrics are logged by the actor as actor/rollout_corr/* (k3_kl is the non-negative estimator; kl can be negative).
+  for tags, c, lab in ((("training/rollout_probs_diff_mean",), "#de2d26", "mean |p_trainer - p_rollout|  (probability MAE)"),
+                       (("training/rollout_probs_diff_max",), "#fd8d3c", "max |p_trainer - p_rollout|"),
+                       (("actor/rollout_corr/k3_kl",), "#08519c", "rollout_corr/k3_kl  = trainer vs rollout (non-negative, log domain)"),
+                       (("rollout_corr/kl", "actor/rollout_corr/kl"), "#3182bd", "rollout_corr/kl  = trainer vs rollout (signed, log domain)"),
+                       (("rollout_corr/log_ppl_abs_diff", "actor/rollout_corr/log_ppl_abs_diff"), "#6baed6", "rollout_corr/log_ppl_abs_diff  (log domain)"),
+                       (("actor/kl_loss",), "#31a354", "actor/kl_loss  = policy vs REFERENCE (k3), drift from init")):
+    for tag in tags:
+      st, v = tb_get(tb, tag)
+      if len(st):
+        break
     if len(st):
       ax.plot(st, v, color=c, lw=1.5, label=lab)
       got = True
       lo, hi = first_last(v)
       summary.append(f"{tag:<34}: first5={lo:.4f} last5={hi:.4f}")
   if not got:
-    ax.text(0.5, 0.5, "no mismatch tags\n(calculate_log_probs=False?)",
+    ax.text(0.5, 0.5, "no trainer-vs-rollout tags found\n(expected training/rollout_probs_diff_* or [actor/]rollout_corr/*)",
             ha="center", va="center", transform=ax.transAxes)
   ax.set_yscale("log")
   ax.set_title("trainer-vs-rollout mismatch  |  policy-vs-reference KL (actor/kl_loss)")

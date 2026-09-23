@@ -238,7 +238,7 @@ for s,tb,ep in ((1,"$T1","sf_tis_16n_cap8k_nopen_seed1"),(2,"$T2","sf_tis_16n_ca
     m=lambda d,lo,hi: float(np.mean([v for k,v in d.items() if lo<=k<=hi])) if d else None
     S[f"seed{s}"]={"eval":{e.step:e.value for e in ev},"fmt_step0":t("val-aux/gsm8k_boxed_test/fmt/mean@1").get(0),"steady_step_s_median":float(np.median(steady)),"steady_step_s_p10_p90":[float(np.percentile(steady,10)),float(np.percentile(steady,90))],"steady_n_steps":len(steady),
         "time_to_0.78":hit(0.78),"time_to_0.80":hit(0.80),"e2e_total_min":(st[-1].wall_time-t0)/60,
-        "diag_mean_1_250":{"entropy":m(t("actor/entropy_loss"),1,250),"response_length":m(t("response_length/mean"),1,250),"cap_hit":m(t("response_length/clip_ratio"),1,250),"grad_norm":m(t("actor/grad_norm"),1,250),"train_score":m(t("critic/score/mean"),1,250),"rollout_probs_diff_mean":m(t("training/rollout_probs_diff_mean"),1,250),"rollout_corr_kl":m(t("rollout_corr/kl"),1,250)},
+        "diag_mean_1_250":{"entropy":m(t("actor/entropy_loss"),1,250),"response_length":m(t("response_length/mean"),1,250),"cap_hit":m(t("response_length/clip_ratio"),1,250),"grad_norm":m(t("actor/grad_norm"),1,250),"train_score":m(t("critic/score/mean"),1,250),"rollout_probs_diff_mean":m(t("training/rollout_probs_diff_mean"),1,250),"rollout_corr_k3_kl":m(t("actor/rollout_corr/k3_kl") or t("rollout_corr/k3_kl"),1,250),"rollout_corr_kl":m(t("actor/rollout_corr/kl") or t("rollout_corr/kl"),1,250),"rollout_corr_log_ppl_abs_diff":m(t("actor/rollout_corr/log_ppl_abs_diff") or t("rollout_corr/log_ppl_abs_diff"),1,250)},
         "diag_last10":{"entropy":m(t("actor/entropy_loss"),241,250),"response_length":m(t("response_length/mean"),241,250),"grad_norm":m(t("actor/grad_norm"),241,250),"train_score":m(t("critic/score/mean"),241,250)}}
 steps=sorted(S["seed1"]["eval"]); W=[max(S[f"seed{s}"]["eval"][k] for s in (1,2,3))-min(S[f"seed{s}"]["eval"][k] for s in (1,2,3)) for k in steps]
 fin=[S[f"seed{s}"]["eval"][250] for s in (1,2,3)]
@@ -261,5 +261,27 @@ EOF
 for D in TPU_GPU_RL_Parity_Rulebook_gsm8k_8k.md Tianyu_TPU_Parity_Guide_gsm8k_8k.md; do
   if [ -s $G/handoff/$D ]; then cp $G/handoff/$D $H/; elif [ -s $G/$D ]; then cp $G/$D $H/; else echo "WARNING: $D not found under $G or $G/handoff"; fi
 done
+cat > $H/README.md <<TXT
+# GB200 reference package: Qwen3-0.6B / GSM8K / response cap 8192, no length penalty (recipe gsm8k_8k_v1)
+
+Three 250-step GRPO runs on 64 GB200 (seeds 1-3), everything needed for the TPU side to reproduce them, and the fixtures for the
+alignment gates. Read TPU_GPU_RL_Parity_Rulebook_gsm8k_8k.md (recipe, gates, reference numbers, comparison rule) and
+Tianyu_TPU_Parity_Guide_gsm8k_8k.md (step-by-step, Chinese). Generated $(date -u +%Y-%m-%dT%H:%MZ) by code/package_gsm8k_8k.sh.
+
+Verify: sha256sum -c --quiet PACKAGE_MANIFEST.sha256
+
+| dir | contents |
+|---|---|
+| model/ | Qwen/Qwen3-0.6B weights + configs + tokenizer; MODEL_SHA256; model_identity.json (fingerprint: 311 tensors, untied lm_head, sum(model.norm.weight)) |
+| data/ | gsm8k_boxed_train.parquet (7473), gsm8k_boxed_test.parquet (1319), Meta jsonl + meta_reference/; train_order_seed{1,2,3}.parquet + step_manifest_seed{1,2,3}.json (per-step question ids the GPU seeds consumed); DATA_COUNTS.json |
+| fixtures/ | prompt_fixture.json (gate 1); meta_reward_fixtures.json + scorer_fixture_8k.jsonl + reward self-test logs (gate 2); logprob_fixture_8k.json (gate 4); fixture_step{1,2}.npz/.json full step batches, replay_step1_reference_8k.*, replay_grad_step1/ reference gradient, grad_compare_8k.*, replay_delta_8k.* (gate 5) |
+| code/ | launcher, reward, data builder, verl patches, replay / gradient / band tools (see rulebook "handoff package") |
+| env/ | verl commit, executed ray_trainer.py + patch markers, versions.txt, pip_freeze.txt, gpu.txt, resolved_config_seed{1,2,3}.yaml, CONFIG_DIFF.txt |
+| runs/seed{1,2,3}/ | launch log, tensorboard/, val_dump/<step>.jsonl (14), rollout_dump/<step>.jsonl (250), collapse_guard.log, start/end epoch |
+| band/ | gb200_band_gsm8k_8k.png/.json, gb200_curves_gsm8k_8k.png, gb200_train_gsm8k_8k.png, diagnostics_seed{1,2,3}.png, summary.json (all reference numbers), step0_greedy_variability.json |
+| checkpoints/ | seed{1,2,3}_step250/ (HF safetensors), fixture_seed1_step2/ (theta_2 of the fixture job, README) |
+
+Reference experiment ids: ${E[1]}, ${E[2]}, ${E[3]}.
+TXT
 ( cd $H && find . -type f ! -name PACKAGE_MANIFEST.sha256 -print0 | sort -z | xargs -0 sha256sum ) > $H/PACKAGE_MANIFEST.sha256
 ( cd $H && sha256sum -c --quiet PACKAGE_MANIFEST.sha256 ) && echo "PACKAGE OK: $(wc -l < $H/PACKAGE_MANIFEST.sha256) files -> $H" && du -sh $H
