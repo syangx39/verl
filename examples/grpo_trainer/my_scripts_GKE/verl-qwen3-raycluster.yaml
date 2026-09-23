@@ -44,12 +44,11 @@ spec:
             ]
       spec:
         serviceAccountName: verl-runner
-        priorityClassName: verl-bench-high
         resourceClaims:
         - name: compute-domain-channel
           resourceClaimTemplateName: verl-qwen3-xiaotongyang-cd-channel
         nodeSelector:
-          cloud.google.com/gke-nodepool: a4x-highgpu-4g-a4x-pool-5
+          cloud.google.com/gke-nodepool: a4x-highgpu-4g-a4x-pool-2
         tolerations:
         - key: nvidia.com/gpu
           operator: Exists
@@ -153,13 +152,12 @@ spec:
               {"interfaceName":"eth5","network":"rdma-3"}
             ]
       spec:
-        priorityClassName: verl-bench-high
         serviceAccountName: verl-runner
         resourceClaims:
         - name: compute-domain-channel
           resourceClaimTemplateName: verl-qwen3-xiaotongyang-cd-channel
         nodeSelector:
-          cloud.google.com/gke-nodepool: a4x-highgpu-4g-a4x-pool-5
+          cloud.google.com/gke-nodepool: a4x-highgpu-4g-a4x-pool-2
         tolerations:
         - key: nvidia.com/gpu
           operator: Exists
