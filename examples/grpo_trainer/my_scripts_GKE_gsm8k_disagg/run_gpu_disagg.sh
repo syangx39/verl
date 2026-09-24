@@ -35,8 +35,9 @@ RAY_ENV_OVERRIDES=(
   "$RE.env_vars.VERL_REPO=$VERL_REPO" "$RE.env_vars.RECIPE_DIR=$RECIPE_DIR" "$RE.env_vars.DISAGG_PYTHON=$DISAGG_PYTHON"
   "$RE.env_vars.MODEL_PATH=$MODEL_PATH" "$RE.env_vars.DATA_DIR=$DATA_DIR" "$RE.env_vars.RUN_DIR=$RUN_DIR" "$RE.env_vars.CKPT_DIR=$CKPT_DIR"
   "$RE.env_vars.EXPERIMENT_NAME=$EXPERIMENT_NAME" "$RE.env_vars.TB_DIR=$TB_DIR" "$RE.env_vars.TENSORBOARD_DIR=$TB_DIR"
-  "$RE.env_vars.SEED=$SEED" "$RE.env_vars.PYTHONHASHSEED=$SEED" "$RE.env_vars.TOTAL_STEPS=$TOTAL_STEPS" "$RE.env_vars.TEST_FREQ=$TEST_FREQ"
-  "$RE.env_vars.SAVE_FREQ=$SAVE_FREQ" "$RE.env_vars.VAL_BEFORE_TRAIN=$VAL_BEFORE_TRAIN" "$RE.env_vars.PYTHONPATH=$VERL_REPO:$RECIPE_DIR"
+  # numbers/booleans must stay strings for Ray (env_vars: Dict[str, str]); the inner single quotes make Hydra keep them as str
+  "$RE.env_vars.SEED='$SEED'" "$RE.env_vars.PYTHONHASHSEED='$SEED'" "$RE.env_vars.TOTAL_STEPS='$TOTAL_STEPS'" "$RE.env_vars.TEST_FREQ='$TEST_FREQ'"
+  "$RE.env_vars.SAVE_FREQ='$SAVE_FREQ'" "$RE.env_vars.VAL_BEFORE_TRAIN='$VAL_BEFORE_TRAIN'" "$RE.env_vars.PYTHONPATH=$VERL_REPO:$RECIPE_DIR"
 )
 PIN=ace775e87d8765bcdd114aac734ab71da5367a0f   # upstream verl-project/verl main (2026-09-22)
 test -x "$DISAGG_PYTHON" || { echo "Run prepare_env.py first: $DISAGG_PYTHON missing" >&2; exit 2; }
