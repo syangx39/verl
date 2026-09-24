@@ -111,8 +111,9 @@ def prepare_node(node_id, node_ip, options, expected):
             if not (repo / ".git").is_dir():
                 raise RuntimeError(f"verl checkout missing on this node: {repo} (pass --clone-url to clone it node-locally)")
             env_root = Path(options["venv"]).resolve()
-            if env_root == repo.resolve() or env_root in repo.resolve().parents or repo.resolve() in env_root.parents:
-                raise RuntimeError(f"source checkout {repo} and venv {env_root} must be separate directories (uv sync refuses a non-env dir)")
+            # a venv INSIDE the repo (uv's standard <repo>/.venv) is fine; the repo inside the venv, or the same dir, is not
+            if env_root == repo.resolve() or env_root in repo.resolve().parents:
+                raise RuntimeError(f"source checkout {repo} must not live inside the venv {env_root} (uv sync refuses a non-env dir)")
             sha = run(["git", "rev-parse", "HEAD"], capture=True)
             if sha != COMMIT:
                 raise RuntimeError(f"Expected checkout {COMMIT}, found {sha}")
@@ -191,10 +192,10 @@ def main():
     parser.add_argument("--parallel", type=int, default=4)
     parser.add_argument("--check", action="store_true", help="Import-check every node; install nothing")
     parser.add_argument("--ray-wheel", help="Shared path to wheel for an existing custom Ray build")
-    parser.add_argument("--clone-url", default="https://github.com/jialei777/verl-upstream.git",
+    parser.add_argument("--clone-url", default="https://github.com/verl-project/verl.git",
                         help="clone the pinned commit into --repo on every node when it is not already there (node-local source); "
                              "pass an empty string to require a pre-existing checkout")
-    parser.add_argument("--clone-branch", default="tpu-main")
+    parser.add_argument("--clone-branch", default="main")
     args = parser.parse_args()
     if args.parallel < 1:
         parser.error("--parallel must be positive")
