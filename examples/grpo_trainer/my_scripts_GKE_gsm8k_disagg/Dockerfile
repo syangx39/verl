@@ -5,8 +5,9 @@
 FROM verlai/verl@sha256:094943c1909590564feda8122bd090ba0a93aa42345245111a05225c1a7972f1
 
 # Source: a LOCAL checkout in the build context (verl-src/ = jialei777/verl-upstream@9924801 + patches/*.patch, committed
-# with a fixed author/date so the resulting SHA is reproducible; see build_and_push.sh). VERL_PIN must equal that SHA.
-ARG VERL_PIN
+# with a fixed author/date so the resulting SHA is reproducible; see build_and_push.sh). VERL_PIN is declared only
+# right before the source layer: an ARG participates in the cache key of every later RUN, so declaring it here would
+# re-run the dependency install whenever a patch changes the pin.
 # set to 1 if the lock's flash-attn wheel URL is x86-only and 404s on aarch64: sync without it, then build it from source
 ARG FLASH_ATTN_FROM_SOURCE=0
 
@@ -23,6 +24,7 @@ RUN if [ "${FLASH_ATTN_FROM_SOURCE}" = "1" ]; then \
     fi
 # Layer 2: the pinned + patched source; installs the project itself (editable) on top of the cached dependencies.
 COPY verl-src /workspace/verl-disagg
+ARG VERL_PIN
 RUN test -n "${VERL_PIN}" && test "$(git rev-parse HEAD)" = "${VERL_PIN}" \
  && test -z "$(git status --porcelain --untracked-files=no)" && git rev-parse HEAD > /workspace/VERL_PIN \
  && uv sync --frozen --all-packages --extra fsdp --extra vllm $( [ "${FLASH_ATTN_FROM_SOURCE}" = "1" ] && echo --no-install-package flash-attn )
