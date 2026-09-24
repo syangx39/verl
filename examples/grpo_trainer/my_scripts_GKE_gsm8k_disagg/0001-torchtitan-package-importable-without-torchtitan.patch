@@ -1,0 +1,32 @@
+From: verl-disagg recipe <recipe@local>
+Subject: [PATCH] torchtitan engine: keep the package importable without torchtitan
+
+verl.workers.utils.losses imports the pure-torch helpers in
+verl.workers.engine.torchtitan.tpu_utils on every stack (GPU included), which
+executes this package's __init__ and, unconditionally, transformer_impl ->
+`import torchtitan`. torchtitan is a TPU-only dependency (not in pyproject/uv.lock),
+so on GPU the V1 trainer could not be imported at all. Guard the engine import;
+the engine symbols become None exactly as verl.workers.engine already treats them.
+---
+ verl/workers/engine/torchtitan/__init__.py | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/verl/workers/engine/torchtitan/__init__.py b/verl/workers/engine/torchtitan/__init__.py
+--- a/verl/workers/engine/torchtitan/__init__.py
++++ b/verl/workers/engine/torchtitan/__init__.py
+@@ -11,6 +11,14 @@
+ # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
+-from .transformer_impl import TorchTitanEngine, TorchTitanEngineWithLMHead
++# The engine needs the torchtitan package, but verl.workers.utils.losses imports the pure-torch helpers in
++# .tpu_utils on every stack (GPU included). Keep this package importable when torchtitan is absent.
++try:
++    from .transformer_impl import TorchTitanEngine, TorchTitanEngineWithLMHead
++except ModuleNotFoundError as e:
++    if (e.name or "").split(".")[0] != "torchtitan":
++        raise
++    TorchTitanEngine = None
++    TorchTitanEngineWithLMHead = None
+ 
+ __all__ = ["TorchTitanEngine", "TorchTitanEngineWithLMHead"]

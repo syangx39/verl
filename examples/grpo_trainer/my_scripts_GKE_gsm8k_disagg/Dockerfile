@@ -4,17 +4,17 @@
 # upstream main's lock -- NOT a ready venv). Must be built on linux/arm64 (GB200 nodes are aarch64).
 FROM verlai/verl@sha256:094943c1909590564feda8122bd090ba0a93aa42345245111a05225c1a7972f1
 
-ARG VERL_FORK=https://github.com/jialei777/verl-upstream.git
-ARG VERL_BRANCH=tpu-main
-ARG VERL_PIN=9924801779415f86c807b5716a3d4479fa60f811
+# Source: a LOCAL checkout in the build context (verl-src/ = jialei777/verl-upstream@9924801 + patches/*.patch, committed
+# with a fixed author/date so the resulting SHA is reproducible; see build_and_push.sh). VERL_PIN must equal that SHA.
+ARG VERL_PIN
 # set to 1 if the lock's flash-attn wheel URL is x86-only and 404s on aarch64: sync without it, then build it from source
 ARG FLASH_ATTN_FROM_SOURCE=0
 
 ENV UV_HTTP_TIMEOUT=500 UV_LINK_MODE=copy UV_CACHE_DIR=/root/.cache/uv UV_PROJECT_ENVIRONMENT=/workspace/verl-disagg/.venv
 WORKDIR /workspace
-RUN git clone --branch ${VERL_BRANCH} ${VERL_FORK} verl-disagg \
- && cd verl-disagg && git fetch --depth 1 origin ${VERL_PIN} && git checkout --detach ${VERL_PIN} \
- && git rev-parse HEAD > /workspace/VERL_PIN && test "$(cat /workspace/VERL_PIN)" = "${VERL_PIN}"
+COPY verl-src /workspace/verl-disagg
+RUN test -n "${VERL_PIN}" && cd verl-disagg && test "$(git rev-parse HEAD)" = "${VERL_PIN}" \
+ && test -z "$(git status --porcelain --untracked-files=no)" && git rev-parse HEAD > /workspace/VERL_PIN
 WORKDIR /workspace/verl-disagg
 RUN if [ "${FLASH_ATTN_FROM_SOURCE}" = "1" ]; then \
       uv sync --frozen --all-packages --extra fsdp --extra vllm --no-install-package flash-attn \
@@ -30,5 +30,5 @@ ENV VIRTUAL_ENV=/workspace/verl-disagg/.venv \
     PATH=/workspace/verl-disagg/.venv/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     PYTHONPATH=/workspace/verl-disagg \
     VERL_PLATFORM=nvidia VLLM_USE_V1=1 PYTHONNOUSERSITE=1
-LABEL verl.fork="${VERL_FORK}" verl.pin="${VERL_PIN}"
+LABEL verl.pin="${VERL_PIN}" verl.base="jialei777/verl-upstream@9924801779415f86c807b5716a3d4479fa60f811 + patches/"
 CMD ["bash"]
