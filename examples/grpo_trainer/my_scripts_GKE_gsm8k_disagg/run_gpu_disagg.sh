@@ -26,7 +26,7 @@ export REWARD_FORMAT_SCORE=0.1 REWARD_OVERLONG_BUFFER=512
 export REWARD_OVERLONG_PENALTY=1.0 REWARD_MAX_RESP_LEN=2048
 export REWARD_PENALTY_SOURCES=gsm8k_boxed_train
 unset LOGPROB_FIXTURE_DIR LOGPROB_FIXTURE_STEP INJECT_BATCH_NPZ INJECT_BATCH_STEP
-PIN=9924801779415f86c807b5716a3d4479fa60f811
+PIN=   # = jialei777/verl-upstream@9924801 + patches/ (image build)
 test -x "$DISAGG_PYTHON" || { echo "Run prepare_env.py first: $DISAGG_PYTHON missing" >&2; exit 2; }
 test "$(git -C "$VERL_REPO" rev-parse HEAD)" = "$PIN" || { echo "Wrong verl commit; require $PIN" >&2; exit 2; }
 test -z "$(git -C "$VERL_REPO" status --porcelain --untracked-files=no)" || { echo "Pinned checkout has tracked modifications" >&2; exit 2; }
