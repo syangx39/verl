@@ -34,7 +34,7 @@ The asynchronous loss is `−mean_valid_tokens(A * stop_gradient(min(exp(clamp(l
 
 Pinned source: **verl 0.10.0.dev**, [`jialei777/verl-upstream@9924801779415f86c807b5716a3d4479fa60f811`](https://github.com/jialei777/verl-upstream/tree/9924801779415f86c807b5716a3d4479fa60f811). This is a development snapshot, not a released 0.10.0. The same V1 controller has a [GPU FSDP2 separate-async example](https://github.com/jialei777/verl-upstream/blob/9924801779415f86c807b5716a3d4479fa60f811/tests/special_e2e/run_v1_separate_async.sh).
 
-The pinned GPU lock uses Python 3.12, Torch 2.11/CUDA 13, vLLM 0.24 and Transformers 5.9. This is a software-stack change from the previous Meta runs. Keep the old checkout and environment for those results. The setup script creates a node-local environment at `/tmp/verl-disagg-9924801`, uses the GPU dependency lock, and explicitly overlays the **running cluster's exact Ray build**. It never restarts Ray. The manifest records that overlay; do not claim an unmodified full lock when Ray differs from 2.55.1.
+The pinned GPU lock uses Python 3.12, Torch 2.11/CUDA 13, vLLM 0.24 and Transformers 5.9. This is a software-stack change from the previous Meta runs. Keep the old checkout and environment for those results. The setup script creates a node-local environment at `/tmp/verl-disagg-venv-9924801` (source checkout at `/tmp/verl-disagg-src-9924801`), uses the GPU dependency lock, and explicitly overlays the **running cluster's exact Ray build**. It never restarts Ray. The manifest records that overlay; do not claim an unmodified full lock when Ray differs from 2.55.1.
 
 Prerequisites: an existing idle Ray cluster with 16 four-GPU nodes; Python 3.12 and matching Ray on all nodes; the same shared `/workspace/meta-RL` paths visible on the head and workers. Downloads need GitHub/PyPI/wheelhouse access. Environment preparation uses substantial node-local disk and is outside run timing. The per-node CUDA probe will reject an incompatible driver; a driver/image change is outside this script.
 
@@ -43,13 +43,14 @@ Put the downloaded archive on the Ray head at `/workspace/meta-RL/wenjun_gpu_dis
 ```bash
 source /workspace/setup_env.sh
 export RAY_ADDRESS=auto
-export VERL_REPO=/tmp/verl-disagg-9924801/src     # node-local; prepare_env.py clones the pinned commit here on every node
+export VERL_REPO=/tmp/verl-disagg-src-9924801       # node-local; prepare_env.py clones the pinned commit here on every node
+export DISAGG_VENV=/tmp/verl-disagg-venv-9924801    # separate from the source checkout
 export RECIPE_DIR=/workspace/meta-RL/recipes/wenjun_recipe
 export MODEL_PATH=/workspace/meta-RL/models/Qwen3-0.6B
 export DATA_DIR=/workspace/meta-RL/data/gsm8k_boxed
 export LOG_DIR=/workspace/meta-RL/logs/wenjun_disagg
 export CKPT_DIR=/workspace/meta-RL/ckpt/wenjun_disagg
-export DISAGG_PYTHON=/tmp/verl-disagg-9924801/bin/python
+export DISAGG_PYTHON=$DISAGG_VENV/bin/python
 mkdir -p /workspace/meta-RL/recipes "$LOG_DIR" "$CKPT_DIR"
 tar -xzf /workspace/meta-RL/wenjun_gpu_disagg_recipe.tar.gz -C /workspace/meta-RL/recipes
 
@@ -57,7 +58,7 @@ tar -xzf /workspace/meta-RL/wenjun_gpu_disagg_recipe.tar.gz -C /workspace/meta-R
 # SIGBUS on mmap'd git files, symlinks unrepresentable). prepare_env.py clones the pinned commit node-locally instead.
 # Use the current image's Python here. Prepares all live nodes, including head.
 set -o pipefail
-python3 "$RECIPE_DIR/prepare_env.py" --repo "$VERL_REPO" --bundle "$RECIPE_DIR" \
+python3 -u "$RECIPE_DIR/prepare_env.py" --repo "$VERL_REPO" --venv "$DISAGG_VENV" --bundle "$RECIPE_DIR" \
   2>&1 | tee "$LOG_DIR/prepare_env.log"
 ```
 

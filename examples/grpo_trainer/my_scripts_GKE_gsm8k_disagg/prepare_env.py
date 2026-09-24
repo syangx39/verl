@@ -99,7 +99,7 @@ def prepare_node(node_id, node_ip, options, expected):
             # (stale caches -> spurious diffs, SIGBUS on mmap'd index/pack files, symlinks unrepresentable), and
             # importing verl from gcsfuse on 64 workers is slow. Each node clones the pinned commit into the SAME
             # local path instead; the shared bundle (recipe, reward) stays on the shared mount.
-            if options["clone_url"]:
+            if options["clone_url"] and not options["check"]:      # --check only verifies; it never clones or moves HEAD
                 if not (repo / ".git").is_dir():
                     repo.parent.mkdir(parents=True, exist_ok=True)
                     subprocess.run(["git", "clone", "--depth", "1", "--branch", options["clone_branch"], options["clone_url"], str(repo)],
@@ -110,6 +110,9 @@ def prepare_node(node_id, node_ip, options, expected):
                     subprocess.run(["git", "-C", str(repo), "checkout", "--detach", COMMIT], stdout=log, stderr=subprocess.STDOUT, check=True)
             if not (repo / ".git").is_dir():
                 raise RuntimeError(f"verl checkout missing on this node: {repo} (pass --clone-url to clone it node-locally)")
+            env_root = Path(options["venv"]).resolve()
+            if env_root == repo.resolve() or env_root in repo.resolve().parents or repo.resolve() in env_root.parents:
+                raise RuntimeError(f"source checkout {repo} and venv {env_root} must be separate directories (uv sync refuses a non-env dir)")
             sha = run(["git", "rev-parse", "HEAD"], capture=True)
             if sha != COMMIT:
                 raise RuntimeError(f"Expected checkout {COMMIT}, found {sha}")
@@ -181,9 +184,9 @@ def prepare_node(node_id, node_ip, options, expected):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", default="/workspace/meta-RL/verl-disagg")
+    parser.add_argument("--repo", default="/tmp/verl-disagg-src-9924801")
     parser.add_argument("--bundle", default=str(Path(__file__).resolve().parent))
-    parser.add_argument("--venv", default="/tmp/verl-disagg-9924801")
+    parser.add_argument("--venv", default="/tmp/verl-disagg-venv-9924801")
     parser.add_argument("--address", default=os.environ.get("RAY_ADDRESS", "auto"))
     parser.add_argument("--parallel", type=int, default=4)
     parser.add_argument("--check", action="store_true", help="Import-check every node; install nothing")
