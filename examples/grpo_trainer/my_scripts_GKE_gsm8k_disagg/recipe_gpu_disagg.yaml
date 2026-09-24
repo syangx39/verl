@@ -1,0 +1,216 @@
+# GPU candidate v1; source pin recorded in run_gpu_disagg.sh / README.md.
+defaults:
+  - ppo_trainer
+  - _self_
+
+hydra:
+  searchpath:
+    - file://${oc.env:VERL_REPO}/verl/trainer/config
+  run:
+    dir: ${oc.env:RUN_DIR}/hydra
+  job:
+    chdir: false
+
+data:
+  train_files: ["${oc.env:DATA_DIR}/gsm8k_boxed_train.parquet"]
+  val_files: ["${oc.env:DATA_DIR}/gsm8k_boxed_test.parquet"]
+  train_max_samples: -1
+  val_max_samples: -1
+  train_batch_size: 128
+  gen_batch_size: 1
+  val_batch_size: 128
+  max_prompt_length: 512
+  max_response_length: 2048
+  prompt_key: prompt
+  return_raw_chat: true
+  filter_overlong_prompts: true
+  truncation: error
+  shuffle: true
+  validation_shuffle: false
+  seed: ${oc.decode:${oc.env:SEED,1}}
+  dataloader_num_workers: 2
+
+algorithm:
+  adv_estimator: grpo
+  norm_adv_by_std_in_grpo: true
+  use_kl_in_reward: false
+  filter_groups:
+    enable: false
+  rollout_correction:
+    bypass_mode: true
+    loss_type: reinforce
+    rollout_is: token
+    rollout_is_threshold: 3.0
+    rollout_is_batch_normalize: false
+    rollout_rs: null
+
+actor_rollout_ref:
+  hybrid_engine: false
+  model:
+    path: ${oc.env:MODEL_PATH}
+    use_remove_padding: true
+    enable_gradient_checkpointing: true
+    use_fused_kernels: false
+  actor:
+    strategy: fsdp2
+    ppo_mini_batch_size: 128
+    ppo_epochs: 1
+    ppo_micro_batch_size_per_gpu: 8
+    use_dynamic_bsz: false
+    data_loader_seed: ${data.seed}
+    loss_agg_mode: token-mean
+    policy_loss:
+      loss_mode: bypass_mode
+      # V1 does NOT automatically copy the algorithm config here.
+      rollout_correction: ${algorithm.rollout_correction}
+    use_kl_loss: false
+    kl_loss_coef: 0.0
+    entropy_coeff: 0.0
+    calculate_entropy: true
+    fsdp_config:
+      fsdp_size: -1
+      model_dtype: fp32
+      mixed_precision:
+        param_dtype: bf16
+        reduce_dtype: fp32
+        buffer_dtype: fp32
+      seed: ${data.seed}
+      param_offload: false
+      optimizer_offload: false
+      offload_policy: false
+    optim:
+      optimizer: AdamW
+      optimizer_impl: torch.optim
+      lr: 2.0e-6
+      betas: [0.9, 0.999]
+      weight_decay: 0.0
+      clip_grad: 1.0
+      lr_scheduler_type: cosine
+      lr_warmup_steps: 10
+      lr_warmup_steps_ratio: 0.0
+      min_lr_ratio: 0.0
+      num_cycles: 0.5
+      zero_indexed_step: true
+      override_optimizer_config:
+        eps: 1.0e-8
+        fused: false
+    checkpoint:
+      save_contents: [model, optimizer, extra, hf_model]
+  rollout:
+    name: vllm
+    mode: async
+    nnodes: 12
+    n_gpus_per_node: 4
+    tensor_model_parallel_size: 1
+    data_parallel_size: 1
+    pipeline_model_parallel_size: 1
+    dtype: bfloat16
+    load_format: safetensors
+    gpu_memory_utilization: 0.6
+    free_cache_engine: false
+    enforce_eager: false
+    max_model_len: 2560
+    max_num_batched_tokens: 8192
+    max_num_seqs: 256
+    enable_chunked_prefill: true
+    enable_prefix_caching: true
+    temperature: 1.0
+    top_p: 1.0
+    top_k: -1
+    n: 16
+    seed: ${data.seed}
+    do_sample: true
+    ignore_eos: false
+    calculate_log_probs: true
+    logprobs_mode: processed_logprobs
+    log_prob_micro_batch_size_per_gpu: 8
+    val_kwargs:
+      do_sample: false
+      temperature: 0.0
+      top_p: 1.0
+      top_k: -1
+      n: 1
+    checkpoint_engine:
+      backend: nccl
+      update_weights_bucket_megabytes: 1024
+
+reward:
+  num_workers: 8
+  custom_reward_function:
+    path: ${oc.env:RECIPE_DIR}/boxed_math_reward.py
+    name: compute_score
+  reward_manager:
+    source: importlib
+    name: BoxedRewardManager
+    module:
+      path: ${oc.env:RECIPE_DIR}/boxed_reward_v1.py
+  reward_model:
+    enable: false
+
+transfer_queue:
+  enable: true
+  backend:
+    storage_backend: SimpleStorage
+    SimpleStorage:
+      num_data_storage_units: 32
+
+trainer:
+  use_v1: true
+  v1:
+    trainer_mode: separate_async
+    separate_async:
+      num_warmup_batches: 1
+      parameter_sync_step: 1
+      hybrid_rollout:
+        enable_switch: false
+    sampler:
+      max_off_policy_threshold: 2
+      max_off_policy_strategy: drop
+  nnodes: 4
+  n_gpus_per_node: 4
+  balance_batch: true
+  total_epochs: 100
+  total_training_steps: ${oc.decode:${oc.env:TOTAL_STEPS,250}}
+  val_before_train: ${oc.decode:${oc.env:VAL_BEFORE_TRAIN,true}}
+  test_freq: ${oc.decode:${oc.env:TEST_FREQ,20}}
+  save_freq: ${oc.decode:${oc.env:SAVE_FREQ,50}}
+  resume_mode: disable
+  logger: [console, tensorboard]
+  project_name: wenjun_gpu_disagg_gsm8k
+  experiment_name: ${oc.env:EXPERIMENT_NAME}
+  default_local_dir: ${oc.env:CKPT_DIR}/${oc.env:EXPERIMENT_NAME}
+  rollout_data_dir: ${oc.env:RUN_DIR}/rollout_dump
+  validation_data_dir: ${oc.env:RUN_DIR}/val_dump
+  log_val_generations: 4
+
+ray_kwargs:
+  ray_init:
+    runtime_env:
+      py_executable: ${oc.env:DISAGG_PYTHON}
+      env_vars:
+        # TaskRunnerV1 resolves the full config remotely; propagate every oc.env input.
+        VERL_REPO: ${oc.env:VERL_REPO}
+        RECIPE_DIR: ${oc.env:RECIPE_DIR}
+        DISAGG_PYTHON: ${oc.env:DISAGG_PYTHON}
+        MODEL_PATH: ${oc.env:MODEL_PATH}
+        DATA_DIR: ${oc.env:DATA_DIR}
+        RUN_DIR: ${oc.env:RUN_DIR}
+        CKPT_DIR: ${oc.env:CKPT_DIR}
+        EXPERIMENT_NAME: ${oc.env:EXPERIMENT_NAME}
+        TB_DIR: ${oc.env:TB_DIR}
+        SEED: ${oc.env:SEED,1}
+        TOTAL_STEPS: ${oc.env:TOTAL_STEPS,250}
+        TEST_FREQ: ${oc.env:TEST_FREQ,20}
+        SAVE_FREQ: ${oc.env:SAVE_FREQ,50}
+        VAL_BEFORE_TRAIN: ${oc.env:VAL_BEFORE_TRAIN,true}
+        PYTHONPATH: ${oc.env:VERL_REPO}:${oc.env:RECIPE_DIR}
+        PYTHONNOUSERSITE: "1"
+        VERL_PLATFORM: nvidia
+        VLLM_USE_V1: "1"
+        PYTHONHASHSEED: ${oc.env:SEED,1}
+        TENSORBOARD_DIR: ${oc.env:TB_DIR}
+        REWARD_FORMAT_SCORE: "0.1"
+        REWARD_OVERLONG_BUFFER: "512"
+        REWARD_OVERLONG_PENALTY: "1.0"
+        REWARD_MAX_RESP_LEN: "2048"
+        REWARD_PENALTY_SOURCES: gsm8k_boxed_train
