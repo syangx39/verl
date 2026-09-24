@@ -21,6 +21,7 @@ def main():
         "trainer.use_v1": True,
         "trainer.v1.trainer_mode": "separate_async",
         "trainer.v1.separate_async.parameter_sync_step": 1,
+        "trainer.v1.separate_async.num_warmup_batches": 1,
         "trainer.v1.separate_async.hybrid_rollout.enable_switch": False,
         "trainer.v1.sampler.max_off_policy_threshold": 2,
         "trainer.v1.sampler.max_off_policy_strategy": "drop",
@@ -38,6 +39,8 @@ def main():
         "actor_rollout_ref.actor.strategy": "fsdp2",
         "actor_rollout_ref.actor.ppo_mini_batch_size": 128,
         "actor_rollout_ref.actor.ppo_epochs": 1,
+        "actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu": 8,
+        "actor_rollout_ref.actor.use_dynamic_bsz": False,
         "actor_rollout_ref.actor.loss_agg_mode": "token-mean",
         "actor_rollout_ref.actor.policy_loss.loss_mode": "bypass_mode",
         "algorithm.rollout_correction.bypass_mode": True,
@@ -48,10 +51,24 @@ def main():
         "algorithm.rollout_correction.rollout_rs": None,
         "actor_rollout_ref.actor.use_kl_loss": False,
         "actor_rollout_ref.actor.entropy_coeff": 0.0,
+        "actor_rollout_ref.actor.calculate_entropy": True,
+        "actor_rollout_ref.model.use_remove_padding": True,
+        "actor_rollout_ref.model.use_fused_kernels": False,
         "actor_rollout_ref.actor.fsdp_config.model_dtype": "fp32",
+        "actor_rollout_ref.actor.fsdp_config.mixed_precision.param_dtype": "bf16",
+        "actor_rollout_ref.actor.fsdp_config.mixed_precision.reduce_dtype": "fp32",
+        "actor_rollout_ref.actor.fsdp_config.mixed_precision.buffer_dtype": "fp32",
+        "actor_rollout_ref.actor.optim.optimizer": "AdamW",
+        "actor_rollout_ref.actor.optim.optimizer_impl": "torch.optim",
         "actor_rollout_ref.actor.optim.lr": 2e-6,
+        "actor_rollout_ref.actor.optim.betas": [0.9, 0.999],
+        "actor_rollout_ref.actor.optim.clip_grad": 1.0,
         "actor_rollout_ref.actor.optim.lr_warmup_steps": 10,
+        "actor_rollout_ref.actor.optim.lr_warmup_steps_ratio": 0.0,
         "actor_rollout_ref.actor.optim.lr_scheduler_type": "cosine",
+        "actor_rollout_ref.actor.optim.zero_indexed_step": True,
+        "actor_rollout_ref.actor.optim.min_lr_ratio": 0.0,
+        "actor_rollout_ref.actor.optim.num_cycles": 0.5,
         "actor_rollout_ref.actor.optim.weight_decay": 0.0,
         "actor_rollout_ref.actor.optim.override_optimizer_config.eps": 1e-8,
         "actor_rollout_ref.actor.optim.override_optimizer_config.fused": False,
@@ -70,6 +87,14 @@ def main():
         got = OmegaConf.select(c, key, default="<missing>")
         assert got == want, f"{key}: {got!r} != {want!r}"
     assert c.actor_rollout_ref.actor.policy_loss.rollout_correction == c.algorithm.rollout_correction
+    steps = c.trainer.total_training_steps
+    sync_steps = c.trainer.v1.separate_async.parameter_sync_step
+    assert isinstance(steps, int) and steps > 0, f"Invalid total_training_steps: {steps!r}"
+    expected_optim_steps = steps * sync_steps
+    assert c.actor_rollout_ref.actor.optim.total_training_steps == expected_optim_steps, \
+        f"Optimizer horizon must equal {steps} trainer steps x {sync_steps} updates"
+    assert c.data.train_batch_size == c.actor_rollout_ref.actor.ppo_mini_batch_size * sync_steps, \
+        "Train batch must contain exactly parameter_sync_step global optimizer minibatches"
     runtime_env = OmegaConf.to_container(c.ray_kwargs.ray_init.runtime_env, resolve=True)
     for k, v in {
         "REWARD_MAX_RESP_LEN": "2048", "REWARD_OVERLONG_BUFFER": "512",
@@ -80,7 +105,7 @@ def main():
 
     model = Path(c.actor_rollout_ref.model.path)
     eos = json.loads((model / "generation_config.json").read_text())["eos_token_id"]
-    assert sorted(eos) == [151643, 151645], f"Reuse the stop-set-patched model, got EOS {eos}"
+    assert sorted(eos) == [151643, 151645], f"Expected existing model EOS [151643, 151645], got {eos}"
     assert (model / "model.safetensors").is_file(), model
     paths = [str(model / "model.safetensors"), str(model / "tokenizer.json"),
              c.reward.reward_manager.module.path, c.reward.custom_reward_function.path]
@@ -141,6 +166,7 @@ def main():
         assert all(r["packages"] == reports[0]["packages"] for r in reports), "Package versions differ across nodes"
         result = {"config_fields_verified": len(expected), "train_rows": 7473,
                   "eval_rows": 1319, "trainer_gpus": 16, "rollout_gpus": 48,
+                  "trainer_steps": steps, "optimizer_schedule_steps": expected_optim_steps,
                   "nodes": reports}
         Path(args.out).write_text(json.dumps(result, indent=2) + "\n")
         print(f"[preflight] OK: {len(expected)} fields; 7473/1319 rows; 16 nodes; CUDA BF16 probe passed", flush=True)

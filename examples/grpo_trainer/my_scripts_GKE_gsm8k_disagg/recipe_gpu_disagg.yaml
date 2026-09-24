@@ -88,6 +88,9 @@ actor_rollout_ref:
       lr_scheduler_type: cosine
       lr_warmup_steps: 10
       lr_warmup_steps_ratio: 0.0
+      # parameter_sync_step is fixed to 1 here. V1 computes the same horizon
+      # at initialization; expose it in the preflight config as well.
+      total_training_steps: ${trainer.total_training_steps}
       min_lr_ratio: 0.0
       num_cycles: 0.5
       zero_indexed_step: true
