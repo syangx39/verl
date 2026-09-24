@@ -30,6 +30,11 @@ PIN=9924801779415f86c807b5716a3d4479fa60f811
 test -x "$DISAGG_PYTHON" || { echo "Run prepare_env.py first: $DISAGG_PYTHON missing" >&2; exit 2; }
 test "$(git -C "$VERL_REPO" rev-parse HEAD)" = "$PIN" || { echo "Wrong verl commit; require $PIN" >&2; exit 2; }
 test -z "$(git -C "$VERL_REPO" status --porcelain --untracked-files=no)" || { echo "Pinned checkout has tracked modifications" >&2; exit 2; }
+if [[ ${DISAGG_IMAGE_MODE:-0} == 1 ]]; then
+  # Environment comes from the container image (verlai/verl:uv-cu130-arm64 venv at /workspace/verl/.venv), identical on
+  # every node by construction; there is no prepare_env manifest. Record the image identity instead.
+  "$DISAGG_PYTHON" -c 'import ray, torch, vllm, transformers, sys; print("python", sys.version.split()[0], "ray", ray.__version__, "torch", torch.__version__, "cuda", torch.version.cuda, "vllm", vllm.__version__, "transformers", transformers.__version__)'
+else
 "$DISAGG_PYTHON" - "$RECIPE_DIR" "$VERL_REPO" "$DISAGG_PYTHON" <<'PY'
 import json, pathlib, sys
 manifest_path = pathlib.Path(sys.argv[1], "ENV_MANIFEST_PATH").read_text().strip()
@@ -38,6 +43,7 @@ assert m["ok"], f"Environment preparation failed: {manifest_path}"
 assert m["repo"] == sys.argv[2]
 assert pathlib.Path(sys.argv[3]).parent.parent == pathlib.Path(m["venv"])
 PY
+fi
 mkdir -p "$LOG_DIR" "$CKPT_DIR"
 mkdir "$RUN_DIR"  # Do not overwrite an earlier run's evidence.
 mkdir -p "$RUN_DIR/tensorboard"
@@ -54,7 +60,11 @@ cd "$VERL_REPO"
 "$DISAGG_PYTHON" "$RECIPE_DIR/boxed_math_reward.py" > "$RUN_DIR/reward_selftest.log"
 "$DISAGG_PYTHON" -c 'import importlib.metadata as m; print("\n".join(sorted("{}=={}".format(d.metadata["Name"], d.version) for d in m.distributions())))' > "$RUN_DIR/packages.txt"
 cp "$RECIPE_DIR/recipe_gpu_disagg.yaml" "$RUN_DIR/recipe_gpu_disagg.yaml"
-cp "$(cat "$RECIPE_DIR/ENV_MANIFEST_PATH")" "$RUN_DIR/environment_manifest.json"
+if [[ ${DISAGG_IMAGE_MODE:-0} == 1 ]]; then
+  { echo "mode: container image"; echo "image: ${DISAGG_IMAGE:-unknown (set DISAGG_IMAGE to the registry path:tag or digest)}"; cat /etc/os-release | head -2; nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -1; } > "$RUN_DIR/environment_manifest.txt"
+else
+  cp "$(cat "$RECIPE_DIR/ENV_MANIFEST_PATH")" "$RUN_DIR/environment_manifest.json"
+fi
 echo "[recipe] trainer=16 rollout=48 fsdp2/vllm TP=1 batch=128x16 mu=1 cap=2048 penalty=train-only TIS=token/3 detached single-forward"
 echo "[recipe] lr=2e-6 warmup=10 cosine steps=$TOTAL_STEPS seed=$SEED sync=1 threshold=2/drop eval=1319"
 echo "[run_dir] $RUN_DIR"
@@ -75,3 +85,4 @@ on_exit() {
 trap on_exit EXIT
 "$DISAGG_PYTHON" -m verl.trainer.main_ppo --config-path "$RECIPE_DIR" --config-name recipe_gpu_disagg \
   "$@" 2>&1 | tee "$RUN_DIR/driver.log"
+  
