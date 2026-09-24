@@ -26,10 +26,16 @@ export REWARD_FORMAT_SCORE=0.1 REWARD_OVERLONG_BUFFER=512
 export REWARD_OVERLONG_PENALTY=1.0 REWARD_MAX_RESP_LEN=2048
 export REWARD_PENALTY_SOURCES=gsm8k_boxed_train
 unset LOGPROB_FIXTURE_DIR LOGPROB_FIXTURE_STEP INJECT_BATCH_NPZ INJECT_BATCH_STEP
-PIN=   # = jialei777/verl-upstream@9924801 + patches/ (image build)
+PIN=9924801779415f86c807b5716a3d4479fa60f811
 test -x "$DISAGG_PYTHON" || { echo "Run prepare_env.py first: $DISAGG_PYTHON missing" >&2; exit 2; }
-test "$(git -C "$VERL_REPO" rev-parse HEAD)" = "$PIN" || { echo "Wrong verl commit; require $PIN" >&2; exit 2; }
-test -z "$(git -C "$VERL_REPO" status --porcelain --untracked-files=no)" || { echo "Pinned checkout has tracked modifications" >&2; exit 2; }
+if [[ ${DISAGG_DEV_SOURCE:-0} == 1 ]]; then
+  # Development iteration only: VERL_REPO may be a patched working copy (e.g. on the shared bucket). The run is recorded
+  # as dev source and is NOT a reference run. Formal runs must not set this: they require the pinned, clean image checkout.
+  echo "[dev] DISAGG_DEV_SOURCE=1: using $VERL_REPO at $(git -C "$VERL_REPO" rev-parse --short HEAD) with $(git -C "$VERL_REPO" status --porcelain --untracked-files=no | wc -l) modified tracked file(s); not a reference run"
+else
+  test "$(git -C "$VERL_REPO" rev-parse HEAD)" = "$PIN" || { echo "Wrong verl commit; require $PIN" >&2; exit 2; }
+  test -z "$(git -C "$VERL_REPO" status --porcelain --untracked-files=no)" || { echo "Pinned checkout has tracked modifications" >&2; exit 2; }
+fi
 if [[ ${DISAGG_IMAGE_MODE:-0} == 1 ]]; then
   # Environment comes from the derived container image (venv built from the pinned commit's uv.lock), identical on every
   # node by construction; there is no prepare_env manifest. Verify the venv against the lock and require DISAGG_IMAGE.
@@ -62,7 +68,9 @@ cd "$VERL_REPO"
 "$DISAGG_PYTHON" -c 'import importlib.metadata as m; print("\n".join(sorted("{}=={}".format(d.metadata["Name"], d.version) for d in m.distributions())))' > "$RUN_DIR/packages.txt"
 cp "$RECIPE_DIR/recipe_gpu_disagg.yaml" "$RUN_DIR/recipe_gpu_disagg.yaml"
 if [[ ${DISAGG_IMAGE_MODE:-0} == 1 ]]; then
-  { echo "mode: container image"; echo "image: ${DISAGG_IMAGE}"; echo "verl_pin: $PIN"; cat /etc/os-release | head -2; nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -1; } > "$RUN_DIR/environment_manifest.txt"
+  { echo "mode: container image"; echo "image: ${DISAGG_IMAGE}"; echo "verl_pin: $PIN";
+    if [[ ${DISAGG_DEV_SOURCE:-0} == 1 ]]; then echo "source: DEV working copy $VERL_REPO @ $(git -C "$VERL_REPO" rev-parse HEAD) (NOT a reference run)"; git -C "$VERL_REPO" status --porcelain --untracked-files=no; git -C "$VERL_REPO" diff > "$RUN_DIR/dev_source.diff"; else echo "source: pinned image checkout $VERL_REPO"; fi
+    cat /etc/os-release | head -2; nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -1; } > "$RUN_DIR/environment_manifest.txt"
 else
   cp "$(cat "$RECIPE_DIR/ENV_MANIFEST_PATH")" "$RUN_DIR/environment_manifest.json"
 fi
