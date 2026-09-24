@@ -31,9 +31,20 @@ test -x "$DISAGG_PYTHON" || { echo "Run prepare_env.py first: $DISAGG_PYTHON mis
 test "$(git -C "$VERL_REPO" rev-parse HEAD)" = "$PIN" || { echo "Wrong verl commit; require $PIN" >&2; exit 2; }
 test -z "$(git -C "$VERL_REPO" status --porcelain --untracked-files=no)" || { echo "Pinned checkout has tracked modifications" >&2; exit 2; }
 if [[ ${DISAGG_IMAGE_MODE:-0} == 1 ]]; then
-  # Environment comes from the container image (verlai/verl:uv-cu130-arm64 venv at /workspace/verl/.venv), identical on
-  # every node by construction; there is no prepare_env manifest. Record the image identity instead.
-  "$DISAGG_PYTHON" -c 'import ray, torch, vllm, transformers, sys; print("python", sys.version.split()[0], "ray", ray.__version__, "torch", torch.__version__, "cuda", torch.version.cuda, "vllm", vllm.__version__, "transformers", transformers.__version__)'
+  # Environment comes from the derived container image (venv built from the pinned commit's uv.lock), identical on every
+  # node by construction; there is no prepare_env manifest. Verify the venv against the lock and require DISAGG_IMAGE.
+  test -n "${DISAGG_IMAGE:-}" || { echo "DISAGG_IMAGE must name the deployed image (registry path@digest)" >&2; exit 2; }
+  "$DISAGG_PYTHON" - "$VERL_REPO" <<'PY'
+import importlib.metadata as md, re, sys
+lock = open(sys.argv[1] + "/uv.lock").read()
+def locked(name):
+    m = re.search(r'\[\[package\]\]\nname = "%s"\nversion = "([^"]+)"' % re.escape(name), lock); return m.group(1) if m else None
+bad = [p for p in ("ray", "torch", "vllm", "transformers", "transferqueue", "flash-attn") if locked(p) and md.version(p) != locked(p)]
+assert not bad, f"venv does not match {sys.argv[1]}/uv.lock: {bad}"
+import verl, ray, torch, vllm, transformers
+assert verl.__file__.startswith(sys.argv[1] + "/"), f"verl imported from {verl.__file__}, expected {sys.argv[1]}"
+print("venv matches the pinned uv.lock:", "ray", ray.__version__, "torch", torch.__version__, "cuda", torch.version.cuda, "vllm", vllm.__version__, "transformers", transformers.__version__)
+PY
 else
 "$DISAGG_PYTHON" - "$RECIPE_DIR" "$VERL_REPO" "$DISAGG_PYTHON" <<'PY'
 import json, pathlib, sys
@@ -61,7 +72,7 @@ cd "$VERL_REPO"
 "$DISAGG_PYTHON" -c 'import importlib.metadata as m; print("\n".join(sorted("{}=={}".format(d.metadata["Name"], d.version) for d in m.distributions())))' > "$RUN_DIR/packages.txt"
 cp "$RECIPE_DIR/recipe_gpu_disagg.yaml" "$RUN_DIR/recipe_gpu_disagg.yaml"
 if [[ ${DISAGG_IMAGE_MODE:-0} == 1 ]]; then
-  { echo "mode: container image"; echo "image: ${DISAGG_IMAGE:-unknown (set DISAGG_IMAGE to the registry path:tag or digest)}"; cat /etc/os-release | head -2; nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -1; } > "$RUN_DIR/environment_manifest.txt"
+  { echo "mode: container image"; echo "image: ${DISAGG_IMAGE}"; echo "verl_pin: $PIN"; cat /etc/os-release | head -2; nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -1; } > "$RUN_DIR/environment_manifest.txt"
 else
   cp "$(cat "$RECIPE_DIR/ENV_MANIFEST_PATH")" "$RUN_DIR/environment_manifest.json"
 fi
@@ -85,4 +96,3 @@ on_exit() {
 trap on_exit EXIT
 "$DISAGG_PYTHON" -m verl.trainer.main_ppo --config-path "$RECIPE_DIR" --config-name recipe_gpu_disagg \
   "$@" 2>&1 | tee "$RUN_DIR/driver.log"
-  

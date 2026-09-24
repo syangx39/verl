@@ -1,0 +1,280 @@
+# =============================================================================
+# verl on GKE A4X — disaggregated-async GSM8K baseline (Wenjun track), 16 nodes x 4 GB200.
+# Image: DERIVED image built by my_scripts_GKE_gsm8k_disagg/image/Dockerfile on top of verlai/verl:uv-cu130-arm64:
+# the fork jialei777/verl-upstream@9924801 checked out at /workspace/verl-disagg and its OWN uv.lock installed into
+# /workspace/verl-disagg/.venv (the base image only carries a prefetched uv cache, not a venv, and its lock differs
+# from the pin, e.g. transformers 5.5.3 vs 5.9.0). Set image: below AND DISAGG_IMAGE to the pushed reference by digest
+# (image/IMAGE_REF.txt). rayVersion must equal the ray in that venv (printed by the Dockerfile's verification step).
+# Nothing is imported from gcsfuse any more except the recipe directory, data and model.
+# =============================================================================
+apiVersion: ray.io/v1
+kind: RayCluster
+metadata:
+  name: verl-disagg-xiaotongyang
+spec:
+  rayVersion: "2.55.1"   # == ray in the image venv (uv.lock); verify before apply
+  headGroupSpec:
+    rayStartParams:
+      num-gpus: "4"
+      dashboard-host: "0.0.0.0"
+    template:
+      metadata:
+        annotations:
+          gke-gcsfuse/volumes: "true"
+          gke-gcsfuse/memory-limit: "8Gi"
+          networking.gke.io/default-interface: 'eth0'
+          networking.gke.io/interfaces: |
+            [
+              {"interfaceName":"eth0","network":"default"},
+              {"interfaceName":"eth2","network":"rdma-0"},
+              {"interfaceName":"eth3","network":"rdma-1"},
+              {"interfaceName":"eth4","network":"rdma-2"},
+              {"interfaceName":"eth5","network":"rdma-3"}
+            ]
+      spec:
+        serviceAccountName: verl-runner
+        priorityClassName: verl-bench-high
+        resourceClaims:
+        - name: compute-domain-channel
+          resourceClaimTemplateName: verl-qwen3-xiaotongyang-cd-channel
+        nodeSelector:
+          cloud.google.com/gke-nodepool: a4x-highgpu-4g-a4x-pool-2
+        tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+        - key: kubernetes.io/arch
+          operator: Equal
+          value: arm64
+          effect: NoSchedule
+        containers:
+        - name: ray-head
+          image: us-central1-docker.pkg.dev/supercomputer-testing/pirillo-gcr/verl-disagg-cu130-arm64:992480177@sha256:REPLACE_WITH_DIGEST_FROM_IMAGE_REF_TXT
+          imagePullPolicy: IfNotPresent
+          env:
+          - name: PYTHONPATH
+            value: /workspace/verl-disagg:/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gsm8k_disagg
+          - name: VIRTUAL_ENV
+            value: /workspace/verl-disagg/.venv
+          - name: LD_LIBRARY_PATH
+            value: /usr/local/nvidia/lib64:/usr/local/gib/lib64:/usr/local/cuda/lib64
+          - name: PATH
+            value: /workspace/verl-disagg/.venv/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          - name: PYTHONNOUSERSITE
+            value: "1"
+          - name: VERL_PLATFORM
+            value: nvidia
+          - name: VLLM_USE_V1
+            value: "1"
+          - name: DISAGG_IMAGE
+            value: us-central1-docker.pkg.dev/supercomputer-testing/pirillo-gcr/verl-disagg-cu130-arm64:992480177@sha256:REPLACE_WITH_DIGEST_FROM_IMAGE_REF_TXT
+          - name: GLOO_SOCKET_IFNAME
+            value: eth0
+          - name: NCCL_SOCKET_IFNAME
+            value: eth0
+          - name: NCCL_ENV_PLUGIN
+            value: gcp
+          - name: NCCL_DEBUG
+            value: INFO
+          - name: XDG_CACHE_HOME
+            value: /tmp/cache
+          - name: HF_HOME
+            value: /tmp/cache/huggingface
+          - name: TRITON_CACHE_DIR
+            value: /tmp/cache/triton
+          - name: FLASHINFER_WORKSPACE_BASE
+            value: /tmp/cache/flashinfer
+          - name: TORCHINDUCTOR_CACHE_DIR
+            value: /tmp/cache/inductor
+          - name: HF_HUB_OFFLINE
+            value: "1"
+          - name: HOME
+            value: /workspace/meta-RL/.home
+          - name: TENSORBOARD_DIR
+            value: /workspace/meta-RL/.home/tensorboard_log
+          resources:
+            requests: { nvidia.com/gpu: 4, cpu: "40", memory: 200Gi }
+            limits:   { nvidia.com/gpu: 4, cpu: "60", memory: 400Gi }
+            claims:
+            - name: compute-domain-channel
+          volumeMounts:
+          - { name: meta-rl, mountPath: /workspace/meta-RL }
+          - { name: setup, mountPath: /workspace/setup_env.sh, subPath: setup_env.sh }
+          - { name: dshm, mountPath: /dev/shm }
+          - { name: nvidia-host, mountPath: /usr/local/nvidia }
+          - { name: gib, mountPath: /usr/local/gib }
+        volumes:
+        - name: meta-rl
+          csi:
+            driver: gcsfuse.csi.storage.gke.io
+            volumeAttributes:
+              bucketName: xiaotongyang-bucket
+              mountOptions: "only-dir=meta-rl/GKE_repro/meta-RL,implicit-dirs,file-cache:max-size-mb:20480"
+        - name: setup
+          configMap: { name: verl-disagg-xiaotongyang-setup-env, defaultMode: 0755 }
+        - name: dshm
+          emptyDir: { medium: Memory, sizeLimit: 64Gi }
+        - name: nvidia-host
+          hostPath: { path: /home/kubernetes/bin/nvidia }
+        - name: gib
+          hostPath: { path: /home/kubernetes/bin/gib }
+  workerGroupSpecs:
+  - groupName: gpu-workers
+    replicas: 15
+    minReplicas: 15
+    maxReplicas: 15
+    rayStartParams:
+      num-gpus: "4"
+    template:
+      metadata:
+        annotations:
+          gke-gcsfuse/volumes: "true"
+          networking.gke.io/default-interface: 'eth0'
+          networking.gke.io/interfaces: |
+            [
+              {"interfaceName":"eth0","network":"default"},
+              {"interfaceName":"eth2","network":"rdma-0"},
+              {"interfaceName":"eth3","network":"rdma-1"},
+              {"interfaceName":"eth4","network":"rdma-2"},
+              {"interfaceName":"eth5","network":"rdma-3"}
+            ]
+      spec:
+        priorityClassName: verl-bench-high
+        serviceAccountName: verl-runner
+        resourceClaims:
+        - name: compute-domain-channel
+          resourceClaimTemplateName: verl-qwen3-xiaotongyang-cd-channel
+        nodeSelector:
+          cloud.google.com/gke-nodepool: a4x-highgpu-4g-a4x-pool-2
+        tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+        - key: kubernetes.io/arch
+          operator: Equal
+          value: arm64
+          effect: NoSchedule
+        containers:
+        - name: ray-worker
+          image: us-central1-docker.pkg.dev/supercomputer-testing/pirillo-gcr/verl-disagg-cu130-arm64:992480177@sha256:REPLACE_WITH_DIGEST_FROM_IMAGE_REF_TXT
+          imagePullPolicy: IfNotPresent
+          env:
+          - name: PYTHONPATH
+            value: /workspace/verl-disagg:/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gsm8k_disagg
+          - name: VIRTUAL_ENV
+            value: /workspace/verl-disagg/.venv
+          - name: LD_LIBRARY_PATH
+            value: /usr/local/nvidia/lib64:/usr/local/gib/lib64:/usr/local/cuda/lib64
+          - name: PATH
+            value: /workspace/verl-disagg/.venv/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          - name: PYTHONNOUSERSITE
+            value: "1"
+          - name: VERL_PLATFORM
+            value: nvidia
+          - name: VLLM_USE_V1
+            value: "1"
+          - name: DISAGG_IMAGE
+            value: us-central1-docker.pkg.dev/supercomputer-testing/pirillo-gcr/verl-disagg-cu130-arm64:992480177@sha256:REPLACE_WITH_DIGEST_FROM_IMAGE_REF_TXT
+          - name: GLOO_SOCKET_IFNAME
+            value: eth0
+          - name: NCCL_SOCKET_IFNAME
+            value: eth0
+          - name: NCCL_ENV_PLUGIN
+            value: gcp
+          - name: NCCL_DEBUG
+            value: INFO
+          - name: XDG_CACHE_HOME
+            value: /tmp/cache
+          - name: HF_HOME
+            value: /tmp/cache/huggingface
+          - name: TRITON_CACHE_DIR
+            value: /tmp/cache/triton
+          - name: TORCHINDUCTOR_CACHE_DIR
+            value: /tmp/cache/inductor
+          - name: FLASHINFER_WORKSPACE_BASE
+            value: /tmp/cache/flashinfer
+          - name: HF_HUB_OFFLINE
+            value: "1"
+          - name: HOME
+            value: /workspace/meta-RL/.home
+          - name: TENSORBOARD_DIR
+            value: /workspace/meta-RL/.home/tensorboard_log
+          resources:
+            requests: { nvidia.com/gpu: 4, cpu: "40", memory: 200Gi }
+            limits:   { nvidia.com/gpu: 4, cpu: "60", memory: 400Gi }
+            claims:
+            - name: compute-domain-channel
+          volumeMounts:
+          - { name: meta-rl, mountPath: /workspace/meta-RL }
+          - { name: setup, mountPath: /workspace/setup_env.sh, subPath: setup_env.sh }
+          - { name: dshm, mountPath: /dev/shm }
+          - { name: nvidia-host, mountPath: /usr/local/nvidia }
+          - { name: gib, mountPath: /usr/local/gib }
+        volumes:
+        - name: meta-rl
+          csi:
+            driver: gcsfuse.csi.storage.gke.io
+            volumeAttributes:
+              bucketName: xiaotongyang-bucket
+              mountOptions: "only-dir=meta-rl/GKE_repro/meta-RL,implicit-dirs,file-cache:max-size-mb:20480"
+        - name: setup
+          configMap: { name: verl-disagg-xiaotongyang-setup-env, defaultMode: 0755 }
+        - name: dshm
+          emptyDir: { medium: Memory, sizeLimit: 64Gi }
+        - name: nvidia-host
+          hostPath: { path: /home/kubernetes/bin/nvidia }
+        - name: gib
+          hostPath: { path: /home/kubernetes/bin/gib }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: verl-disagg-xiaotongyang-setup-env
+data:
+  setup_env.sh: |
+    #!/bin/bash
+    # =========================================================================
+    # setup_env.sh -- INTERACTIVE-SHELL environment for rl-05 parity runs
+    # (Qwen3-0.6B GRPO/DAPO on GKE A4X; bucket FUSE at /workspace/meta-RL).
+    #
+    # TWO WORLDS RULE
+    #   * Values read by PYTHON TRAINING PROCESSES (ray actors/workers) MUST
+    #     live in the pod containers' env: in this yaml. They do NOT inherit
+    #     shell exports. Currently there: PYTHONPATH, LD_LIBRARY_PATH, PATH,
+    #     GLOO/NCCL_SOCKET_IFNAME, HOME, REWARD_DUMP_DIR, XDG_CACHE_HOME,
+    #     HF_HOME, TRITON_CACHE_DIR, TORCHINDUCTOR_CACHE_DIR, HF_HUB_OFFLINE.
+    #   * Values read by BASH (this shell, launch scripts) live here.
+    # This file mirrors a few container-env values for shell convenience only;
+    # the yaml copies are the ones that matter for the run.
+    # =========================================================================
+
+    # ---- mirrors of container env (shell convenience; yaml is authoritative)
+    export HOME=/workspace/meta-RL/.home
+    mkdir -p "$HOME"
+    export VIRTUAL_ENV=/workspace/verl-disagg/.venv
+    export PATH=/workspace/verl-disagg/.venv/bin:/usr/local/cuda/bin:$PATH
+    export PYTHONPATH=/workspace/verl-disagg:/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gsm8k_disagg
+    export PYTHONNOUSERSITE=1 VERL_PLATFORM=nvidia VLLM_USE_V1=1
+    export CACHE_ROOT=/tmp/cache
+    mkdir -p $CACHE_ROOT
+    export XDG_CACHE_HOME=$CACHE_ROOT
+    export HF_HOME=$CACHE_ROOT/huggingface
+    export TRITON_CACHE_DIR=$CACHE_ROOT/triton
+    export TORCHINDUCTOR_CACHE_DIR=$CACHE_ROOT/inductor
+    export HF_HUB_OFFLINE=1
+
+    # ---- shell-world values (read by launch scripts, not by ray workers)
+    export RECIPE_DIR=/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gsm8k_disagg
+    export VERL_REPO=/workspace/verl-disagg                  # pinned fork checkout INSIDE the image
+    export DISAGG_PYTHON=/workspace/verl-disagg/.venv/bin/python   # the image venv built from the pin's uv.lock
+    export DISAGG_IMAGE_MODE=1                                # run_gpu_disagg.sh: verify the venv against the pin's uv.lock, record DISAGG_IMAGE (from the container env)
+    export MODEL_PATH=/workspace/meta-RL/models/Qwen3-0.6B
+    export DATA_DIR=/workspace/meta-RL/data/gsm8k_boxed
+    export LOG_DIR=/workspace/meta-RL/logs/wenjun_disagg
+    export CKPT_DIR=/workspace/meta-RL/ckpt/wenjun_disagg
+    export RAY_ADDRESS=auto
+    mkdir -p $LOG_DIR $CKPT_DIR
+
+    # ---- runtime hygiene
+    unset ROCR_VISIBLE_DEVICES HIP_VISIBLE_DEVICES
+    [ -f /usr/local/gib/scripts/set_nccl_env.sh ] && . /usr/local/gib/scripts/set_nccl_env.sh
