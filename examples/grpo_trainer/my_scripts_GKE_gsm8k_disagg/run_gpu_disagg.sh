@@ -26,6 +26,18 @@ export REWARD_FORMAT_SCORE=0.1 REWARD_OVERLONG_BUFFER=512
 export REWARD_OVERLONG_PENALTY=1.0 REWARD_MAX_RESP_LEN=2048
 export REWARD_PENALTY_SOURCES=gsm8k_boxed_train
 unset LOGPROB_FIXTURE_DIR LOGPROB_FIXTURE_STEP INJECT_BATCH_NPZ INJECT_BATCH_STEP
+# Upstream main_ppo.py passes ray_kwargs.ray_init to ray.init() via OmegaConf.to_container() WITHOUT resolve=True, so the
+# ${oc.env:...} interpolations in the recipe's ray_kwargs block would reach Ray verbatim ("bad substitution" in the
+# raylet's worker command). Pass every such value as a literal hydra override instead; overrides take precedence.
+RE=ray_kwargs.ray_init.runtime_env
+RAY_ENV_OVERRIDES=(
+  "$RE.py_executable=$DISAGG_PYTHON"
+  "$RE.env_vars.VERL_REPO=$VERL_REPO" "$RE.env_vars.RECIPE_DIR=$RECIPE_DIR" "$RE.env_vars.DISAGG_PYTHON=$DISAGG_PYTHON"
+  "$RE.env_vars.MODEL_PATH=$MODEL_PATH" "$RE.env_vars.DATA_DIR=$DATA_DIR" "$RE.env_vars.RUN_DIR=$RUN_DIR" "$RE.env_vars.CKPT_DIR=$CKPT_DIR"
+  "$RE.env_vars.EXPERIMENT_NAME=$EXPERIMENT_NAME" "$RE.env_vars.TB_DIR=$TB_DIR" "$RE.env_vars.TENSORBOARD_DIR=$TB_DIR"
+  "$RE.env_vars.SEED=$SEED" "$RE.env_vars.PYTHONHASHSEED=$SEED" "$RE.env_vars.TOTAL_STEPS=$TOTAL_STEPS" "$RE.env_vars.TEST_FREQ=$TEST_FREQ"
+  "$RE.env_vars.SAVE_FREQ=$SAVE_FREQ" "$RE.env_vars.VAL_BEFORE_TRAIN=$VAL_BEFORE_TRAIN" "$RE.env_vars.PYTHONPATH=$VERL_REPO:$RECIPE_DIR"
+)
 PIN=ace775e87d8765bcdd114aac734ab71da5367a0f   # upstream verl-project/verl main (2026-09-22)
 test -x "$DISAGG_PYTHON" || { echo "Run prepare_env.py first: $DISAGG_PYTHON missing" >&2; exit 2; }
 if [[ ${DISAGG_DEV_SOURCE:-0} == 1 ]]; then
@@ -56,12 +68,12 @@ mkdir "$RUN_DIR"  # Do not overwrite an earlier run's evidence.
 mkdir -p "$RUN_DIR/tensorboard"
 printf '%s\n' "$RUN_DIR" > "$LOG_DIR/latest_seed${SEED}.txt"
 printf '%s\n' "$PIN" > "$RUN_DIR/verl_commit.txt"
-printf '%q ' "$DISAGG_PYTHON" -m verl.trainer.main_ppo --config-path "$RECIPE_DIR" --config-name recipe_gpu_disagg "$@" > "$RUN_DIR/command.txt"
+printf '%q ' "$DISAGG_PYTHON" -m verl.trainer.main_ppo --config-path "$RECIPE_DIR" --config-name recipe_gpu_disagg "${RAY_ENV_OVERRIDES[@]}" "$@" > "$RUN_DIR/command.txt"
 printf '\n' >> "$RUN_DIR/command.txt"
 
 cd "$VERL_REPO"
 "$DISAGG_PYTHON" -m verl.trainer.main_ppo --config-path "$RECIPE_DIR" --config-name recipe_gpu_disagg \
-  --cfg job --resolve "$@" > "$RUN_DIR/resolved_config.yaml" 2> "$RUN_DIR/config.stderr.log"
+  --cfg job --resolve "${RAY_ENV_OVERRIDES[@]}" "$@" > "$RUN_DIR/resolved_config.yaml" 2> "$RUN_DIR/config.stderr.log"
 "$DISAGG_PYTHON" "$RECIPE_DIR/preflight.py" --config "$RUN_DIR/resolved_config.yaml" \
   --out "$RUN_DIR/preflight.json"
 "$DISAGG_PYTHON" "$RECIPE_DIR/boxed_math_reward.py" > "$RUN_DIR/reward_selftest.log"
@@ -93,4 +105,4 @@ on_exit() {
 }
 trap on_exit EXIT
 "$DISAGG_PYTHON" -m verl.trainer.main_ppo --config-path "$RECIPE_DIR" --config-name recipe_gpu_disagg \
-  "$@" 2>&1 | tee "$RUN_DIR/driver.log"
+  "${RAY_ENV_OVERRIDES[@]}" "$@" 2>&1 | tee "$RUN_DIR/driver.log"
