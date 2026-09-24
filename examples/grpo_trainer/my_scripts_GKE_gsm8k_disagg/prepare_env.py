@@ -18,7 +18,7 @@ import sys
 import traceback
 
 
-COMMIT = ""
+COMMIT = "f7e53133bfff899e2ba7690624e6e2f387d462a5"
 LOCKED_RAY = "2.55.1"
 
 

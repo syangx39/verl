@@ -26,7 +26,7 @@ export REWARD_FORMAT_SCORE=0.1 REWARD_OVERLONG_BUFFER=512
 export REWARD_OVERLONG_PENALTY=1.0 REWARD_MAX_RESP_LEN=2048
 export REWARD_PENALTY_SOURCES=gsm8k_boxed_train
 unset LOGPROB_FIXTURE_DIR LOGPROB_FIXTURE_STEP INJECT_BATCH_NPZ INJECT_BATCH_STEP
-PIN=9924801779415f86c807b5716a3d4479fa60f811
+PIN=f7e53133bfff899e2ba7690624e6e2f387d462a5   # upstream verl-project/verl main (checkout inside the image)
 test -x "$DISAGG_PYTHON" || { echo "Run prepare_env.py first: $DISAGG_PYTHON missing" >&2; exit 2; }
 if [[ ${DISAGG_DEV_SOURCE:-0} == 1 ]]; then
   # Development iteration only: VERL_REPO may be a patched working copy (e.g. on the shared bucket). The run is recorded
