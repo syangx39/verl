@@ -34,17 +34,7 @@ if [[ ${DISAGG_IMAGE_MODE:-0} == 1 ]]; then
   # Environment comes from the derived container image (venv built from the pinned commit's uv.lock), identical on every
   # node by construction; there is no prepare_env manifest. Verify the venv against the lock and require DISAGG_IMAGE.
   test -n "${DISAGG_IMAGE:-}" || { echo "DISAGG_IMAGE must name the deployed image (registry path@digest)" >&2; exit 2; }
-  "$DISAGG_PYTHON" - "$VERL_REPO" <<'PY'
-import importlib.metadata as md, re, sys
-lock = open(sys.argv[1] + "/uv.lock").read()
-def locked(name):
-    m = re.search(r'\[\[package\]\]\nname = "%s"\nversion = "([^"]+)"' % re.escape(name), lock); return m.group(1) if m else None
-bad = [p for p in ("ray", "torch", "vllm", "transformers", "transferqueue", "flash-attn") if locked(p) and md.version(p) != locked(p)]
-assert not bad, f"venv does not match {sys.argv[1]}/uv.lock: {bad}"
-import verl, ray, torch, vllm, transformers
-assert verl.__file__.startswith(sys.argv[1] + "/"), f"verl imported from {verl.__file__}, expected {sys.argv[1]}"
-print("venv matches the pinned uv.lock:", "ray", ray.__version__, "torch", torch.__version__, "cuda", torch.version.cuda, "vllm", vllm.__version__, "transformers", transformers.__version__)
-PY
+  "$DISAGG_PYTHON" "$RECIPE_DIR/verify_venv_lock.py" "$VERL_REPO"
 else
 "$DISAGG_PYTHON" - "$RECIPE_DIR" "$VERL_REPO" "$DISAGG_PYTHON" <<'PY'
 import json, pathlib, sys

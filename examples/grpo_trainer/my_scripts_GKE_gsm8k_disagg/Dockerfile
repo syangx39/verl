@@ -1,4 +1,4 @@
-# Derived image for the disaggregated-async GSM8K baseline: verl fork pinned at 9924801, dependencies installed from
+# Derived image for the disaggregated-async GSM8K baseline (build context = my_scripts_GKE_gsm8k_disagg/, Dockerfile at image/Dockerfile): verl fork pinned at 9924801, dependencies installed from
 # THAT commit's uv.lock into /workspace/verl-disagg/.venv, using the base image's prefetched uv cache.
 # Base: verlai/verl:uv-cu130-arm64 (Ubuntu 24.04, CUDA 13.0.2 devel, NCCL 2.28, gdrcopy; uv cache prefetched for
 # upstream main's lock -- NOT a ready venv). Must be built on linux/arm64 (GB200 nodes are aarch64).
@@ -23,23 +23,9 @@ RUN if [ "${FLASH_ATTN_FROM_SOURCE}" = "1" ]; then \
     else \
       uv sync --frozen --all-packages --extra fsdp --extra vllm; \
     fi
-# prove the venv is complete and matches the pinned lock before the image is shipped
-RUN .venv/bin/python - <<'PY'
-import importlib.metadata as md, re, sys
-lock = open("uv.lock").read()
-def locked(name):
-    m = re.search(r'\[\[package\]\]\nname = "%s"\nversion = "([^"]+)"' % re.escape(name), lock); return m.group(1) if m else None
-bad = []
-for pkg in ("ray", "torch", "vllm", "transformers", "transferqueue", "flash-attn"):
-    want, got = locked(pkg), md.version(pkg)
-    print(f"{pkg:14s} installed {got:12s} locked {want}")
-    if want and got != want: bad.append(pkg)
-import ray, torch, vllm, transformers, transfer_queue, flash_attn, verl
-assert verl.__file__.startswith("/workspace/verl-disagg/"), verl.__file__
-from verl.trainer.ppo.v1.trainer_separate_async import PPOTrainerSeparateAsync  # V1 async controller present
-assert not bad, f"version mismatch vs uv.lock: {bad}"
-print("VENV OK; verl from", verl.__file__)
-PY
+# prove the venv is complete and matches the pinned lock (cu130 torch entry, not the +cpu one) before the image is shipped
+COPY verify_venv_lock.py /workspace/verify_venv_lock.py
+RUN .venv/bin/python /workspace/verify_venv_lock.py /workspace/verl-disagg --require-async
 ENV VIRTUAL_ENV=/workspace/verl-disagg/.venv \
     PATH=/workspace/verl-disagg/.venv/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     PYTHONPATH=/workspace/verl-disagg \
