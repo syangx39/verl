@@ -1,19 +1,11 @@
 # =============================================================================
 # verl on GKE A4X — disaggregated-async GSM8K baseline (Wenjun track), 16 nodes x 4 GB200.
-# Image: verlai/verl:uv-cu130-arm64 (upstream verl main, uv.lock baked into /workspace/verl/.venv:
-# Torch 2.11/cu13, vLLM 0.24, flash-attn built for aarch64, transferqueue). Mirror it into Artifact
-# Registry by digest before applying (Docker Hub pulls from 16 nodes hit rate limits):
-#   docker pull --platform linux/arm64 verlai/verl@sha256:094943c1909590564feda8122bd090ba0a93aa42345245111a05225c1a7972f1
-#   docker tag  verlai/verl@sha256:094943c1909590564feda8122bd090ba0a93aa42345245111a05225c1a7972f1 us-central1-docker.pkg.dev/supercomputer-testing/pirillo-gcr/verl-cu130-arm64:094943c1
-#   docker push us-central1-docker.pkg.dev/supercomputer-testing/pirillo-gcr/verl-cu130-arm64:094943c1
-# Differences from the colocated (Meta) cluster manifest, all required:
-#   1. image + PATH: the venv's bin must be first on PATH, otherwise `ray start` runs the system python (no ray).
-#   2. PYTHONPATH: the pinned fork checkout (jialei777/verl-upstream@9924801) on the bucket, ahead of the image's
-#      editable verl (/workspace/verl = upstream main). Importing from gcsfuse is fine (the Meta line does it);
-#      only git operations from many nodes are not.
-#   3. no post-start pip install (the venv already has transferqueue per the lock; --break-system-packages
-#      would target the wrong interpreter).
-#   4. rayVersion must equal the image venv's ray (check: /workspace/verl/.venv/bin/python -c 'import ray;print(ray.__version__)').
+# Image: DERIVED image built by my_scripts_GKE_gsm8k_disagg/image/Dockerfile on top of verlai/verl:uv-cu130-arm64:
+# the fork jialei777/verl-upstream@9924801 checked out at /workspace/verl-disagg and its OWN uv.lock installed into
+# /workspace/verl-disagg/.venv (the base image only carries a prefetched uv cache, not a venv, and its lock differs
+# from the pin, e.g. transformers 5.5.3 vs 5.9.0). Set image: below AND DISAGG_IMAGE to the pushed reference by digest
+# (image/IMAGE_REF.txt). rayVersion must equal the ray in that venv (printed by the Dockerfile's verification step).
+# Nothing is imported from gcsfuse any more except the recipe directory, data and model.
 # =============================================================================
 apiVersion: ray.io/v1
 kind: RayCluster
@@ -57,23 +49,25 @@ spec:
           effect: NoSchedule
         containers:
         - name: ray-head
-          image: us-central1-docker.pkg.dev/supercomputer-testing/pirillo-gcr/verl-cu130-arm64:094943c1
+          image: __IMAGE_REF__
           imagePullPolicy: IfNotPresent
           env:
           - name: PYTHONPATH
-            value: /workspace/meta-RL/verl-disagg:/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gsm8k_disagg
+            value: /workspace/verl-disagg:/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gsm8k_disagg
           - name: VIRTUAL_ENV
-            value: /workspace/verl/.venv
+            value: /workspace/verl-disagg/.venv
           - name: LD_LIBRARY_PATH
             value: /usr/local/nvidia/lib64:/usr/local/gib/lib64:/usr/local/cuda/lib64
           - name: PATH
-            value: /workspace/verl/.venv/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+            value: /workspace/verl-disagg/.venv/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
           - name: PYTHONNOUSERSITE
             value: "1"
           - name: VERL_PLATFORM
             value: nvidia
           - name: VLLM_USE_V1
             value: "1"
+          - name: DISAGG_IMAGE
+            value: __IMAGE_REF__
           - name: GLOO_SOCKET_IFNAME
             value: eth0
           - name: NCCL_SOCKET_IFNAME
@@ -162,23 +156,25 @@ spec:
           effect: NoSchedule
         containers:
         - name: ray-worker
-          image: us-central1-docker.pkg.dev/supercomputer-testing/pirillo-gcr/verl-cu130-arm64:094943c1
+          image: __IMAGE_REF__
           imagePullPolicy: IfNotPresent
           env:
           - name: PYTHONPATH
-            value: /workspace/meta-RL/verl-disagg:/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gsm8k_disagg
+            value: /workspace/verl-disagg:/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gsm8k_disagg
           - name: VIRTUAL_ENV
-            value: /workspace/verl/.venv
+            value: /workspace/verl-disagg/.venv
           - name: LD_LIBRARY_PATH
             value: /usr/local/nvidia/lib64:/usr/local/gib/lib64:/usr/local/cuda/lib64
           - name: PATH
-            value: /workspace/verl/.venv/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+            value: /workspace/verl-disagg/.venv/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
           - name: PYTHONNOUSERSITE
             value: "1"
           - name: VERL_PLATFORM
             value: nvidia
           - name: VLLM_USE_V1
             value: "1"
+          - name: DISAGG_IMAGE
+            value: __IMAGE_REF__
           - name: GLOO_SOCKET_IFNAME
             value: eth0
           - name: NCCL_SOCKET_IFNAME
@@ -255,9 +251,9 @@ data:
     # ---- mirrors of container env (shell convenience; yaml is authoritative)
     export HOME=/workspace/meta-RL/.home
     mkdir -p "$HOME"
-    export VIRTUAL_ENV=/workspace/verl/.venv
-    export PATH=/workspace/verl/.venv/bin:/usr/local/cuda/bin:$PATH
-    export PYTHONPATH=/workspace/meta-RL/verl-disagg:/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gsm8k_disagg
+    export VIRTUAL_ENV=/workspace/verl-disagg/.venv
+    export PATH=/workspace/verl-disagg/.venv/bin:/usr/local/cuda/bin:$PATH
+    export PYTHONPATH=/workspace/verl-disagg:/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gsm8k_disagg
     export PYTHONNOUSERSITE=1 VERL_PLATFORM=nvidia VLLM_USE_V1=1
     export CACHE_ROOT=/tmp/cache
     mkdir -p $CACHE_ROOT
@@ -269,9 +265,9 @@ data:
 
     # ---- shell-world values (read by launch scripts, not by ray workers)
     export RECIPE_DIR=/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gsm8k_disagg
-    export VERL_REPO=/workspace/meta-RL/verl-disagg          # pinned fork checkout on the bucket (git ops only from the head)
-    export DISAGG_PYTHON=/workspace/verl/.venv/bin/python    # the image venv; no prepare_env needed
-    export DISAGG_IMAGE_MODE=1                                # run_gpu_disagg.sh: skip the prepare_env manifest, record the image instead
+    export VERL_REPO=/workspace/verl-disagg                  # pinned fork checkout INSIDE the image
+    export DISAGG_PYTHON=/workspace/verl-disagg/.venv/bin/python   # the image venv built from the pin's uv.lock
+    export DISAGG_IMAGE_MODE=1                                # run_gpu_disagg.sh: verify the venv against the pin's uv.lock, record DISAGG_IMAGE (from the container env)
     export MODEL_PATH=/workspace/meta-RL/models/Qwen3-0.6B
     export DATA_DIR=/workspace/meta-RL/data/gsm8k_boxed
     export LOG_DIR=/workspace/meta-RL/logs/wenjun_disagg
