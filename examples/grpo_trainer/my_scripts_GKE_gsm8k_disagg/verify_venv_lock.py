@@ -47,6 +47,8 @@ def main():
     print("\n".join(lines)); print("verl from", verl.__file__)
     if not verl.__file__.startswith(repo.rstrip("/") + "/"):
         bad.append(f"verl-import-path:{verl.__file__}")
+    import flash_attn  # a matching version string does not prove the CUDA extension loads; importing does
+    print("flash_attn", flash_attn.__version__, "imports OK")
     if "--require-async" in sys.argv:
         from verl.trainer.ppo.v1.trainer_separate_async import PPOTrainerSeparateAsync  # noqa: F401
     if bad:

@@ -1,4 +1,4 @@
-# Derived image for the disaggregated-async GSM8K baseline (build context = my_scripts_GKE_gsm8k_disagg/, Dockerfile at image/Dockerfile): verl fork pinned at 9924801, dependencies installed from
+# Derived image for the disaggregated-async GSM8K baseline (build context = my_scripts_GKE_gsm8k_disagg/, which holds this Dockerfile, verify_venv_lock.py and build_and_push.sh): verl fork pinned at 9924801, dependencies installed from
 # THAT commit's uv.lock into /workspace/verl-disagg/.venv, using the base image's prefetched uv cache.
 # Base: verlai/verl:uv-cu130-arm64 (Ubuntu 24.04, CUDA 13.0.2 devel, NCCL 2.28, gdrcopy; uv cache prefetched for
 # upstream main's lock -- NOT a ready venv). Must be built on linux/arm64 (GB200 nodes are aarch64).
