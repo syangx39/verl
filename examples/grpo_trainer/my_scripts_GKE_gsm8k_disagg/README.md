@@ -43,7 +43,7 @@ Put the downloaded archive on the Ray head at `/workspace/meta-RL/wenjun_gpu_dis
 ```bash
 source /workspace/setup_env.sh
 export RAY_ADDRESS=auto
-export VERL_REPO=/workspace/meta-RL/verl-disagg
+export VERL_REPO=/tmp/verl-disagg-9924801/src     # node-local; prepare_env.py clones the pinned commit here on every node
 export RECIPE_DIR=/workspace/meta-RL/recipes/wenjun_recipe
 export MODEL_PATH=/workspace/meta-RL/models/Qwen3-0.6B
 export DATA_DIR=/workspace/meta-RL/data/gsm8k_boxed
@@ -53,11 +53,8 @@ export DISAGG_PYTHON=/tmp/verl-disagg-9924801/bin/python
 mkdir -p /workspace/meta-RL/recipes "$LOG_DIR" "$CKPT_DIR"
 tar -xzf /workspace/meta-RL/wenjun_gpu_disagg_recipe.tar.gz -C /workspace/meta-RL/recipes
 
-# Dedicated checkout. If already present, verify its pin instead of cloning over it.
-git clone --depth 1 --branch tpu-main https://github.com/jialei777/verl-upstream.git "$VERL_REPO"
-git -C "$VERL_REPO" fetch --depth 1 origin 9924801779415f86c807b5716a3d4479fa60f811
-git -C "$VERL_REPO" checkout --detach 9924801779415f86c807b5716a3d4479fa60f811
-
+# No shared checkout: a git working tree on the gcsfuse mount is not usable from 16 nodes at once (stale caches,
+# SIGBUS on mmap'd git files, symlinks unrepresentable). prepare_env.py clones the pinned commit node-locally instead.
 # Use the current image's Python here. Prepares all live nodes, including head.
 set -o pipefail
 python3 "$RECIPE_DIR/prepare_env.py" --repo "$VERL_REPO" --bundle "$RECIPE_DIR" \

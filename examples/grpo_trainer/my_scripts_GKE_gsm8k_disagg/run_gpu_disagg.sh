@@ -3,7 +3,7 @@
 set -euo pipefail
 export RECIPE_DIR
 RECIPE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-export VERL_REPO=${VERL_REPO:-/workspace/meta-RL/verl-disagg}
+export VERL_REPO=${VERL_REPO:-/tmp/verl-disagg-9924801/src}   # node-local checkout made by prepare_env.py on every node (same path everywhere)
 export DISAGG_PYTHON=${DISAGG_PYTHON:-/tmp/verl-disagg-9924801/bin/python}
 export MODEL_PATH=${MODEL_PATH:-/workspace/meta-RL/models/Qwen3-0.6B}
 export DATA_DIR=${DATA_DIR:-/workspace/meta-RL/data/gsm8k_boxed}

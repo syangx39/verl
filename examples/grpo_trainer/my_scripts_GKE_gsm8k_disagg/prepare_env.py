@@ -95,6 +95,21 @@ def prepare_node(node_id, node_ip, options, expected):
             repo = Path(options["repo"])
             if not Path(options["bundle"]).is_dir():
                 raise RuntimeError(f"Shared recipe bundle is missing: {options['bundle']}")
+            # Node-local source checkout. A git checkout on a gcsfuse mount is not usable from many nodes at once
+            # (stale caches -> spurious diffs, SIGBUS on mmap'd index/pack files, symlinks unrepresentable), and
+            # importing verl from gcsfuse on 64 workers is slow. Each node clones the pinned commit into the SAME
+            # local path instead; the shared bundle (recipe, reward) stays on the shared mount.
+            if options["clone_url"]:
+                if not (repo / ".git").is_dir():
+                    repo.parent.mkdir(parents=True, exist_ok=True)
+                    subprocess.run(["git", "clone", "--depth", "1", "--branch", options["clone_branch"], options["clone_url"], str(repo)],
+                                   stdout=log, stderr=subprocess.STDOUT, check=True)
+                head_now = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True, capture_output=True).stdout.strip()
+                if head_now != COMMIT:
+                    subprocess.run(["git", "-C", str(repo), "fetch", "--depth", "1", "origin", COMMIT], stdout=log, stderr=subprocess.STDOUT, check=True)
+                    subprocess.run(["git", "-C", str(repo), "checkout", "--detach", COMMIT], stdout=log, stderr=subprocess.STDOUT, check=True)
+            if not (repo / ".git").is_dir():
+                raise RuntimeError(f"verl checkout missing on this node: {repo} (pass --clone-url to clone it node-locally)")
             sha = run(["git", "rev-parse", "HEAD"], capture=True)
             if sha != COMMIT:
                 raise RuntimeError(f"Expected checkout {COMMIT}, found {sha}")
@@ -173,6 +188,10 @@ def main():
     parser.add_argument("--parallel", type=int, default=4)
     parser.add_argument("--check", action="store_true", help="Import-check every node; install nothing")
     parser.add_argument("--ray-wheel", help="Shared path to wheel for an existing custom Ray build")
+    parser.add_argument("--clone-url", default="https://github.com/jialei777/verl-upstream.git",
+                        help="clone the pinned commit into --repo on every node when it is not already there (node-local source); "
+                             "pass an empty string to require a pre-existing checkout")
+    parser.add_argument("--clone-branch", default="tpu-main")
     args = parser.parse_args()
     if args.parallel < 1:
         parser.error("--parallel must be positive")
