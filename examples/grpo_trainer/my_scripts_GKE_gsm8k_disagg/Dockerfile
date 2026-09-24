@@ -11,18 +11,21 @@ ARG VERL_PIN
 ARG FLASH_ATTN_FROM_SOURCE=0
 
 ENV UV_HTTP_TIMEOUT=500 UV_LINK_MODE=copy UV_CACHE_DIR=/root/.cache/uv UV_PROJECT_ENVIRONMENT=/workspace/verl-disagg/.venv
-WORKDIR /workspace
-COPY verl-src /workspace/verl-disagg
-RUN test -n "${VERL_PIN}" && cd verl-disagg && test "$(git rev-parse HEAD)" = "${VERL_PIN}" \
- && test -z "$(git status --porcelain --untracked-files=no)" && git rev-parse HEAD > /workspace/VERL_PIN
 WORKDIR /workspace/verl-disagg
+# Layer 1: dependencies only, keyed on the lock/pyproject so source patches do not re-trigger the install.
+COPY verl-src/pyproject.toml verl-src/uv.lock ./
 RUN if [ "${FLASH_ATTN_FROM_SOURCE}" = "1" ]; then \
-      uv sync --frozen --all-packages --extra fsdp --extra vllm --no-install-package flash-attn \
+      uv sync --frozen --no-install-project --all-packages --extra fsdp --extra vllm --no-install-package flash-attn \
       && FA=$(grep -A2 '^name = "flash-attn"' uv.lock | grep '^version' | head -1 | cut -d'"' -f2) \
       && MAX_JOBS=32 uv pip install --python .venv/bin/python --no-build-isolation "flash-attn==${FA}"; \
     else \
-      uv sync --frozen --all-packages --extra fsdp --extra vllm; \
+      uv sync --frozen --no-install-project --all-packages --extra fsdp --extra vllm; \
     fi
+# Layer 2: the pinned + patched source; installs the project itself (editable) on top of the cached dependencies.
+COPY verl-src /workspace/verl-disagg
+RUN test -n "${VERL_PIN}" && test "$(git rev-parse HEAD)" = "${VERL_PIN}" \
+ && test -z "$(git status --porcelain --untracked-files=no)" && git rev-parse HEAD > /workspace/VERL_PIN \
+ && uv sync --frozen --all-packages --extra fsdp --extra vllm $( [ "${FLASH_ATTN_FROM_SOURCE}" = "1" ] && echo --no-install-package flash-attn )
 # prove the venv is complete and matches the pinned lock (cu130 torch entry, not the +cpu one) before the image is shipped
 COPY verify_venv_lock.py /workspace/verify_venv_lock.py
 RUN .venv/bin/python /workspace/verify_venv_lock.py /workspace/verl-disagg --require-async
