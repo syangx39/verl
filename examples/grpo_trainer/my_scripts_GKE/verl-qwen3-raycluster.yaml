@@ -49,7 +49,7 @@ spec:
           effect: NoSchedule
         containers:
         - name: ray-head
-          image: us-central1-docker.pkg.dev/supercomputer-testing/pirillo-gcr/verl-disagg-cu130-arm64@sha256:0f2b9ed6e423c9081ccfd7d6b92f8f18ac31da76066b5b06240cc34f20372241
+          image: us-central1-docker.pkg.dev/supercomputer-testing/pirillo-gcr/verl-disagg-cu130-arm64:897e680a8
           imagePullPolicy: IfNotPresent
           env:
           - name: PYTHONPATH
@@ -67,7 +67,7 @@ spec:
           - name: VLLM_USE_V1
             value: "1"
           - name: DISAGG_IMAGE
-            value: us-central1-docker.pkg.dev/supercomputer-testing/pirillo-gcr/verl-disagg-cu130-arm64@sha256:0f2b9ed6e423c9081ccfd7d6b92f8f18ac31da76066b5b06240cc34f20372241
+            value: us-central1-docker.pkg.dev/supercomputer-testing/pirillo-gcr/verl-disagg-cu130-arm64:897e680a8
           - name: GLOO_SOCKET_IFNAME
             value: eth0
           - name: NCCL_SOCKET_IFNAME
@@ -156,7 +156,7 @@ spec:
           effect: NoSchedule
         containers:
         - name: ray-worker
-          image: us-central1-docker.pkg.dev/supercomputer-testing/pirillo-gcr/verl-disagg-cu130-arm64@sha256:0f2b9ed6e423c9081ccfd7d6b92f8f18ac31da76066b5b06240cc34f20372241
+          image: us-central1-docker.pkg.dev/supercomputer-testing/pirillo-gcr/verl-disagg-cu130-arm64:897e680a8
           imagePullPolicy: IfNotPresent
           env:
           - name: PYTHONPATH
@@ -174,7 +174,7 @@ spec:
           - name: VLLM_USE_V1
             value: "1"
           - name: DISAGG_IMAGE
-            value: us-central1-docker.pkg.dev/supercomputer-testing/pirillo-gcr/verl-disagg-cu130-arm64@sha256:0f2b9ed6e423c9081ccfd7d6b92f8f18ac31da76066b5b06240cc34f20372241
+            value: us-central1-docker.pkg.dev/supercomputer-testing/pirillo-gcr/verl-disagg-cu130-arm64:897e680a8
           - name: GLOO_SOCKET_IFNAME
             value: eth0
           - name: NCCL_SOCKET_IFNAME
