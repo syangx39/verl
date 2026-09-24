@@ -18,7 +18,7 @@ import sys
 import traceback
 
 
-COMMIT = "f7e53133bfff899e2ba7690624e6e2f387d462a5"
+COMMIT = "ace775e87d8765bcdd114aac734ab71da5367a0f"
 LOCKED_RAY = "2.55.1"
 
 
@@ -184,9 +184,9 @@ def prepare_node(node_id, node_ip, options, expected):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", default="/tmp/verl-disagg-src-9924801")
+    parser.add_argument("--repo", default="/workspace/verl-pin")
     parser.add_argument("--bundle", default=str(Path(__file__).resolve().parent))
-    parser.add_argument("--venv", default="/tmp/verl-disagg-venv-9924801")
+    parser.add_argument("--venv", default="/workspace/verl-pin/.venv")
     parser.add_argument("--address", default=os.environ.get("RAY_ADDRESS", "auto"))
     parser.add_argument("--parallel", type=int, default=4)
     parser.add_argument("--check", action="store_true", help="Import-check every node; install nothing")

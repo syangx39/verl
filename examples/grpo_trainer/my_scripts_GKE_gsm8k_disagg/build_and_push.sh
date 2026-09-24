@@ -4,7 +4,7 @@
 set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"          # the recipe dir: Dockerfile, verify_venv_lock.py and this script live side by side
 REG=${REG:-us-central1-docker.pkg.dev/supercomputer-testing/pirillo-gcr}
-PIN=f7e53133bfff899e2ba7690624e6e2f387d462a5      # upstream verl main, the checkout shipped inside the base image
+PIN=ace775e87d8765bcdd114aac734ab71da5367a0f      # upstream verl-project/verl main (2026-09-22): hybrid_engine=False in separate_async + standalone rollout memory budget
 echo "$PIN" > VERL_PIN.txt
 # keep launcher and prepare_env on the same pin
 sed -i "s|^PIN=.*|PIN=$PIN   # upstream verl-project/verl main (checkout inside the image)|" run_gpu_disagg.sh

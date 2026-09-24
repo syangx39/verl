@@ -2,7 +2,7 @@
 # verl on GKE A4X — disaggregated-async GSM8K baseline (Wenjun track), 16 nodes x 4 GB200.
 # Image: DERIVED image built by my_scripts_GKE_gsm8k_disagg/image/Dockerfile on top of verlai/verl:uv-cu130-arm64:
 # the fork jialei777/verl-upstream@9924801 checked out at /workspace/verl-disagg and its OWN uv.lock installed into
-# /workspace/verl/.venv (the base image only carries a prefetched uv cache, not a venv, and its lock differs
+# /workspace/verl-pin/.venv (the base image only carries a prefetched uv cache, not a venv, and its lock differs
 # from the pin, e.g. transformers 5.5.3 vs 5.9.0). Set image: below AND DISAGG_IMAGE to the pushed reference by digest
 # (image/IMAGE_REF.txt). rayVersion must equal the ray in that venv (printed by the Dockerfile's verification step).
 # Nothing is imported from gcsfuse any more except the recipe directory, data and model.
@@ -53,13 +53,13 @@ spec:
           imagePullPolicy: IfNotPresent
           env:
           - name: PYTHONPATH
-            value: /workspace/verl:/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gsm8k_disagg
+            value: /workspace/verl-pin:/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gsm8k_disagg
           - name: VIRTUAL_ENV
-            value: /workspace/verl/.venv
+            value: /workspace/verl-pin/.venv
           - name: LD_LIBRARY_PATH
             value: /usr/local/nvidia/lib64:/usr/local/gib/lib64:/usr/local/cuda/lib64
           - name: PATH
-            value: /workspace/verl/.venv/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+            value: /workspace/verl-pin/.venv/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
           - name: PYTHONNOUSERSITE
             value: "1"
           - name: VERL_PLATFORM
@@ -160,13 +160,13 @@ spec:
           imagePullPolicy: IfNotPresent
           env:
           - name: PYTHONPATH
-            value: /workspace/verl:/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gsm8k_disagg
+            value: /workspace/verl-pin:/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gsm8k_disagg
           - name: VIRTUAL_ENV
-            value: /workspace/verl/.venv
+            value: /workspace/verl-pin/.venv
           - name: LD_LIBRARY_PATH
             value: /usr/local/nvidia/lib64:/usr/local/gib/lib64:/usr/local/cuda/lib64
           - name: PATH
-            value: /workspace/verl/.venv/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+            value: /workspace/verl-pin/.venv/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
           - name: PYTHONNOUSERSITE
             value: "1"
           - name: VERL_PLATFORM
@@ -251,9 +251,9 @@ data:
     # ---- mirrors of container env (shell convenience; yaml is authoritative)
     export HOME=/workspace/meta-RL/.home
     mkdir -p "$HOME"
-    export VIRTUAL_ENV=/workspace/verl/.venv
-    export PATH=/workspace/verl/.venv/bin:/usr/local/cuda/bin:$PATH
-    export PYTHONPATH=/workspace/verl:/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gsm8k_disagg
+    export VIRTUAL_ENV=/workspace/verl-pin/.venv
+    export PATH=/workspace/verl-pin/.venv/bin:/usr/local/cuda/bin:$PATH
+    export PYTHONPATH=/workspace/verl-pin:/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gsm8k_disagg
     export PYTHONNOUSERSITE=1 VERL_PLATFORM=nvidia VLLM_USE_V1=1
     export CACHE_ROOT=/tmp/cache
     mkdir -p $CACHE_ROOT
@@ -265,8 +265,8 @@ data:
 
     # ---- shell-world values (read by launch scripts, not by ray workers)
     export RECIPE_DIR=/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gsm8k_disagg
-    export VERL_REPO=/workspace/verl                         # upstream checkout INSIDE the image (pin f7e53133)
-    export DISAGG_PYTHON=/workspace/verl/.venv/bin/python   # the image venv built from the pin's uv.lock
+    export VERL_REPO=/workspace/verl-pin                     # upstream checkout INSIDE the image (pin ace775e8)
+    export DISAGG_PYTHON=/workspace/verl-pin/.venv/bin/python   # the image venv built from the pin's uv.lock
     export DISAGG_IMAGE_MODE=1                                # run_gpu_disagg.sh: verify the venv against the pin's uv.lock, record DISAGG_IMAGE (from the container env)
     export MODEL_PATH=/workspace/meta-RL/models/Qwen3-0.6B
     export DATA_DIR=/workspace/meta-RL/data/gsm8k_boxed

@@ -3,8 +3,8 @@
 set -euo pipefail
 export RECIPE_DIR
 RECIPE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-export VERL_REPO=${VERL_REPO:-/tmp/verl-disagg-src-9924801}   # node-local checkout made by prepare_env.py on every node (same path everywhere)
-export DISAGG_PYTHON=${DISAGG_PYTHON:-/tmp/verl-disagg-venv-9924801/bin/python}   # venv is a separate dir from the source checkout
+export VERL_REPO=${VERL_REPO:-/workspace/verl-pin}          # upstream checkout inside the image
+export DISAGG_PYTHON=${DISAGG_PYTHON:-/workspace/verl-pin/.venv/bin/python}
 export MODEL_PATH=${MODEL_PATH:-/workspace/meta-RL/models/Qwen3-0.6B}
 export DATA_DIR=${DATA_DIR:-/workspace/meta-RL/data/gsm8k_boxed}
 export LOG_DIR=${LOG_DIR:-/workspace/meta-RL/logs/wenjun_disagg}
@@ -26,7 +26,7 @@ export REWARD_FORMAT_SCORE=0.1 REWARD_OVERLONG_BUFFER=512
 export REWARD_OVERLONG_PENALTY=1.0 REWARD_MAX_RESP_LEN=2048
 export REWARD_PENALTY_SOURCES=gsm8k_boxed_train
 unset LOGPROB_FIXTURE_DIR LOGPROB_FIXTURE_STEP INJECT_BATCH_NPZ INJECT_BATCH_STEP
-PIN=f7e53133bfff899e2ba7690624e6e2f387d462a5   # upstream verl-project/verl main (checkout inside the image)
+PIN=ace775e87d8765bcdd114aac734ab71da5367a0f   # upstream verl-project/verl main (2026-09-22)
 test -x "$DISAGG_PYTHON" || { echo "Run prepare_env.py first: $DISAGG_PYTHON missing" >&2; exit 2; }
 if [[ ${DISAGG_DEV_SOURCE:-0} == 1 ]]; then
   # Development iteration only: VERL_REPO may be a patched working copy (e.g. on the shared bucket). The run is recorded
