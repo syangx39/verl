@@ -176,7 +176,7 @@ def main():
         reports = ray.get(futures, timeout=600)
         assert all(r["packages"] == reports[0]["packages"] for r in reports), "Package versions differ across nodes"
         result = {"config_fields_verified": len(expected), "train_rows": 7473,
-                  "eval_rows": 1319, "trainer_gpus": 16, "rollout_gpus": 48,
+                  "eval_rows": 1319, "trainer_gpus": t_nodes * t_gpn, "rollout_gpus": r_nodes * r_gpn, "profile": profile,
                   "trainer_steps": steps, "optimizer_schedule_steps": expected_optim_steps,
                   "nodes": reports}
         Path(args.out).write_text(json.dumps(result, indent=2) + "\n")
