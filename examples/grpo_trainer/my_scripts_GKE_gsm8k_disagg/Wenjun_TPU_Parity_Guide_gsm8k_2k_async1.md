@@ -41,7 +41,7 @@
 4. 丢弃规则按**题的下发年龄**算，不按 token 的策略版本：`当前更新步 − 下发步 + 1 > 2` 的题组 **trainer** 直接丢掉（阈值 2，策略 drop），也就是一个题组只能在它下发那一步或下一步被消费；丢掉后 **sampler** 从 dataloader 补发一题。
 5. eval 时 **trainer** 等待，**sampler** 用被评估的那个 checkpoint 的权重跑 1,319 题。
 
-两个计数器别混：丢弃规则用的是**下发年龄**；日志里的 `trajectory_staleness_worst = 当前更新步 − 1 − 组内最老 token 的版本号`，`trajectory_spans` = 一条回答里出现的版本数。配置本身只保证"被消费的题组是当前步或上一步下发的"，不能换算成"worst lag ≤ 2 / span ≤ 3 合法"这种说法。跨版本回答是允许且预期的。GB200 三条 run 的**实测**（`band/summary.json`，是观测值不是保证）：`staleness_worst/max` = 1（每一步都是，step 1 为 0）；**一半以上的步（136/138/144 of 250）里至少有一条回答跨了两个版本**（同步发生在它生成中途）——这是常态；丢弃 **11 / 8 / 8 组**（占 32,000 组的 0.03%，全是接近 2048 的长回答，staleness 3）。TPU 上出现 staleness 2 的题组被消费是合法的，报告分布即可。IS 权重按 token 记录、按 token 修正，所以跨版本的回答不需要特殊处理；`k3_kl`（trainer vs sampler）稳态 7e-4，15–40 步策略变化最快时升到 1.6e-3 再回落——这是滞后的唯一可见特征。
+两个计数器别混：丢弃规则用的是**下发年龄**；日志里的 `trajectory_staleness_worst = 当前更新步 − 1 − 组内最老 token 的版本号`，`trajectory_spans = max_version − min_version + 1`（一条回答跨的版本数）。配置本身只保证"被消费的题组是当前步或上一步下发的"，不能换算成对日志 staleness 的任何数值上下限。TPU 侧把这两个计数器按同样定义实现并报告每步分布；某个观测值能不能接受，看下发年龄规则和计数器定义是否核对一致，不是看数字。跨版本回答是允许且预期的。GB200 三条 run 的**实测**（`band/summary.json`，是观测值不是保证）：`staleness_worst/max` = 1（每一步都是，step 1 为 0，没有消费过 staleness 2 的题组）；**一半以上的步（136/138/144 of 250）里至少有一条回答跨了两个版本**（同步发生在它生成中途）——这是常态；丢弃 **11 / 8 / 8 组**（占 32,000 组的 0.03%，全是接近 2048 的长回答）。IS 权重按 token 记录、按 token 修正，所以跨版本的回答不需要特殊处理；`k3_kl`（trainer vs sampler）稳态 7e-4，15–40 步策略变化最快时升到 1.6e-3 再回落——这是滞后的唯一可见特征。
 
 TPU 侧要做到：同样的"领先一批、每次更新推权重、warmup 1、按下发年龄阈值 2 + drop + 补发、优先最早下发、同步后从前缀续写"（必须一致的是配置和这些行为）；记录每步被消费题组的下发年龄和 token 版本 staleness、每条回答的 spans、丢弃数（这些是报告项，期望和 GB200 相近，不要求相等）。如果 TPU 的 sampler 在权重更新后**不能**从保留前缀续写（只能整条重来或丢弃），明确写出来：那样 spans 恒为 1、丢弃率和批次构成会变，是要记录的偏差，不是违规。
 
@@ -95,7 +95,7 @@ TPU 侧用自己的 scorer 实现跑同一份 800 条，期望分数逐条相等
 |---|---|
 | driver 退出码 | 0 |
 | 前三次更新的 lr | 0 / 2e-7 / 4e-7（日志记的是 step 之后的值）|
-| `staleness_worst/max` | step 1 = 0，之后 ≤ 1（GB200 实测恒 1；配置上 TPU 出现 2 不算违规，报告）|
+| `staleness_worst/max` | step 1 = 0，之后 ≤ 1（GB200 实测恒 1；出现 2 时不按数字放行或判失败，回头核对下发年龄规则和计数器定义，连同分布一起报告）|
 | `spans` | 有记录（GB200 ≤ 2）|
 | 丢弃组数 | 20 步内 0 |
 | 权重同步 | 每步一次，每次都成功 |
@@ -106,8 +106,8 @@ TPU 侧用自己的 scorer 实现跑同一份 800 条，期望分数逐条相等
 
 这轮**没有梯度 fixture**（V1 异步 trainer 不产出逐 token logp dump，8K 包的重放工具用不上），这道门也**不能证明和 GPU 的梯度一致**，它只是本地自检：
 
-(a) **数值**：取一次更新，导出 trainer 用到的逐 token `logp_theta`（训练 pass，fp32）、`logp_sampler`、`adv`、`mask`，用 float64 算 `w = min(exp(clip(logp_theta − logp_sampler, −20, 20)), 3)`、`loss_ref = −Σ(adv·w·logp_theta·mask) / Σmask`（整批一个全局和），和 trainer 记录的这次更新的 loss 比。**容差待 GPU 侧校准后再作为判据**（我们加上 trainer 的逐 token 导出后会发布 GPU 实测的相对偏差），现在先报告数值。
-(b) **梯度路径**：数值相等抓不到 w 忘了 detach。在小 batch 上用 autograd 求 ∂loss/∂logp_theta，逐 token 应恰好等于 `−adv·w·mask/Σmask`；w 没 detach 时会变成 `−adv·w·(1 + logp_theta)·mask/Σmask`。
+(a) **数值**：取一次更新，导出 trainer 用到的逐 token `logp_theta`（训练 pass，fp32）、`logp_sampler`、`adv`、`mask`，用 float64 算 `w = min(exp(clip(logp_theta − logp_sampler, −20, 20)), 3)`、`loss_ref = −Σ(adv·w·logp_theta·mask) / Σmask`（整批一个全局和），和 trainer 记录的这次更新的 loss 比，**绝对误差和相对误差都报**。**容差待 GPU 侧校准后再作为判据**（我们加上 trainer 的逐 token 导出后会发布），现在先报告数值。
+(b) **梯度路径**：数值相等抓不到 w 忘了 detach。在小 batch 上用 autograd 求 ∂loss/∂logp_theta，**只在 clamp 和 cap 都没触发的 token 上比**（|logp_theta − logp_sampler| < 20 且 exp(·) < 3）**且 adv ≠ 0**，测试 batch 里必须有这类 token；用浮点容差比（fp32 相对 1e-5、float64 1e-9），不要求完全相等。这些 token 上正确值是 `−adv·w·mask/Σmask`；w 没 detach 时会变成 `−adv·w·(1 + logp_theta)·mask/Σmask`；被 cap/clamp 的 token 上两者相同，测不出问题。
 
 colocated 轮测的单前向 = 两遍（同批梯度余弦 0.99995）只对那条 V0 路径成立。
 

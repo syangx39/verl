@@ -62,8 +62,10 @@ for s, r in enumerate(sys.argv[2:], 1):
     manifest, unmatched = {}, 0
     for step in range(1, 251):
         rows = [json.loads(l) for l in open(f"{r}/rollout_dump/{step}.jsonl")]
-        groups = {}
-        for row in rows: groups.setdefault(row["uid"].rsplit("_", 2)[0], row["input"])
+        groups, sizes = {}, {}
+        for row in rows:
+            g = row["uid"].rsplit("_", 2)[0]; groups.setdefault(g, row["input"]); sizes[g] = sizes.get(g, 0) + 1
+        assert len(groups) == 128 and set(sizes.values()) == {16}, f"seed {s} step {step}: {len(groups)} groups, group sizes {set(sizes.values())}"
         ids = []
         for uid, inp in groups.items():
             hit = [i for q, i in idx_of.items() if q and q in inp]      # exact substring; question texts are unique
@@ -73,6 +75,7 @@ for s, r in enumerate(sys.argv[2:], 1):
     json.dump({"note": "training-row indices of the 128 prompt groups consumed at each optimizer step (asynchronous: membership follows completion order, order within a step irrelevant)",
                "unmatched_groups": unmatched, "steps": manifest}, open(f"{out}/step_manifest_seed{s}.json", "w"))
     n = sum(len(v) for v in manifest.values()); print(f"seed {s}: {n} prompt groups over 250 steps matched to train rows, {unmatched} unmatched, {len(set(i for v in manifest.values() for i in v))} distinct questions")
+    assert unmatched == 0 and n == 250 * 128, f"seed {s}: manifest incomplete ({n} matched, {unmatched} unmatched)"
 PYX
 
 # ---------- 3. code + environment ----------
@@ -97,12 +100,11 @@ print("keys differing across the three seeds:", keys)
 PYX
 
 # ---------- 4. fixtures: gates 1-2 (reused from the 8K package when present) + the 2K scorer fixture from real responses ----------
-if [ -f $PKG8K/fixtures/prompt_fixture.json ]; then
-  cp $PKG8K/fixtures/prompt_fixture.json $PKG8K/fixtures/meta_reward_fixtures.json $PKG8K/fixtures/reward_selftest_meta_rule.log $H/fixtures/
-  echo "prompt_fixture.json / meta_reward_fixtures.json reused from $PKG8K (same data build, same scorer)"
-else
-  $PY $G/build_gsm8k_boxed_data.py --out_dir $H/data --prompt_fixture $H/fixtures/prompt_fixture.json --model $MODEL_PATH 2>&1 | tail -3
-fi
+for f in prompt_fixture.json meta_reward_fixtures.json reward_selftest_meta_rule.log; do
+  test -f $PKG8K/fixtures/$f || { echo "missing $PKG8K/fixtures/$f: gates 1-2 reuse the 8K package's fixtures (same data build, same scorer); restore that package first"; exit 2; }
+  cp $PKG8K/fixtures/$f $H/fixtures/
+done
+echo "prompt_fixture.json / meta_reward_fixtures.json reused from $PKG8K"
 $PY - "${R[1]}" "$H/fixtures" "$RECIPE_DIR" <<'PYX'
 import sys, json, os, random, importlib.util
 r, out, rd = sys.argv[1:4]
@@ -136,12 +138,17 @@ PYX
 
 # ---------- 5. runs ----------
 for S in 1 2 3; do
-  D=$H/runs/seed$S; rm -rf $D; mkdir -p $D
-  for f in driver.log command.txt resolved_config.yaml preflight.json environment_manifest.txt start_epoch.txt end_epoch.txt exit_code.txt; do cp ${R[$S]}/$f $D/ 2>/dev/null || true; done
-  [ -f ${R[$S]}/check_smoke.json ] || $PY $RECIPE_DIR/check_smoke.py ${R[$S]} --steps 250 --max-worst-lag 1 > /dev/null 2>&1 || true
-  cp ${R[$S]}/check_smoke.json $D/ 2>/dev/null || true
-  cp -r ${R[$S]}/tensorboard $D/tensorboard; echo "${E[$S]}" > $D/EXPERIMENT_NAME
-  if [ "${SKIP_DUMPS:-0}" != "1" ]; then cp -r ${R[$S]}/val_dump $D/val_dump; cp -r ${R[$S]}/rollout_dump $D/rollout_dump; fi
+  D=$H/runs/seed$S; mkdir -p $D
+  for f in driver.log command.txt resolved_config.yaml preflight.json start_epoch.txt end_epoch.txt exit_code.txt; do cp ${R[$S]}/$f $D/; done
+  cp ${R[$S]}/environment_manifest.txt $D/ 2>/dev/null || true
+  # the post-run checks must pass (re-run when the JSON is missing or did not pass); a failure aborts the package
+  $PY $RECIPE_DIR/check_smoke.py ${R[$S]} --steps 250 --max-worst-lag 1 > $D/check_smoke.log 2>&1 || { echo "seed $S: check_smoke FAILED (see $D/check_smoke.log)"; exit 2; }
+  $PY -c "import json,sys; j=json.load(open('${R[$S]}/check_smoke.json')); assert j.get('status') == 'passed', j.get('status'); print('seed $S check_smoke:', j['status'])"
+  cp ${R[$S]}/check_smoke.json $D/
+  rm -rf $D/tensorboard; cp -r ${R[$S]}/tensorboard $D/tensorboard; echo "${E[$S]}" > $D/EXPERIMENT_NAME
+  if [ "${SKIP_DUMPS:-0}" = "1" ] && [ -d $D/val_dump ] && [ -d $D/rollout_dump ]; then echo "seed $S: keeping existing dumps"; else
+    rm -rf $D/val_dump $D/rollout_dump; cp -r ${R[$S]}/val_dump $D/val_dump; cp -r ${R[$S]}/rollout_dump $D/rollout_dump; fi
+  test "$(ls $D/val_dump | wc -l)" = "14" && test "$(ls $D/rollout_dump | wc -l)" = "250" || { echo "seed $S: package dumps incomplete"; exit 2; }
   cp $LOG_DIR/${E[$S]}.driver.log $D/launch.log 2>/dev/null || true
 done
 
@@ -232,5 +239,14 @@ Verify: sha256sum -c --quiet PACKAGE_MANIFEST.sha256
 
 Reference experiment ids: ${E[1]}, ${E[2]}, ${E[3]}.
 TXT
+for f in model/model.safetensors model/MODEL_SHA256 model/model_identity.json data/gsm8k_boxed_train.parquet data/gsm8k_boxed_test.parquet data/DATA_COUNTS.json \
+         data/step_manifest_seed1.json data/step_manifest_seed2.json data/step_manifest_seed3.json fixtures/prompt_fixture.json fixtures/meta_reward_fixtures.json \
+         fixtures/scorer_fixture_2k.jsonl fixtures/reward_selftest_2k_penalty.log env/IMAGE_REF.txt env/VERL_PIN.txt env/uv.lock env/versions.txt env/CONFIG_DIFF.txt \
+         env/resolved_config_seed1.yaml env/resolved_config_seed2.yaml env/resolved_config_seed3.yaml band/summary.json band/gb200_band_gsm8k_2k_async1.png \
+         band/diagnostics_seed1.png band/diagnostics_seed2.png band/diagnostics_seed3.png band/step0_greedy_variability.json code/recipe_gpu_disagg.yaml code/run_gpu_disagg.sh \
+         runs/seed1/check_smoke.json runs/seed2/check_smoke.json runs/seed3/check_smoke.json README.md; do
+  test -s $H/$f || { echo "required file missing or empty: $H/$f"; exit 2; }
+done
+[ "${SKIP_CKPT:-0}" = "1" ] || for S in 1 2 3; do test -s $H/checkpoints/seed${S}_step250/SHA256 || { echo "checkpoint seed $S missing"; exit 2; }; done
 ( cd $H && find . -type f ! -name PACKAGE_MANIFEST.sha256 -print0 | sort -z | xargs -0 sha256sum ) > $H/PACKAGE_MANIFEST.sha256
 ( cd $H && sha256sum -c --quiet PACKAGE_MANIFEST.sha256 ) && echo "PACKAGE OK: $(wc -l < $H/PACKAGE_MANIFEST.sha256) files -> $H" && du -sh $H
