@@ -27,7 +27,7 @@ ap.add_argument("--exclude_every", nargs="*", type=int, default=[20, 50], help="
 ap.add_argument("--val_tag", default="val-core/gsm8k_boxed_test/acc/mean@1")
 ap.add_argument("--steady_from", type=int, default=20, help="first step of the steady-state window (use 1 for short runs)")
 ap.add_argument("--target_rule", choices=["first", "sustained2"], default="sustained2",
-                help="time-to-target: first eval >= target, or (rulebook convention) the first of two consecutive evals >= target")
+                help="time-to-target: first eval >= target, or (rulebook convention) the second of two consecutive evals >= target, i.e. the confirming evaluation")
 ap.add_argument("--start_epoch", nargs="*", default=[], help="per run: file with the launch epoch (run_dir/start_epoch.txt) -> end-to-end wall clock incl. startup and the step-0 eval; omitted runs start the clock at their first training step")
 args = ap.parse_args(); assert len(args.tb) == len(args.labels)
 
@@ -59,7 +59,8 @@ for i, (tb, lab) in enumerate(zip(args.tb, args.labels)):
             d = S(tag)[0] if tag in tags else {}
             if not d: continue
             y = np.minimum(np.array([d.get(s, 0.0) for s in steps]), med * 2.5)
-            axb.bar(steps, y, bottom=bottom, width=1.0, label=f"{name}: median {np.median([d.get(s,0.0) for s in steady]):.2f}s"); bottom += y
+            shown = name if (i == 0 or not tag.endswith("/gen")) else "gen = generation"
+            axb.bar(steps, y, bottom=bottom, width=1.0, label=f"{shown}: median {np.median([d.get(s,0.0) for s in steady]):.2f}s"); bottom += y
         axb.set_ylim(0, med * 2.5); axb.set_title(f"breakdown: {lab}  (gen = {'wait for sampler' if i == 0 else 'generation'})", fontsize=10)
         axb.set_xlabel("training step"); axb.set_ylabel("s"); axb.legend(fontsize=7); axb.grid(alpha=0.3)
     # panel 3: cumulative wall clock from the first step's wall_time, + time to target
@@ -73,8 +74,8 @@ for i, (tb, lab) in enumerate(zip(args.tb, args.labels)):
     vs = sorted(val)
     if args.target_rule == "first":
         hit = [s for s in vs if val[s] >= args.target]
-    else:   # rulebook convention: first of two consecutive evaluations >= target
-        hit = [a for a, b in zip(vs, vs[1:]) if val[a] >= args.target and val[b] >= args.target]
+    else:   # rulebook convention: the SECOND of two consecutive evaluations >= target (the confirming one)
+        hit = [b for a, b in zip(vs, vs[1:]) if val[a] >= args.target and val[b] >= args.target]
     if hit:
         s = hit[0]; t = (vwt[s] - t0) / 60; ax[3].scatter([s], [t], color=c, s=50, zorder=3); ax[3].annotate(f"{args.target:.2f} ({args.target_rule}) @ step {s}, {t:.0f} min", (s, t), textcoords="offset points", xytext=(6, -12), fontsize=8, color=c)
     summary.append((lab, med, p90, cum[-1], hit[0] if hit else None, origin))

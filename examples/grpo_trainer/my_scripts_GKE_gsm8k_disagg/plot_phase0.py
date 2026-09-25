@@ -243,6 +243,7 @@ def main():
   ap.add_argument("--ref_labels", nargs="*", default=[])
   args = ap.parse_args()
   refs = list(zip(args.ref_tb, args.ref_labels + [os.path.basename(os.path.normpath(t)) for t in args.ref_tb[len(args.ref_labels):]]))
+  refs = [(load_tb(path), label) for path, label in refs]      # overlay_refs() reads the loaded scalar dicts, not paths
 
   tb = load_tb(args.tb)
   agg = load_rollout(args.rollout, require_uid=not args.allow_no_uid, groups=args.groups, group_size=args.group_size)
