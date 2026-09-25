@@ -145,9 +145,12 @@ for S in 1 2 3; do
   $PY $RECIPE_DIR/check_smoke.py ${R[$S]} --steps 250 --max-worst-lag 1 > $D/check_smoke.log 2>&1 || { echo "seed $S: check_smoke FAILED (see $D/check_smoke.log)"; exit 2; }
   $PY -c "import json,sys; j=json.load(open('${R[$S]}/check_smoke.json')); assert j.get('status') == 'passed', j.get('status'); print('seed $S check_smoke:', j['status'])"
   cp ${R[$S]}/check_smoke.json $D/
-  rm -rf $D/tensorboard; cp -r ${R[$S]}/tensorboard $D/tensorboard; echo "${E[$S]}" > $D/EXPERIMENT_NAME
-  if [ "${SKIP_DUMPS:-0}" = "1" ] && [ -d $D/val_dump ] && [ -d $D/rollout_dump ]; then echo "seed $S: keeping existing dumps"; else
+  PREV=$(cat $D/EXPERIMENT_NAME 2>/dev/null || true)                    # experiment the existing package content belongs to
+  rm -rf $D/tensorboard; cp -r ${R[$S]}/tensorboard $D/tensorboard
+  if [ "${SKIP_DUMPS:-0}" = "1" ] && [ "$PREV" = "${E[$S]}" ] && [ -d $D/val_dump ] && [ -d $D/rollout_dump ]; then echo "seed $S: keeping existing dumps of ${E[$S]}"; else
+    [ "${SKIP_DUMPS:-0}" = "1" ] && echo "seed $S: existing dumps belong to '${PREV:-none}', not ${E[$S]} -> copying"
     rm -rf $D/val_dump $D/rollout_dump; cp -r ${R[$S]}/val_dump $D/val_dump; cp -r ${R[$S]}/rollout_dump $D/rollout_dump; fi
+  echo "${E[$S]}" > $D/EXPERIMENT_NAME
   test "$(ls $D/val_dump | wc -l)" = "14" && test "$(ls $D/rollout_dump | wc -l)" = "250" || { echo "seed $S: package dumps incomplete"; exit 2; }
   cp $LOG_DIR/${E[$S]}.driver.log $D/launch.log 2>/dev/null || true
 done
@@ -209,10 +212,14 @@ json.dump(res, open(H + "/band/step0_greedy_variability.json", "w"), indent=1); 
 PYX
 
 # ---------- 7. checkpoints (HF export at step 250) ----------
-if [ "${SKIP_CKPT:-0}" != "1" ]; then
-  for S in 1 2 3; do src=$CKPT_DIR/${E[$S]}/global_step_250/actor/huggingface; test -d $src || { echo "missing $src"; exit 2; }
-    rm -rf $H/checkpoints/seed${S}_step250; cp -r $src $H/checkpoints/seed${S}_step250; ( cd $H/checkpoints/seed${S}_step250 && sha256sum *.safetensors > SHA256 ); done
-fi
+for S in 1 2 3; do
+  dst=$H/checkpoints/seed${S}_step250; src=$CKPT_DIR/${E[$S]}/global_step_250/actor/huggingface
+  if [ "${SKIP_CKPT:-0}" = "1" ] && [ "$(cat $dst/EXPERIMENT_NAME 2>/dev/null)" = "${E[$S]}" ] && [ -s $dst/SHA256 ]; then echo "seed $S: keeping existing checkpoint of ${E[$S]}"; else
+    test -d $src || { echo "missing $src"; exit 2; }
+    rm -rf $dst; cp -r $src $dst; ( cd $dst && sha256sum *.safetensors > SHA256 ); echo "${E[$S]}" > $dst/EXPERIMENT_NAME; fi
+  ( cd $dst && sha256sum -c --quiet SHA256 ) || { echo "seed $S: checkpoint checksum mismatch in $dst"; exit 2; }
+  test "$(cat $dst/EXPERIMENT_NAME)" = "${E[$S]}" && test -s $dst/config.json || { echo "seed $S: checkpoint provenance/config missing"; exit 2; }
+done
 
 # ---------- 8. docs, README, manifest ----------
 for D in TPU_GPU_RL_Parity_Rulebook_gsm8k_2k_async1.md Wenjun_TPU_Parity_Guide_gsm8k_2k_async1.md; do [ -f $RECIPE_DIR/$D ] && cp $RECIPE_DIR/$D $H/; done
@@ -247,6 +254,6 @@ for f in model/model.safetensors model/MODEL_SHA256 model/model_identity.json da
          runs/seed1/check_smoke.json runs/seed2/check_smoke.json runs/seed3/check_smoke.json README.md; do
   test -s $H/$f || { echo "required file missing or empty: $H/$f"; exit 2; }
 done
-[ "${SKIP_CKPT:-0}" = "1" ] || for S in 1 2 3; do test -s $H/checkpoints/seed${S}_step250/SHA256 || { echo "checkpoint seed $S missing"; exit 2; }; done
+for S in 1 2 3; do test -s $H/checkpoints/seed${S}_step250/SHA256 && test -s $H/checkpoints/seed${S}_step250/model.safetensors || { echo "checkpoint seed $S missing"; exit 2; }; done
 ( cd $H && find . -type f ! -name PACKAGE_MANIFEST.sha256 -print0 | sort -z | xargs -0 sha256sum ) > $H/PACKAGE_MANIFEST.sha256
 ( cd $H && sha256sum -c --quiet PACKAGE_MANIFEST.sha256 ) && echo "PACKAGE OK: $(wc -l < $H/PACKAGE_MANIFEST.sha256) files -> $H" && du -sh $H
