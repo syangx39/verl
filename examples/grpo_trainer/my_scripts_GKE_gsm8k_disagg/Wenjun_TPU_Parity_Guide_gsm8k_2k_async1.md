@@ -25,9 +25,9 @@
 - 每步：128 题 × 16 条 = 2,048 条；一次 AdamW 更新；250 步。
 - 优化器：lr 2e-6，warmup 10 步（第 1 次更新 lr=0，第 2 次 2e-7 …），cosine 到 0 @250；betas (0.9, 0.999)，eps 1e-8，wd 0，全局 grad clip 1.0。
 - 优势：GRPO，组内 (R − mean)/(std + 1e-6)，样本标准差（ddof=1），广播到每个 response token；零方差组保留在分母里。
-- 损失：`−A · w · logπ_θ` 的**全批 token 均值**（分母 = 2,048 条的有效 response token 总数，含结束 token）；`w = min(exp(logπ_θ.detach() − logπ_sampler), 3.0)`，不带梯度；**`logπ_sampler` 是 sampler 自己记录的、生成该 token 时那个策略版本下的逐 token logp**；ratio ≡ 1，clip 无效；无 KL、无 entropy 项。
+- 损失：`−A · w · logπ_θ` 的**全批 token 均值**（分母 = 2,048 条的有效 response token 总数，含结束 token）；`w = min(exp(clamp(logπ_θ.detach() − logπ_sampler, −20, 20)), 3.0)`，不带梯度；**`logπ_sampler` 是 sampler 自己记录的、生成该 token 时那个策略版本下的逐 token logp**；ratio ≡ 1，clip 无效；无 KL、无 entropy 项。
 - 采样：T=1，top_k −1，top_p 1，stop `[151645, 151643]`。
-- **Reward**：`code/boxed_math_reward.py`：最后一个括号平衡的 `\boxed{}`，精确匹配 1.0 / 有框但错 0.1 / 无框 0。**训练时**再加惩罚 `−min(1, max(0, (L − 1536)/512))`（L = 生成 token 数含结束 token；1536 以下无惩罚，2048 时 −1.0）；eval 不加。
+- **Reward**：`code/boxed_math_reward.py`：最后一个括号平衡的 `\boxed{}`，精确匹配 1.0 / 有框但错 0.1 / 无框 0。**训练时**再加惩罚 `min(0, −(L − 1536)/512)`（L = 生成 token 数含结束 token；1536 以下无惩罚，2048 时 −1.0，**没有下限**——规则 fixture 里 L=2560 对应 −2.0）；eval 不加。
 - Eval：greedy，n=1，cap 2048，全量 1,319，step 0/20/…/240/250（14 次），在 sampler 池上用刚同步的权重；指标 `acc = (raw reward == 1)`。
 - 精度：fp32 master + Adam，bf16 计算/采样/KV，logp 用 fp32。
 
@@ -36,14 +36,14 @@
 用主语说清楚谁在做什么：
 
 1. **sampler** 先在 θ₀ 下生成一整批（warmup 1 批）；**trainer** 用它做第 1 次更新（staleness 0）。
-2. 之后 **sampler** 始终在生成"下一批"，**trainer** 在用"当前批"更新；**trainer** 每次更新完立刻把 θ_t 推给全部 sampler 副本（GB200 上 NCCL，0.8–1.0 s）。**sampler 不会中断正在生成的请求**：已生成的 token 保留，后面的 token 用新权重接着采。
-3. **sampler** 逐题下发（每题 16 条），完成的题组进队列；**trainer** 按完成顺序取 128 个完整题组做一次更新。
-4. 一个题组如果最老的 token 是在 **2 个以上**版本之前生成的，**trainer** 直接丢掉它（阈值 2，策略 drop），不重采、不顺延。
+2. 之后 **sampler** 始终在生成"下一批"，**trainer** 在用"当前批"更新；**trainer** 每次更新完立刻把 θ_t 推给全部 sampler 副本（GB200 上 NCCL，0.8–1.0 s）。同步时 **sampler 会中断底层引擎请求**：暂停/中止请求 → 保留已生成的 token 和逐 token logp → 清掉引擎缓存 → 载入新权重 → 从保留的前缀接着生成（前缀在新权重下重新 prefill）。**逻辑上的回答继续**（可能含两个版本的 token），**底层请求不会跨越同步**。TPU 的 sampler 要能在权重更新后从保留前缀续写（KV cache 重建，不跨版本复用）。
+3. **sampler** 逐题下发（每题 16 条），每题记录下发时的更新步号；完成的题组进队列。**trainer** 每次更新从"已完成且仍合格"的题组里取 128 个，**优先取下发步号最早的**（同一下发步内顺序不保证）。不是纯完成顺序 FIFO。
+4. 丢弃规则按**题的下发年龄**算，不按 token 的策略版本：`当前更新步 − 下发步 + 1 > 2` 的题组 **trainer** 直接丢掉（阈值 2，策略 drop），也就是一个题组只能在它下发那一步或下一步被消费；丢掉后 **sampler** 从 dataloader 补发一题。
 5. eval 时 **trainer** 等待，**sampler** 用被评估的那个 checkpoint 的权重跑 1,319 题。
 
-配置本身只保证：被消费的题组最老 token 最多落后 **2** 个版本（阈值 2），一条回答最多跨 3 个版本；跨版本回答是允许且预期的。GB200 三条 run 的**实测**（`band/summary.json`，是观测值不是保证）：被消费 token 的最大滞后 = 1（每一步都是）；**一半以上的步（136/138/144 of 250）里至少有一条回答跨了两个版本**（同步发生在它生成中途）——这是常态；丢弃 **11 / 8 / 8 组**（占 32,000 组的 0.03%，全是接近 2048 的长回答，staleness 3）。TPU 上出现 staleness 2 的题组被消费是合法的，报告分布即可。IS 权重按 token 记录、按 token 修正，所以跨版本的回答不需要特殊处理；`k3_kl`（trainer vs sampler）稳态 7e-4，15–40 步策略变化最快时升到 1.6e-3 再回落——这是滞后的唯一可见特征。
+两个计数器别混：丢弃规则用的是**下发年龄**；日志里的 `trajectory_staleness_worst = 当前更新步 − 1 − 组内最老 token 的版本号`，`trajectory_spans` = 一条回答里出现的版本数。配置本身只保证"被消费的题组是当前步或上一步下发的"，不能换算成"worst lag ≤ 2 / span ≤ 3 合法"这种说法。跨版本回答是允许且预期的。GB200 三条 run 的**实测**（`band/summary.json`，是观测值不是保证）：`staleness_worst/max` = 1（每一步都是，step 1 为 0）；**一半以上的步（136/138/144 of 250）里至少有一条回答跨了两个版本**（同步发生在它生成中途）——这是常态；丢弃 **11 / 8 / 8 组**（占 32,000 组的 0.03%，全是接近 2048 的长回答，staleness 3）。TPU 上出现 staleness 2 的题组被消费是合法的，报告分布即可。IS 权重按 token 记录、按 token 修正，所以跨版本的回答不需要特殊处理；`k3_kl`（trainer vs sampler）稳态 7e-4，15–40 步策略变化最快时升到 1.6e-3 再回落——这是滞后的唯一可见特征。
 
-TPU 侧要做到：同样的"领先一批、每次更新推权重、warmup 1、阈值 2 + drop"（必须一致的是配置）；记录每步被消费题组的 staleness 分布、每条回答的 spans、丢弃数（这些是报告项，期望和 GB200 相近，不要求相等）。如果 TPU 的 sampler 在权重更新时**不能**接着生成 in-flight 请求（只能中断重来），明确写出来：那样 spans 恒为 1、丢弃率和批次构成会变，是要记录的偏差，不是违规。
+TPU 侧要做到：同样的"领先一批、每次更新推权重、warmup 1、按下发年龄阈值 2 + drop + 补发、优先最早下发、同步后从前缀续写"（必须一致的是配置和这些行为）；记录每步被消费题组的下发年龄和 token 版本 staleness、每条回答的 spans、丢弃数（这些是报告项，期望和 GB200 相近，不要求相等）。如果 TPU 的 sampler 在权重更新后**不能**从保留前缀续写（只能整条重来或丢弃），明确写出来：那样 spans 恒为 1、丢弃率和批次构成会变，是要记录的偏差，不是违规。
 
 ## 3. 门 1 · Prompt 渲染（CPU，5 分钟）
 
@@ -76,7 +76,7 @@ for l in open("fixtures/scorer_fixture_2k.jsonl"):
     s = s["score"] if isinstance(s, dict) else s; bad += abs(s - x["expected_score"]) > 1e-6
 print("scorer fixture (800 real eval responses):", "OK" if bad == 0 else f"{bad} mismatches")
 EOF
-cat fixtures/reward_selftest_2k_penalty.log        # 训练模式惩罚：len 100→1.0, 1536→1.0, 1792→0.5, 2048→0.0
+cat fixtures/reward_selftest_2k_penalty.log        # 训练模式惩罚（正确答案）：len 100→1.0, 1536→1.0, 1792→0.5, 2048→0.0, 2560→−1.0（无下限）
 ```
 
 TPU 侧用自己的 scorer 实现跑同一份 800 条，期望分数逐条相等；再用几个长度核惩罚公式（注意 L 含结束 token、只对训练 source 生效）。
@@ -87,23 +87,29 @@ TPU 侧用自己的 scorer 实现跑同一份 800 条，期望分数逐条相等
 
 ## 6. 门 4 · 异步语义门（TPU，20 步，~10 分钟）
 
-跑 20 步（eval 关掉），每步记录并检查：
+跑 20 步（eval 关掉）。分两类：
 
-| 量 | 期望（GB200 20 步实测）|
+**脚本检查的**（GPU 上 `code/check_smoke.py --steps 20 --max-worst-lag 1 --require-no-drops`，可照着写 TPU 版）：
+
+| 量 | 检查 |
 |---|---|
-| 最坏滞后 `staleness_worst/max` | step 1 = 0，之后 ≤ 2（GB200 实测恒 1）|
-| `spans/max` | ≤ 3（GB200 实测 ≤ 2）|
+| driver 退出码 | 0 |
+| 前三次更新的 lr | 0 / 2e-7 / 4e-7（日志记的是 step 之后的值）|
+| `staleness_worst/max` | step 1 = 0，之后 ≤ 1（GB200 实测恒 1；配置上 TPU 出现 2 不算违规，报告）|
+| `spans` | 有记录（GB200 ≤ 2）|
 | 丢弃组数 | 20 步内 0 |
-| IS 权重均值 / 有效样本比例 / 超阈值比例 | ≈ 1.000 / ≥ 0.99 / ≲ 1e-5 |
-| `k3_kl`（trainer vs sampler，逐 token）| ≲ 2e-3 |
-| 前三次更新的 lr | 0 / 2e-7 / 4e-7 |
 | 权重同步 | 每步一次，每次都成功 |
 
-GPU 的 `code/check_smoke.py` 是这些检查在 GPU 日志格式上的实现，每条阈值都有注释，可以照着写 TPU 版。
+**只看不检查的诊断参考**（脚本不断言这些）：IS 权重均值 ≈ 1.000、有效样本比例 ≈ 0.9986、超阈值比例 ≈ 1e-6、`k3_kl` ≈ 7e-4（15–40 步升到 1.6e-3）。明显偏离按 rulebook 查原因。
 
 ## 7. 门 5 · Loss 合约自检（推荐，TPU，~30 分钟）
 
-这轮**没有梯度 fixture**（V1 异步 trainer 不产出逐 token logp dump，8K 包的重放工具用不上）。改为直接核合约：随便取一批，把 trainer 用到的逐 token (logπ_θ, logπ_sampler, A, mask) 导出，用 NumPy 按第 1 节公式算 loss，和 trainer 的 loss 在 bf16 误差内相等；分母 = 这一批有效 response token 总数。单前向和两遍实现的等价性（同批梯度余弦 0.99995）在 colocated 轮已验证，对这条损失不变。
+这轮**没有梯度 fixture**（V1 异步 trainer 不产出逐 token logp dump，8K 包的重放工具用不上），这道门也**不能证明和 GPU 的梯度一致**，它只是本地自检：
+
+(a) **数值**：取一次更新，导出 trainer 用到的逐 token `logp_theta`（训练 pass，fp32）、`logp_sampler`、`adv`、`mask`，用 float64 算 `w = min(exp(clip(logp_theta − logp_sampler, −20, 20)), 3)`、`loss_ref = −Σ(adv·w·logp_theta·mask) / Σmask`（整批一个全局和），和 trainer 记录的这次更新的 loss 比。**容差待 GPU 侧校准后再作为判据**（我们加上 trainer 的逐 token 导出后会发布 GPU 实测的相对偏差），现在先报告数值。
+(b) **梯度路径**：数值相等抓不到 w 忘了 detach。在小 batch 上用 autograd 求 ∂loss/∂logp_theta，逐 token 应恰好等于 `−adv·w·mask/Σmask`；w 没 detach 时会变成 `−adv·w·(1 + logp_theta)·mask/Σmask`。
+
+colocated 轮测的单前向 = 两遍（同批梯度余弦 0.99995）只对那条 V0 路径成立。
 
 ## 8. 门 6 · 三条 250 步 run
 
@@ -112,7 +118,7 @@ seed 1、2、3，各 250 步，eval 在 14 个点。GB200 参考（`band/summary
 | | seed 1 | seed 2 | seed 3 |
 |---|---|---|---|
 | step 0 → 250 | 0.7066 → 0.8317 | 0.7066 → 0.8271 | 0.7028 → 0.8234 |
-| 连续两次 ≥ 0.80 的确认步 | 80 | 100 | 100 |
+| 连续两次 ≥ 0.80 的第二次（确认步）| 80 | 100 | 100 |
 | 稳态步时（中位 / p90）| 7.16 / 10.07 s | 7.34 / 9.53 s | 7.22 / 10.25 s |
 | 端到端 250 步 | 59.4 min | 59.2 min | 59.3 min |
 | 丢弃组 / spans=2 的步数 | 11 / 136 | 8 / 138 | 8 / 144 |
@@ -130,7 +136,9 @@ band 宽度 median 2.0 pp、p90 2.5 pp、max 2.9 pp；终点 mean 0.8274 [0.8234
 - **在训练卡上顺手起 rollout**：不允许（GB200 明确关掉了 hybrid rollout）；训练池和采样池分开。
 - **`logπ_sampler` 用 trainer 重算**：那样 IS 权重恒为 1，滞后完全没被修正；必须用 sampler 生成时记录的逐 token 值。
 - **按整条回答取一个版本的 logp**：跨版本的回答前后半段来自不同策略，逐 token 才对。
-- **阈值/丢弃策略改了**：阈值 3 或"顺延到下一批"都是另一个 recipe，要重跑参考。
+- **阈值/丢弃策略改了**：阈值 3、"顺延到下一批"、丢弃后不补发，都是另一个 recipe，要重跑参考。
+- **取组顺序按纯完成顺序 FIFO**：源码是"优先最早下发"，纯 FIFO 会改变批次构成，要么照做要么写明偏差。
+- **同步时把 in-flight 回答整条重来**：GB200 是保留前缀续写；整条重来 spans 恒 1、丢弃率变，写明偏差。
 - **惩罚用到 eval 上**或 **L 不含结束 token**：门 2 会抓到，但只有你跑了惩罚自检才会。
 - **按长度排序/分桶下发 prompt**：会系统性改变 staleness 和批次构成；下发顺序只能是 seeded shuffle。
 - **eval 时不等 trainer**：要用被评估的那个 checkpoint 的权重，sampler 上的权重版本要和 step 号对上。
