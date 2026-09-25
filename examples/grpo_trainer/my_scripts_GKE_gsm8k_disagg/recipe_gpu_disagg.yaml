@@ -28,7 +28,7 @@ data:
   shuffle: true
   validation_shuffle: false
   seed: ${oc.decode:${oc.env:SEED,1}}
-  dataloader_num_workers: 2
+  dataloader_num_workers: 0
 
 algorithm:
   adv_estimator: grpo
@@ -56,7 +56,8 @@ actor_rollout_ref:
     ppo_mini_batch_size: 128
     ppo_epochs: 1
     ppo_micro_batch_size_per_gpu: 8
-    use_dynamic_bsz: false
+    use_dynamic_bsz: true
+    ppo_max_token_len_per_gpu: 32768   # dynamic batching budget (prompt+response tokens) per GPU; profile B
     data_loader_seed: ${data.seed}
     loss_agg_mode: token-mean
     policy_loss:
@@ -102,7 +103,7 @@ actor_rollout_ref:
   rollout:
     name: vllm
     mode: async
-    nnodes: 12
+    nnodes: 8
     n_gpus_per_node: 4
     tensor_model_parallel_size: 1
     data_parallel_size: 1
@@ -169,7 +170,7 @@ trainer:
     sampler:
       max_off_policy_threshold: 2
       max_off_policy_strategy: drop
-  nnodes: 4
+  nnodes: 8
   n_gpus_per_node: 4
   balance_batch: true
   total_epochs: 100
@@ -209,7 +210,8 @@ ray_kwargs:
         PYTHONPATH: ${oc.env:VERL_REPO}:${oc.env:RECIPE_DIR}
         PYTHONNOUSERSITE: "1"
         VERL_PLATFORM: nvidia
-        VLLM_USE_V1: "1"
+        VLLM_NO_USAGE_STATS: "1"   # 48 vLLM workers appending usage_stats.json on gcsfuse -> stale file handles
+        DO_NOT_TRACK: "1"
         PYTHONHASHSEED: ${oc.env:SEED,1}
         TENSORBOARD_DIR: ${oc.env:TB_DIR}
         REWARD_FORMAT_SCORE: "0.1"
