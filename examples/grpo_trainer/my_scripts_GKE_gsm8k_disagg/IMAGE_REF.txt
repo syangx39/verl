@@ -1,1 +1,1 @@
-us-central1-docker.pkg.dev/supercomputer-testing/pirillo-gcr/verl-disagg-cu130-arm64@sha256:<digest>
+us-central1-docker.pkg.dev/supercomputer-testing/pirillo-gcr/verl-disagg-cu130-arm64@sha256:70e1f1ed758188fd7e17716f5cb697d93fbd22ed4760613d6b97fed58eda571d
