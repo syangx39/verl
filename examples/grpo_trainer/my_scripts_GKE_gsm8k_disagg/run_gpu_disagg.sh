@@ -87,7 +87,14 @@ if [[ ${DISAGG_IMAGE_MODE:-0} == 1 ]]; then
 else
   cp "$(cat "$RECIPE_DIR/ENV_MANIFEST_PATH")" "$RUN_DIR/environment_manifest.json"
 fi
-echo "[recipe] trainer=16 rollout=48 fsdp2/vllm TP=1 batch=128x16 mu=1 cap=2048 penalty=train-only TIS=token/3 detached single-forward"
+"$DISAGG_PYTHON" - "$RUN_DIR/resolved_config.yaml" <<'PYREC'
+import sys, yaml
+c = yaml.safe_load(open(sys.argv[1]))
+t = c["trainer"]["nnodes"] * c["trainer"]["n_gpus_per_node"]; r = c["actor_rollout_ref"]["rollout"]["nnodes"] * c["actor_rollout_ref"]["rollout"]["n_gpus_per_node"]
+a = c["actor_rollout_ref"]["actor"]
+batching = f"dynbsz={a['ppo_max_token_len_per_gpu']}tok/gpu" if a["use_dynamic_bsz"] else f"micro={a['ppo_micro_batch_size_per_gpu']}/gpu"
+print(f"[recipe] trainer={t} rollout={r} {a['strategy']}/vllm TP={c['actor_rollout_ref']['rollout']['tensor_model_parallel_size']} batch={c['data']['train_batch_size']}x{c['actor_rollout_ref']['rollout']['n']} mu=1 {batching} cap={c['data']['max_response_length']} penalty=train-only TIS=token/{c['algorithm']['rollout_correction']['rollout_is_threshold']} detached single-forward")
+PYREC
 echo "[recipe] lr=2e-6 warmup=10 cosine steps=$TOTAL_STEPS seed=$SEED sync=1 threshold=2/drop eval=1319"
 echo "[run_dir] $RUN_DIR"
 if [[ ${PREFLIGHT_ONLY:-0} == 1 ]]; then

@@ -25,9 +25,6 @@ def main():
         "trainer.v1.separate_async.hybrid_rollout.enable_switch": False,
         "trainer.v1.sampler.max_off_policy_threshold": 2,
         "trainer.v1.sampler.max_off_policy_strategy": "drop",
-        "trainer.nnodes": 4, "trainer.n_gpus_per_node": 4,
-        "actor_rollout_ref.rollout.nnodes": 12,
-        "actor_rollout_ref.rollout.n_gpus_per_node": 4,
         "actor_rollout_ref.hybrid_engine": False,
         "data.train_batch_size": 128, "data.gen_batch_size": 1,
         "data.max_response_length": 2048, "data.max_prompt_length": 512,
@@ -39,8 +36,6 @@ def main():
         "actor_rollout_ref.actor.strategy": "fsdp2",
         "actor_rollout_ref.actor.ppo_mini_batch_size": 128,
         "actor_rollout_ref.actor.ppo_epochs": 1,
-        "actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu": 8,
-        "actor_rollout_ref.actor.use_dynamic_bsz": False,
         "actor_rollout_ref.actor.loss_agg_mode": "token-mean",
         "actor_rollout_ref.actor.policy_loss.loss_mode": "bypass_mode",
         "algorithm.rollout_correction.bypass_mode": True,
@@ -87,6 +82,22 @@ def main():
         got = OmegaConf.select(c, key, default="<missing>")
         assert got == want, f"{key}: {got!r} != {want!r}"
     assert c.actor_rollout_ref.actor.policy_loss.rollout_correction == c.algorithm.rollout_correction
+    # Topology / trainer-batching profiles (performance configuration, Tier 3: same objective, different step time).
+    # baseline: 16 trainer / 48 rollout, fixed micro-batch 8;  A: 16/48 + dynamic batching;  B: 32/32 + dynamic batching.
+    t_nodes, t_gpn = int(c.trainer.nnodes), int(c.trainer.n_gpus_per_node)
+    r_nodes, r_gpn = int(c.actor_rollout_ref.rollout.nnodes), int(c.actor_rollout_ref.rollout.n_gpus_per_node)
+    dyn = bool(c.actor_rollout_ref.actor.use_dynamic_bsz)
+    assert t_gpn == 4 and r_gpn == 4, f"GB200 nodes have 4 GPUs: trainer {t_gpn}, rollout {r_gpn}"
+    assert t_nodes * t_gpn + r_nodes * r_gpn == 64, f"trainer+rollout must use all 64 GPUs: {t_nodes * t_gpn}+{r_nodes * r_gpn}"
+    profiles = {"baseline": (4, 12, False), "A": (4, 12, True), "B": (8, 8, True)}
+    profile = next((k for k, v in profiles.items() if v == (t_nodes, r_nodes, dyn)), None)
+    assert profile is not None, f"unsupported topology/batching: trainer_nodes={t_nodes} rollout_nodes={r_nodes} use_dynamic_bsz={dyn}; allowed {profiles}"
+    if dyn:
+        assert int(c.actor_rollout_ref.actor.ppo_max_token_len_per_gpu) == 32768, "dynamic batching budget must be 32768 tokens (prompt+response) per GPU"
+    else:
+        assert int(c.actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu) == 8, "fixed micro-batch must be 8 per GPU"
+    print(f"[preflight] profile {profile}: trainer pool {t_nodes * t_gpn} GPUs, rollout pool {r_nodes * r_gpn} GPUs, "
+          f"{'dynamic batching 32768 tok/GPU' if dyn else 'fixed micro-batch 8'}")
     steps = c.trainer.total_training_steps
     sync_steps = c.trainer.v1.separate_async.parameter_sync_step
     assert isinstance(steps, int) and steps > 0, f"Invalid total_training_steps: {steps!r}"
