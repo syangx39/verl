@@ -120,8 +120,10 @@ def load_rollout(rollout_dir, require_uid=True, groups=256, group_size=8):
           key = ("input", r.get("input", ""))
         groups_[key].append((a, sc))
         n += 1; acc += a; fmt += fm; chars += len(r.get("output", ""))
-        ssum += sc; lpsum += float(r.get("length_penalty", 0.0))
-        tmo += float(r.get("mv_timeout", 0)); exc += float(r.get("mv_exc", 0)); lrj += float(r.get("mv_lenrej", 0))
+        ssum += sc; lpsum += float(r["length_penalty"]) if "length_penalty" in r else np.nan
+        tmo += float(r["mv_timeout"]) if "mv_timeout" in r else np.nan
+        exc += float(r["mv_exc"]) if "mv_exc" in r else np.nan
+        lrj += float(r["mv_lenrej"]) if "mv_lenrej" in r else np.nan
     if n == 0:
       continue
     sizes = [len(g) for g in groups_.values()]
@@ -192,6 +194,20 @@ def tb_get(tb, tag):
   return tb.get(tag, (np.array([]), np.array([])))
 
 
+
+REF_STYLE = [dict(color="#7f7f7f", ls="--", lw=1.1), dict(color="#bdbdbd", ls="--", lw=1.1), dict(color="#525252", ls=":", lw=1.1)]
+
+def overlay_refs(ax, refs, tags, label_suffix="", transform=None, marker=None):
+  """Draw the first available tag of each reference run as a grey dashed line."""
+  for k, (rtb, rlab) in enumerate(refs):
+    for tag in tags:
+      st, v = tb_get(rtb, tag)
+      if len(st):
+        if transform is not None:
+          v = transform(np.asarray(v))
+        ax.plot(st, v, marker=marker, markersize=3, label=f"{rlab}{label_suffix}", **REF_STYLE[k % len(REF_STYLE)])
+        break
+
 def tb_find(tb, prefix, suffix):
   """All tags of the form <prefix><ds><suffix>, returned as {ds: (steps, vals)}.
 
@@ -223,7 +239,10 @@ def main():
   ap.add_argument("--out", default="phase0.png")
   ap.add_argument("--ma", type=int, default=5)
   ap.add_argument("--title", default="")
+  ap.add_argument("--ref_tb", nargs="*", default=[], help="TensorBoard dirs of reference runs to overlay (grey dashed) on the TB-based panels")
+  ap.add_argument("--ref_labels", nargs="*", default=[])
   args = ap.parse_args()
+  refs = list(zip(args.ref_tb, args.ref_labels + [os.path.basename(os.path.normpath(t)) for t in args.ref_tb[len(args.ref_labels):]]))
 
   tb = load_tb(args.tb)
   agg = load_rollout(args.rollout, require_uid=not args.allow_no_uid, groups=args.groups, group_size=args.group_size)
@@ -247,20 +266,23 @@ def main():
       ax.plot(x, agg["acc"], color="#9ecae1", lw=1, label="acc per step (rollout dump)")
       ax.plot(x, moving_mean(agg["acc"], args.ma), color="#08519c", lw=2, label=f"acc {args.ma}-step mean")
     ax.plot(x, agg["score"], color="#e6550d", lw=1, ls="--", label="actual reward per step (dump mean score)")
+    overlay_refs(ax, refs, ("critic/score/mean",), " critic/score/mean")
     if not has_acc:
       ax.plot(x, moving_mean(agg["score"], args.ma), color="#08519c", lw=2, label=f"reward {args.ma}-step mean (dump has no acc field)")
     if len(s_step):
       ax.plot(s_step, s_val, color="#fd8d3c", lw=1, ls=":", label="TB critic/score/mean (cross-check)")
+    qty = "acc" if has_acc else "reward"        # what the summary line and the title describe
     lo, hi = first_last(agg["acc"] if has_acc else agg["score"])
     sl, ci = ols_slope(x, agg["acc"] if has_acc else agg["score"])
-    summary.append(f"train acc   : first5={lo:.3f} last5={hi:.3f}  slope/100steps={sl:+.4f} ±{ci:.4f}")
+    summary.append(f"train {qty:<6}: first5={lo:.3f} last5={hi:.3f}  slope/100steps={sl:+.4f} ±{ci:.4f}" + ("" if has_acc else "  [dump has no acc field: reward incl. penalty]"))
     lo, hi = first_last(agg["score"])
     summary.append(f"train reward: first5={lo:.3f} last5={hi:.3f}  (actual training reward)")
     lo, hi = first_last(agg["length_penalty"])
     summary.append(f"length_pen  : first5={lo:+.3f} last5={hi:+.3f}  (mean per sample, <= 0)")
-    ax.set_title(f"train acc vs actual reward ({args.groups * args.group_size} samples/step)")
+    ax.set_title(f"train {'acc vs actual reward' if has_acc else 'reward (score incl. penalty; no acc field in dump)'} ({args.groups * args.group_size} samples/step)")
   elif len(s_step):
     ax.plot(s_step, s_val, color="#9ecae1", lw=1, label="critic/score/mean")
+    overlay_refs(ax, refs, ("critic/score/mean",), " critic/score/mean")
     ax.plot(s_step, moving_mean(s_val, args.ma), color="#08519c", lw=2, label=f"{args.ma}-step mean")
     lo, hi = first_last(s_val)
     sl, ci = ols_slope(s_step, s_val)
@@ -285,6 +307,7 @@ def main():
     if ds.startswith("num_turns"):
       continue
     ax.plot(st, vals, marker="o", lw=2, label=f"{ds} acc (greedy)")
+    overlay_refs(ax, refs, (f"val-core/{ds}/acc/mean@1", f"val-aux/{ds}/acc/mean@1"), " acc", marker="o")
     lo, hi = first_last(vals, 1)
     sl, ci = ols_slope(st, vals)
     summary.append(f"eval {ds:<8}: first={lo:.3f} last={hi:.3f}  slope/100steps={sl:+.4f} ±{ci:.4f}  (n_evals={len(st)})")
@@ -336,6 +359,7 @@ def main():
   st, v = tb_get(tb, "response_length/mean")
   if len(st):
     ax.plot(st, v, color="#08519c", lw=1.5, label="response_length/mean")
+    overlay_refs(ax, refs, ("response_length/mean",), " length")
     ax.set_ylabel("tokens")
   st2, v2 = tb_get(tb, "response_length/clip_ratio")
   if len(st2):
@@ -363,6 +387,7 @@ def main():
     st, v = tb_get(tb, ent_tag)
   if len(st):
     ax.plot(st, v, color="#08519c", lw=1.5, label=ent_tag)
+    overlay_refs(ax, refs, ("actor/entropy", "actor/entropy_loss"), " entropy")
     ax.set_ylabel("entropy (nats/token)")
     ax.set_yscale("log")
     lo, hi = first_last(v)
@@ -413,6 +438,8 @@ def main():
         break
     if len(st):
       ax.plot(st, v, color=c, lw=1.5, label=lab)
+      if "k3_kl" in tag:
+        overlay_refs(ax, refs, ("actor/rollout_corr/k3_kl", "rollout_corr/k3_kl"), " k3_kl")
       got = True
       lo, hi = first_last(v)
       summary.append(f"{tag:<34}: first5={lo:.4f} last5={hi:.4f}")
