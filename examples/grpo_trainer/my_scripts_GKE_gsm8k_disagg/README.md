@@ -1,4 +1,4 @@
-# GPU disaggregated-async GSM8K reference — recipe `gsm8k_2k_async1`
+# GPU disaggregated-async GSM8K reference — recipe `gsm8k_2k_async1` (operator notes)
 
 The GB200 baseline requested by the TPU TorchTitan team: Qwen3-0.6B (post-trained), GSM8K, response cap 2,048 with the overlong penalty,
 GRPO with single-forward REINFORCE and a truncated importance weight (the colocated `gsm8k_2k_v1` algorithm), run **disaggregated and
@@ -14,7 +14,7 @@ Three seeds × 250 steps are done and packaged. Semantics, gates, reference numb
 | confirming eval ≥ 0.80 (second of two consecutive) | step 80 | step 100 | step 100 |
 | steady step time, median / p90 (steps 20–250 excl. eval/ckpt) | 7.16 / 10.07 s | 7.34 / 9.53 s | 7.22 / 10.25 s |
 | end to end, 250 steps incl. startup, 14 evals, 5 checkpoints | 59.4 min | 59.2 min | 59.3 min |
-| worst-case consumed staleness / max span / dropped groups | 1 / 2 / 11 | 1 / 2 / 8 | 1 / 2 / 8 |
+| observed worst consumed staleness / max span / dropped groups (config allows staleness ≤ 2) | 1 / 2 / 11 | 1 / 2 / 8 | 1 / 2 / 8 |
 
 Final mean 0.8274 [0.8234, 0.8317]; band width across the 14 checkpoints median 2.0 pp, max 2.9 pp. Colocated `gsm8k_2k_v1` on the same
 64 GB200 (context): 14.1 s/step, 71.0 / 69.9 min end to end, final 0.8226 / 0.8180. Figures: `band/` in the package (3-seed band,
