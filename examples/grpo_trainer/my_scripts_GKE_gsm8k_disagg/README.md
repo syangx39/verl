@@ -1,131 +1,94 @@
-# Wenjun GPU disaggregated GSM8K recipe — candidate v1.1
+# GPU disaggregated-async GSM8K reference — recipe `gsm8k_2k_async1`
 
-This is a **new GPU baseline candidate**, using the learning settings of the successful 2K synchronous runs. Its asynchronous learning curve and speed have **not** been measured. Wenjun's TorchTitan + verl + torchtpuvllm stack can subsequently target the measured GPU result.
+The GB200 baseline requested by the TPU TorchTitan team: Qwen3-0.6B (post-trained), GSM8K, response cap 2,048 with the overlong penalty,
+GRPO with single-forward REINFORCE and a truncated importance weight (the colocated `gsm8k_2k_v1` algorithm), run **disaggregated and
+asynchronously** on 64 GB200: **32 trainer GPUs + 32 rollout GPUs (profile B)**, sampler one batch ahead, weights pushed after every update.
+Three seeds × 250 steps are done and packaged. Semantics, gates, reference numbers and the comparison rule are in
+`TPU_GPU_RL_Parity_Rulebook_gsm8k_2k_async1.md`; the TPU-side procedure is `Wenjun_TPU_Parity_Guide_gsm8k_2k_async1.md`.
 
-| Item | Setting |
+## Results (three seeds, `band/summary.json` in the package)
+
+| | seed 1 | seed 2 | seed 3 |
+|---|---|---|---|
+| GSM8K test acc, step 0 → 250 (greedy, 1,319) | 0.7066 → **0.8317** | 0.7066 → **0.8271** | 0.7028 → **0.8234** |
+| confirming eval ≥ 0.80 (second of two consecutive) | step 80 | step 100 | step 100 |
+| steady step time, median / p90 (steps 20–250 excl. eval/ckpt) | 7.16 / 10.07 s | 7.34 / 9.53 s | 7.22 / 10.25 s |
+| end to end, 250 steps incl. startup, 14 evals, 5 checkpoints | 59.4 min | 59.2 min | 59.3 min |
+| worst-case consumed staleness / max span / dropped groups | 1 / 2 / 11 | 1 / 2 / 8 | 1 / 2 / 8 |
+
+Final mean 0.8274 [0.8234, 0.8317]; band width across the 14 checkpoints median 2.0 pp, max 2.9 pp. Colocated `gsm8k_2k_v1` on the same
+64 GB200 (context): 14.1 s/step, 71.0 / 69.9 min end to end, final 0.8226 / 0.8180. Figures: `band/` in the package (3-seed band,
+disagg-vs-colocated curves, step-time decomposition, per-seed six-panel diagnostics).
+
+## Source and environment (frozen)
+
+- verl: upstream `verl-project/verl` @ `ace775e87d8765bcdd114aac734ab71da5367a0f` (`VERL_PIN.txt`; hybrid_engine=False support in
+  `separate_async`, standalone-rollout memory budget). No fork, no patches.
+- Container: `IMAGE_REF.txt` — derived by `Dockerfile` / `build_and_push.sh` from `verlai/verl:uv-cu130-arm64` (the base ships a prefetched uv
+  cache, not a venv): the pinned commit is cloned to `/workspace/verl-pin` and its own `uv.lock` installed into `/workspace/verl-pin/.venv`
+  (Python 3.12, Torch 2.13.0+cu130, vLLM 0.29.0, Transformers 5.12.1, TransferQueue 0.1.10, FlashAttention 2.8.3), verified by
+  `verify_venv_lock.py` at build time (`uv export` for the enabled extras, marker-aware; imports flash_attn and the V1 async trainer).
+  Build on an arm64 machine (`bash build_and_push.sh`), then set the digest in the RayCluster manifest (4 places: `image:` ×2, `DISAGG_IMAGE` ×2).
+- Cluster: `examples/grpo_trainer/my_scripts_GKE/verl-qwen3-raycluster.yaml` — venv on PATH, `PYTHONPATH=/workspace/verl-pin:<recipe dir>`,
+  `DISAGG_IMAGE_MODE=1` (launcher verifies the venv against `uv.lock` instead of a prepare_env manifest). `prepare_env.py` is only for a
+  venv-on-nodes setup without the image and is not used for the reference runs.
+
+## Files
+
+| file | role |
 |---|---|
-| Hardware | 64 GB200: trainer 4 nodes × 4 GPUs; rollout 12 nodes × 4 GPUs |
-| Stack | verl V1 `separate_async`, FSDP2 trainer, vLLM rollout; TP=1 |
-| Pool separation | `hybrid_engine=false`; no borrowing trainer GPUs for rollout |
-| Model | Existing Qwen3-0.6B post-trained model; verify the shipped EOS IDs |
-| Data | Existing Meta boxed GSM8K parquet: 7,473 train / full 1,319 test |
-| Prompt / response cap | 512 / 2,048 tokens; stop IDs 151643 and 151645 |
-| Reward | Correct boxed answer: 1; wrong nonempty boxed answer: 0.1; otherwise 0 |
-| Overlong penalty | Training only: 0 through 1,536 tokens, linear to −1 at 2,048; evaluation uses raw reward |
-| Batch | 128 prompt groups × 16 responses = 2,048 completions/update |
-| Update | One minibatch, one epoch (μ=1); fixed microbatch 8/GPU |
-| Advantage / loss | GRPO sample std (ddof=1), epsilon 1e-6; global token mean; EOS included |
-| Correction | Detached token TIS, upper cap 3; no weight normalization or rejection sampling |
-| Forward path | REINFORCE + TIS; skip separate old-policy log-prob inference |
-| Optimizer | AdamW, LR 2e-6, betas .9/.999, eps 1e-8, weight decay 0, gradient clip 1, fused=false |
-| Schedule | 10 warmup steps, cosine over 250 steps; zero-indexed schedule |
-| Precision | FP32 master weights, BF16 compute, FP32 gradient reduction |
-| Sampling | T=1, top_p=1, top_k=−1; no dynamic group filtering |
-| KL / entropy coefficients | Both 0; entropy still measured |
-| Async controls | Synchronize weights each update; one warmup batch; threshold=2, strategy=drop |
-| Eval / checkpoint | Greedy n=1; eval at 0,20,…,240,250; checkpoint every 50 plus final |
-| Seeds | Start seed 1; run seeds 2 and 3 after the candidate learns, for a three-seed reference |
+| `recipe_gpu_disagg.yaml` | the recipe (Tier 1 + Tier 2 + the chosen profile B knobs: `trainer.nnodes 8`, `rollout.nnodes 8`, `use_dynamic_bsz true`, `ppo_max_token_len_per_gpu 32768`, `dataloader_num_workers 0`, `VLLM_NO_USAGE_STATS`/`DO_NOT_TRACK` in the Ray env) |
+| `run_gpu_disagg.sh` | launcher: venv check, pin check, preflight, `[recipe]` line from the resolved config, run dir with command/config/logs; passes every `${oc.env:…}` of `ray_kwargs` as literal overrides (upstream `main_ppo` does not resolve them) |
+| `preflight.py` | 60+ frozen fields, data checks, 16-node CUDA probe, profile check (baseline 16/48 fixed micro-batch, A 16/48 dyn, B 32/32 dyn — B is the reference) |
+| `boxed_math_reward.py`, `boxed_reward_v1.py` | scorer (shared with the Meta round) and the V1 reward-manager adapter passing the true response length |
+| `check_smoke.py` | post-run checks: LR sequence, TIS stats, staleness/spans, evictions (`--max-worst-lag 1`, `--require-no-drops`) |
+| `plot_phase0.py`, `plot_step_time.py` | six-panel diagnostics (V1 dumps: grouped by prompt uuid, accuracy not inferred from the penalized score) and step-time / wall-clock figures |
+| `package_gsm8k_2k_async1.sh` | assembles and self-verifies the handoff package |
+| `Dockerfile`, `build_and_push.sh`, `verify_venv_lock.py`, `VERL_PIN.txt`, `IMAGE_REF.txt` | image build and provenance |
 
-The threshold bounds prompt dispatch age according to this implementation, **not an exact one-version bound on every generated token**. This candidate explicitly allows mixed-version partial rollouts: synchronization aborts requests and generation continues under the new weights, retaining the sampler log-probs for previously generated tokens. Record newest-version staleness, **oldest-version staleness** (`trajectory_staleness_worst`), trajectory version spans, dropped prompt groups and TIS ratio statistics. Native span summaries are min/mean/max, not a histogram. This is not a clean one-step-lag recipe. A clean-trajectory variant would require different synchronization behavior and verification of span=1 and worst lag<=1.
-
-The asynchronous loss is `−mean_valid_tokens(A * stop_gradient(min(exp(clamp(logp_current − logp_sampler, −20, 20)), 3)) * logp_current)`. The numerator uses the training forward, while the denominator comes from the sampler for each generated token. Activation checkpointing can recompute activations; “single forward” refers to removing the separate old-log-prob inference pass.
-
-## 1. Source and environment
-
-Pinned source: **verl 0.10.0.dev**, [`jialei777/verl-upstream@9924801779415f86c807b5716a3d4479fa60f811`](https://github.com/jialei777/verl-upstream/tree/9924801779415f86c807b5716a3d4479fa60f811). This is a development snapshot, not a released 0.10.0. The same V1 controller has a [GPU FSDP2 separate-async example](https://github.com/jialei777/verl-upstream/blob/9924801779415f86c807b5716a3d4479fa60f811/tests/special_e2e/run_v1_separate_async.sh).
-
-The pinned GPU lock uses Python 3.12, Torch 2.11/CUDA 13, vLLM 0.24 and Transformers 5.9. This is a software-stack change from the previous Meta runs. Keep the old checkout and environment for those results. The setup script creates a node-local environment at `/tmp/verl-disagg-venv-9924801` (source checkout at `/tmp/verl-disagg-src-9924801`), uses the GPU dependency lock, and explicitly overlays the **running cluster's exact Ray build**. It never restarts Ray. The manifest records that overlay; do not claim an unmodified full lock when Ray differs from 2.55.1.
-
-Prerequisites: an existing idle Ray cluster with 16 four-GPU nodes; Python 3.12 and matching Ray on all nodes; the same shared `/workspace/meta-RL` paths visible on the head and workers. Downloads need GitHub/PyPI/wheelhouse access. Environment preparation uses substantial node-local disk and is outside run timing. The per-node CUDA probe will reject an incompatible driver; a driver/image change is outside this script.
-
-Put the downloaded archive on the Ray head at `/workspace/meta-RL/wenjun_gpu_disagg_recipe.tar.gz`, then run:
+## Running
 
 ```bash
-source /workspace/setup_env.sh
-export RAY_ADDRESS=auto
-export VERL_REPO=/tmp/verl-disagg-src-9924801       # node-local; prepare_env.py clones the pinned commit here on every node
-export DISAGG_VENV=/tmp/verl-disagg-venv-9924801    # separate from the source checkout
-export RECIPE_DIR=/workspace/meta-RL/recipes/wenjun_recipe
-export MODEL_PATH=/workspace/meta-RL/models/Qwen3-0.6B
-export DATA_DIR=/workspace/meta-RL/data/gsm8k_boxed
-export LOG_DIR=/workspace/meta-RL/logs/wenjun_disagg
-export CKPT_DIR=/workspace/meta-RL/ckpt/wenjun_disagg
-export DISAGG_PYTHON=$DISAGG_VENV/bin/python
-mkdir -p /workspace/meta-RL/recipes "$LOG_DIR" "$CKPT_DIR"
-tar -xzf /workspace/meta-RL/wenjun_gpu_disagg_recipe.tar.gz -C /workspace/meta-RL/recipes
-
-# No shared checkout: a git working tree on the gcsfuse mount is not usable from 16 nodes at once (stale caches,
-# SIGBUS on mmap'd git files, symlinks unrepresentable). prepare_env.py clones the pinned commit node-locally instead.
-# Use the current image's Python here. Prepares all live nodes, including head.
-set -o pipefail
-python3 -u "$RECIPE_DIR/prepare_env.py" --repo "$VERL_REPO" --venv "$DISAGG_VENV" --bundle "$RECIPE_DIR" \
-  2>&1 | tee "$LOG_DIR/prepare_env.log"
+source /workspace/setup_env.sh                       # RECIPE_DIR, VERL_REPO=/workspace/verl-pin, DISAGG_PYTHON, DISAGG_IMAGE, LOG_DIR, CKPT_DIR, MODEL_PATH, DATA_DIR
+PREFLIGHT_ONLY=1 SEED=1 EXPERIMENT_NAME=preflight_$(date -u +%Y%m%d_%H%M%S) bash $RECIPE_DIR/run_gpu_disagg.sh      # [preflight] profile B … OK; no training launched
+# 3-step smoke, then a 20-step check with eval/ckpt on:
+SEED=1 TOTAL_STEPS=3  TEST_FREQ=-1 SAVE_FREQ=-1 VAL_BEFORE_TRAIN=false bash $RECIPE_DIR/run_gpu_disagg.sh
+SEED=1 TOTAL_STEPS=20 TEST_FREQ=20 SAVE_FREQ=20 VAL_BEFORE_TRAIN=true  bash $RECIPE_DIR/run_gpu_disagg.sh
+$DISAGG_PYTHON $RECIPE_DIR/check_smoke.py $(cat $LOG_DIR/latest_seed1.txt) --steps 20 --max-worst-lag 1 --require-no-drops
+# reference run (defaults: 250 steps, eval every 20 + 250, checkpoint every 50):
+SEED=1 nohup bash $RECIPE_DIR/run_gpu_disagg.sh > $LOG_DIR/seed1.driver.log 2>&1 &
 ```
 
-Require exit code 0 and an environment manifest with `ok=true`. Preparation verifies Python 3.12, Ray>=2.41 with the `py_executable` plugin, matching Ray builds, and dependency imports. The **CUDA execution probe is in preflight**, not preparation. On a custom Ray build, provide `--ray-wheel /shared/path/to/exact-ray.whl`. After worker pods are recreated, rerun preparation because `/tmp` is node-local. `prepare_env.py --check` verifies all environments without installing. Do not use plain `uv run` afterward: it can replace the preserved Ray version with the lock's version.
+All profile-B settings are in the YAML: do **not** pass `+ray_kwargs…VLLM_NO_USAGE_STATS` / `DO_NOT_TRACK` or the dynamic-batching /
+topology overrides on the command line any more (Hydra rejects `+key` for keys that already exist; the YAML already holds them). Other
+profiles for performance experiments only: `trainer.nnodes=4 actor_rollout_ref.rollout.nnodes=12 actor_rollout_ref.actor.use_dynamic_bsz=false` (baseline).
 
-## 2. Three-step smoke, using the full 16/48 topology
+Expected per step in the driver log: `training/off_policy/trajectory_staleness_worst/max` 0 at step 1 then 1; `trajectory_spans/max` ≤ 2;
+`actor/rollout_corr/rollout_is_mean` ≈ 1.000, `rollout_is_eff_sample_size` ≈ 0.9986, `k3_kl` ≈ 7e-4 (up to ≈ 1.6e-3 during steps 15–40);
+`actor/lr` is logged after `scheduler.step()` (2e-7 at step 1 means update 1 used 0). `evicted_samples` appears only when a group older
+than 2 policy versions is dropped (≈ 10 per 250 steps).
+
+## Topology / batching selection (20-step trials, steps 11–19, median / p90 step time)
+
+| profile | trainer / rollout GPUs | batching | step | update_actor | trainer waiting for sampler |
+|---|---|---|---|---|---|
+| baseline | 16 / 48 | fixed micro-batch 8 | 13.0 / 13.5 s | 9.7 / 10.5 s | 0.09 / 0.09 s |
+| A | 16 / 48 | dynamic 32,768 tok/GPU | 6.8 / 12.8 s | 3.6 / 8.9 s | 0.08 / 2.1 s |
+| **B (reference)** | **32 / 32** | dynamic 32,768 tok/GPU | **7.0 / 8.8 s** | 2.9 / 5.0 s | 0.07 / 2.1 s |
+
+Dynamic batching removed the trainer bottleneck (MFU ≈ 2 % at fixed micro-batch 8); 32/32 has the same median as A with a much tighter tail.
+
+## Packaging
 
 ```bash
-ray status
-# Expect 0/64 GPU used. Run the smoke in the foreground.
-SEED=1 EXPERIMENT_NAME=disagg_smoke_$(date -u +%Y%m%d_%H%M%S) \
-TOTAL_STEPS=3 TEST_FREQ=-1 SAVE_FREQ=-1 VAL_BEFORE_TRAIN=false \
-  bash "$RECIPE_DIR/run_gpu_disagg.sh" 2>&1 | tee "$LOG_DIR/smoke.log"
-
-SMOKE_DIR=$(cat "$LOG_DIR/latest_seed1.txt")
-"$DISAGG_PYTHON" "$RECIPE_DIR/check_smoke.py" "$SMOKE_DIR"
+nohup bash $RECIPE_DIR/package_gsm8k_2k_async1.sh > $LOG_DIR/package_2k_async1.log 2>&1 &     # ~20 min; SKIP_DUMPS=1 / SKIP_CKPT=1 for reruns
 ```
 
-Require `SMOKE OK`, then inspect its diagnostics and warnings. The check verifies nonzero finite gradients, finite loss/entropy, logged LR against the resolved schedule, TIS statistics and both staleness measures/spans for all steps. It reports dropped prompt groups and available timing tags, saving `check_smoke.json`. Drops or mixed versions are reported rather than silently treated as a clean one-step pipeline; a startup pass alone is not approval for the final baseline. This is not evidence of convergence. An `old_log_prob` timing key can still exist in V1: its timer wraps a metadata-copy path, so key presence alone does not imply a second model inference.
+Output `/workspace/meta-RL/handoff/gsm8k_2k_async1/` → `gs://xiaotongyang-bucket/meta-rl/GKE_repro/meta-RL/handoff/gsm8k_2k_async1/`, verified by
+`sha256sum -c --quiet PACKAGE_MANIFEST.sha256`; `README.md` inside the package lists every directory.
 
-The logged `actor/lr` is the LR **after** advancing the scheduler. Steps 1/2/10 log 2e-7/4e-7/2e-6; their actual optimizer updates use 0/2e-7/1.8e-6. The first peak-LR update is step 11. The optimizer horizon is explicitly resolved from the trainer's total steps and verified against the runtime rule (sync=1).
+## Known gaps
 
-The launcher checks the full resolved config, model stop IDs, data source labels/counts, no train/test question overlap, exact actor TIS wiring, node environments and a BF16 CUDA operation on each GPU node. `PREFLIGHT_ONLY=1 bash ...` runs these checks without starting training.
-
-## 3. Formal 250-step run
-
-After smoke, run a 20-step systems diagnostic using the same smoke command with a new experiment name and `TOTAL_STEPS=20`, then `check_smoke.py --steps 20`. Inspect oldest-version lag, spans, drops, TIS clipping and stage timing before choosing the formal run. This short diagnostic uses a **20-step cosine horizon**: it tests operation and scheduler wiring, and must not be treated as the first 20 steps of the 250-step learning curve. A prefix-equivalent test would require an independent stop control with the scheduler held at 250; this bundle does not add such a controller.
-
-After those checks pass and resources are released, start the full run from the original model:
-
-```bash
-ray status
-EXP=disagg_t16_r48_seed1_$(date -u +%Y%m%d_%H%M%S)
-SEED=1 EXPERIMENT_NAME="$EXP" TOTAL_STEPS=250 TEST_FREQ=20 SAVE_FREQ=50 VAL_BEFORE_TRAIN=true \
-  nohup bash "$RECIPE_DIR/run_gpu_disagg.sh" > "$LOG_DIR/$EXP.launch.log" 2>&1 &
-echo "PID=$! EXP=$EXP"
-tail -f "$LOG_DIR/$EXP.launch.log"
-```
-
-The script already creates the start/end timestamps. Do not wrap a second timestamp around environment installation. For seeds 2 and 3, change only `SEED` and the experiment name; use the same dependency manifest and settings.
-
-All recorded seeds are explicit in the data loader, FSDP engine and rollout engine. They do not guarantee identical update membership: the buffer chooses completed groups, prioritizing dispatch version, and equal-age ordering can vary. For TPU handoff, record the actual consumed question/group IDs per step and distinguish them from dispatch order; an old synchronous `train_order_seed{k}` cannot prescribe the asynchronous batches.
-
-## 4. Outputs and interpretation
-
-Each run writes `$LOG_DIR/$EXP/` with:
-
-- `driver.log`, `resolved_config.yaml`, `preflight.json`, `environment_manifest.json`, `packages.txt`, `verl_commit.txt`.
-- `start_epoch.txt`, `end_epoch.txt`, `exit_code.txt`; checkpoints under `$CKPT_DIR/$EXP/`.
-- Full `val_dump/`, whole selected training-batch `rollout_dump/` and `tensorboard/<node-id>/`.
-
-The native training dump includes all 2,048 rows in a healthy 128x16 step, but is **not a replay tensor fixture**: it contains decoded input/output, ground truth, score and a composite row UID. It lacks token IDs, masks, log-probs, advantages, qid and separate acc/fmt fields. Before using old replay/diagnostic tools, adapt this schema and the grouping key (`{prompt_uuid}_{rollout}_{output}`); grouping exact row UID would incorrectly produce singleton groups. Old `verl_grad_from_optim.py` assumes FSDP1 flat parameters and also needs an FSDP2/DTensor checkpoint reader before reuse.
-
-Source review confirms global token normalization: the FSDP engine all-reduces the full local update's mask count before microbatch splitting; each micro loss uses `sum / global_token_count * DP_size`, followed by accumulated backward and FSDP gradient averaging. This establishes the intended denominator for this single-minibatch recipe, not a measured cross-stack gradient-parity result.
-
-TensorBoard writes to `/tmp/tb_local/wenjun_gpu_disagg_gsm8k/$EXP` on the TaskRunner's node during training, then gets copied into the run directory on exit. Use `tensorboard --logdir "$LOG_DIR/$EXP/tensorboard"`. If interrupted during collection, rerun `collect_tb.py --source /tmp/tb_local/wenjun_gpu_disagg_gsm8k/$EXP --out "$LOG_DIR/$EXP/tensorboard"` while those pods are alive.
-
-Inspect full-test `val-core/gsm8k_boxed_test/acc/mean@1`, reward, response length/cap hits, gradient norm, entropy, `actor/rollout_corr/*`, `training/off_policy/trajectory_staleness*`, `training/off_policy/trajectory_spans/*`, and `training/off_policy/evicted_samples`. The eviction counter counts prompt groups, not individual responses; in this pinned source, the tag can be absent when no groups are evicted. The actor pool and rollout pool are both part of compute accounting.
-
-**Time-to-quality:** use wall time from `start_epoch.txt` through the second consecutive full-set eval above the fixed target (initial target 0.80), including startup, eval and checkpoints. With this allocation, GPU-hours = elapsed seconds × 64 / 3600. Report failures to reach the target within 250 steps alongside full curves. V1's `timing_s/step` excludes validation in this source, so it is not directly comparable to the old V0 step timer; use end-to-end elapsed time for the primary comparison.
-
-If trainer starvation dominates, investigate an 8/56 split; if the ready queue stays full and trainer computation dominates, investigate 32/32. Those are future recipe changes requiring corresponding config/preflight updates. Neither 64 GPUs nor the initial 16/48 allocation is guaranteed faster. Do not use the previous synchronous accuracy curve as proof this asynchronous candidate converges.
-
-## Verification performed when creating this bundle
-
-- Full Hydra composition against the pinned source, including explicit actor TIS config and optimizer/mixed-precision config.
-- Shell/Python syntax checks; boxed scorer's 22 fixture/scope checks; reward-adapter synthetic interface checks.
-- Source review of resource pools, replay-age rule, single-forward TIS dispatch, global token normalization and exact completion-length reward adapter.
-
-No GPU training or deployment was performed while generating this bundle. Environment provisioning, distributed NCCL weight transfer and learning remain to be validated on the user's cluster by the provided smoke/full-run commands.
+No per-parameter gradient fixture for the V1 trainer (gate 5 is a loss-contract check); batch membership is completion-order dependent
+(step manifests are references); the V1 rollout dumps carry the penalized score only (no `acc` field); evaluation on the 32-GPU sampler pool
+costs ≈ 70 s per pass (≈ 16 of the 59 minutes).

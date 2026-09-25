@@ -210,7 +210,8 @@ ray_kwargs:
         PYTHONPATH: ${oc.env:VERL_REPO}:${oc.env:RECIPE_DIR}
         PYTHONNOUSERSITE: "1"
         VERL_PLATFORM: nvidia
-        VLLM_NO_USAGE_STATS: "1"   # 48 vLLM workers appending usage_stats.json on gcsfuse -> stale file handles
+        VLLM_USE_V1: "1"           # ignored by vLLM 0.29 (one warning per server); kept so the resolved config equals the three reference runs' exactly
+        VLLM_NO_USAGE_STATS: "1"   # 32 vLLM workers appending usage_stats.json on gcsfuse -> stale file handles
         DO_NOT_TRACK: "1"
         PYTHONHASHSEED: ${oc.env:SEED,1}
         TENSORBOARD_DIR: ${oc.env:TB_DIR}
