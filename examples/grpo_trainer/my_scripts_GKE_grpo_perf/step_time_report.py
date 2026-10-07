@@ -3,7 +3,8 @@
 usage: step_time_report.py DRIVER_LOG [LO HI] [--tb DIR]
   default window: steps 4..last logged step; --tb defaults to <dir of DRIVER_LOG>/tensorboard when it exists.
 Per step: train = update_actor + old_log_prob, other = step - gen - train; medians are taken AFTER the per-step split.
-old_log_prob may be absent when the old-logprob forward is bypassed (single-forward runs): it then counts as 0.
+The policy-loss mode is read from the resolved config the trainer prints at start ('bypass_mode' / 'loss_mode'), not inferred
+from missing metrics: old_log_prob may be absent only in a single-forward (bypass) run, where it then counts as 0.
 timing_s/step is measured inside the trainer loop, so work done between steps (logging, TensorBoard writes, data loading)
 is outside it. The TPU side reports wall time per global step, so the wall clock between consecutive steps (TensorBoard
 event timestamps of timing_s/step) and its gap to timing_s/step are printed as well."""
@@ -27,12 +28,19 @@ hi = a.hi if a.hi is not None else max(d["timing_s/step"])
 w = list(range(lo, hi + 1))
 missing = {t: [s for s in w if s not in v] for t, v in d.items() if any(s not in v for s in w)}
 assert not missing, f"metrics missing in the window {lo}-{hi}: { {t: v[:5] for t, v in missing.items()} }"
-olp_note = ""
-if not olp:
-    olp = {s: 0.0 for s in w}; olp_note = " [old_log_prob not logged: bypassed]"
+bypass = "'bypass_mode': True" in L
+actor_mode = sorted(set(re.findall(r"'loss_mode': '([^']+)'", L)))
+if bypass:
+    print(f"mode: single forward (bypass_mode=True in the resolved config; actor loss_mode {actor_mode or 'not printed'})")
+    if "bypass_mode" not in actor_mode:
+        print("WARNING: bypass_mode is on but the actor's loss_mode is not 'bypass_mode' (rollout_correction not mirrored into policy_loss?)")
 else:
-    gaps = [s for s in w if s not in olp]
-    assert not gaps, f"old_log_prob missing at steps {gaps[:5]}"
+    print(f"mode: two-pass (no bypass_mode=True in the resolved config; actor loss_mode {actor_mode or 'not printed'})")
+olp_note = ""
+gaps = [s for s in w if s not in olp]
+if gaps:
+    assert bypass, f"old_log_prob missing at steps {gaps[:5]} in a two-pass run"
+    olp = {s: olp.get(s, 0.0) for s in w}; olp_note = " [old-logprob pass skipped]"
 st, gen, ua = d["timing_s/step"], d["timing_s/gen"], d["timing_s/update_actor"]
 train = {s: ua[s] + olp[s] for s in w}
 other = {s: st[s] - gen[s] - train[s] for s in w}
@@ -42,7 +50,9 @@ print(f"steps {lo}-{hi} (n={len(w)}): step median {med(st):.1f} s (mean {v.mean(
       f"rollout {med(gen):.1f} s ({100 * med(gen) / med(st):.0f}%) | train {med(train):.1f} s (update {med(ua):.1f} + old_logp {med(olp):.1f}){olp_note} | other {med(other):.1f} s")
 k = min(10, len(w))
 sc = d["critic/score/mean"]
-print(f"prompt mean {med(d['prompt_length/mean']):.1f} tok | output mean {med(d['response_length/mean']):.0f} tok | at cap {100 * med(d['response_length/clip_ratio']):.1f}% | "
+mean = lambda x: float(np.mean([x[s] for s in w]))
+print(f"prompt {mean(d['prompt_length/mean']):.1f} tok | output length: mean {mean(d['response_length/mean']):.0f} tok, median of step means {med(d['response_length/mean']):.0f} | "
+      f"at cap: mean {100 * mean(d['response_length/clip_ratio']):.1f}% | "
       f"score first{k} {np.mean([sc[s] for s in w[:k]]):.3f} -> last{k} {np.mean([sc[s] for s in w[-k:]]):.3f} | steps logged {min(st)}-{max(st)}")
 if len(w) <= 20:
     print("per step:", " ".join(f"{s}:{st[s]:.0f}" for s in w))

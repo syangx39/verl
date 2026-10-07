@@ -24,7 +24,7 @@ run_one(){  # $1 model size, $2 TP, $3 log suffix; knobs come from the environme
   # shellcheck disable=SC2086  # EXTRA is split into separate overrides on purpose
   MODEL_PATH=${MODEL_ROOT:-$SRC_ROOT}/Qwen3-$1 TP=$2 bash "$SCRIPT_DIR/run_grpo_colocated.sh" ${EXTRA:-} > "$L/tp$2_Qwen3-$1$3.log" 2>&1; }
 report(){ RUN=$(ls -d "$L"/grpo_Qwen3-$1_tp$2_2*/ 2>/dev/null | sort | tail -1)
-          [ -n "$RUN" ] && "$DISAGG_PYTHON" "$SCRIPT_DIR/step_time_report.py" "${RUN}driver.log" 2>&1 | head -4; }
+          [ -n "$RUN" ] && "$DISAGG_PYTHON" "$SCRIPT_DIR/step_time_report.py" "${RUN}driver.log" 2>&1; }
 for s in ${MODELS:-0.6B 1.7B 4B 8B 14B 32B}; do
   model_ok "$SRC_ROOT/Qwen3-$s" || { echo "=== SKIP Qwen3-$s: model missing or incomplete under $SRC_ROOT"; continue; }
   for TP in ${TPS:-1 2 4}; do
