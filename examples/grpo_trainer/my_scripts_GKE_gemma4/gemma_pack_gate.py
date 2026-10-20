@@ -20,6 +20,7 @@
 #              bf16 kernel tiling differences, expected small)
 # =============================================================================
 import argparse
+import sys
 import torch
 
 
@@ -119,6 +120,7 @@ def main():
     else:
         print("FAIL: packing leaks under this attention impl; run with REMOVE_PADDING=False "
               "(and solve its memory cost separately) or move to an impl whose masking passes this gate.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

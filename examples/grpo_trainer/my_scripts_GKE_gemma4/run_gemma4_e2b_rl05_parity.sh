@@ -42,9 +42,10 @@ set -xeuo pipefail
 
 ########################### paths (site-specific) ###########################
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
-DATA_DIR=${DATA_DIR:-/workspace/meta-RL/data/openmathinstruct2}
-TRAIN_FILE=${TRAIN_FILE:-$DATA_DIR/train.parquet}
-VAL_FILE=${VAL_FILE:-$DATA_DIR/val.parquet}
+# Deliberately NOT ${DATA_DIR:-...}: setup_env.sh exports DATA_DIR=.../gsm8k_boxed for the Qwen line.
+DATA_DIR=${GEMMA_DATA_DIR:-/workspace/meta-RL/data/openmathinstruct2}
+TRAIN_FILE=${GEMMA_TRAIN_FILE:-$DATA_DIR/train.parquet}
+VAL_FILE=${GEMMA_VAL_FILE:-$DATA_DIR/val.parquet}
 PROMPT_KEY=${PROMPT_KEY:-prompt}                # parquet column read by PREFLIGHT only
                                                 # (== verl's data.prompt_key default)
 
@@ -138,6 +139,7 @@ if [ -z "${RAY_ADDRESS:-}" ]; then
   RAY_NUM_GPUS_ARG="+ray_kwargs.ray_init.num_gpus=${NGPUS_PER_NODE}"
 fi
 
+set +e
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
     algorithm.use_kl_in_reward=False \
@@ -190,8 +192,8 @@ python3 -m verl.trainer.main_ppo \
     trainer.use_v1=False \
     "++ray_kwargs.ray_init.runtime_env.env_vars.REWARD_DUMP_DIR=${REWARD_DUMP_DIR}" \
     "++ray_kwargs.ray_init.runtime_env.env_vars.REWARD_DUMP_EVERY=\"${REWARD_DUMP_EVERY}\"" \
-    "++ray_kwargs.ray_init.runtime_env.env_vars.VLLM_NO_USAGE_STATS=1" \
-    "++ray_kwargs.ray_init.runtime_env.env_vars.DO_NOT_TRACK=1" \
+    "++ray_kwargs.ray_init.runtime_env.env_vars.VLLM_NO_USAGE_STATS=\"1\"" \
+    "++ray_kwargs.ray_init.runtime_env.env_vars.DO_NOT_TRACK=\"1\"" \
     trainer.balance_batch=True \
     trainer.logger='["console","tensorboard"]' \
     trainer.project_name=${PROJECT_NAME} \
@@ -205,6 +207,10 @@ python3 -m verl.trainer.main_ppo \
     trainer.total_training_steps=${TOTAL_STEPS} \
     ${RAY_NUM_GPUS_ARG} \
     "$@"
+rc=$?
+set -e
+echo "[driver] main_ppo finished with exit_code=${rc}"
+exit "${rc}"
 
 # =============================================================================
 # Bring-up watch list (gemma-specific, check on the 2-step smoke):
