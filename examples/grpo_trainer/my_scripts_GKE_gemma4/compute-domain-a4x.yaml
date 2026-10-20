@@ -1,0 +1,31 @@
+# RDMA NIC claim template (official GKE verl recipe): each GPU pod claims the
+# CX-7 NICs via DRA. Requires deviceclass mrdma.google.com on the cluster
+# (verify: kubectl get deviceclasses) -- pods stay Pending without it.
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  name: verl-rdma-nic
+spec:
+  spec:
+    devices:
+      requests:
+      - name: nic
+        exactly:
+          deviceClassName: mrdma.google.com
+          allocationMode: ExactCount
+          count: 1
+---
+# =============================================================================
+# DRA ComputeDomain for MNNVL/IMEX on GB200 (required for cross-node NCCL
+# over NVLink). numNodes must match the RayCluster's total node count.
+# Prereq: NVIDIA DRA driver installed (kubectl get crd | grep computedomain).
+# =============================================================================
+apiVersion: resource.nvidia.com/v1beta1
+kind: ComputeDomain
+metadata:
+  name: verl-qwen3-xiaotongyang-cd
+spec:
+  numNodes: 16
+  channel:
+    resourceClaimTemplate:
+      name: verl-qwen3-xiaotongyang-cd-channel
