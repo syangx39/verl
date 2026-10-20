@@ -1,0 +1,51 @@
+=== 4-Step Validation Run on a4x-highgpu-4g-a4x-pool-7 (4n16g, flex_attention) ===
+--- Steady-State Steps 2-4 ---
+mode: two-pass (no bypass_mode=True in the resolved config; actor loss_mode ['k3', 'vanilla'])
+steps 2-4 (n=3): step median 78.3 s (mean 78.8, p90 81.4, max 82.2) | rollout 38.1 s (49%) | train 35.9 s (update 27.7 + old_logp 8.7) | other 4.3 s
+prompt 154.1 tok | output length: mean 1895 tok, median of step means 1892 | at cap: mean 0.1% | score first3 0.711 -> last3 0.711 | steps logged 1-4
+per step: 2:76 3:78 4:82
+wall clock: no TensorBoard events under /workspace/meta-RL/logs/tensorboard; skipped
+--- All Steps 1-4 (incl. Step 1 Compilation) ---
+mode: two-pass (no bypass_mode=True in the resolved config; actor loss_mode ['k3', 'vanilla'])
+steps 1-4 (n=4): step median 80.2 s (mean 92.0, p90 116.8, max 131.6) | rollout 38.4 s (48%) | train 37.5 s (update 29.0 + old_logp 8.8) | other 4.3 s
+prompt 153.5 tok | output length: mean 1862 tok, median of step means 1827 | at cap: mean 0.1% | score first4 0.715 -> last4 0.715 | steps logged 1-4
+per step: 1:132 2:76 3:78 4:82
+wall clock: no TensorBoard events under /workspace/meta-RL/logs/tensorboard; skipped
+
+=== Official 20-Step Scaling Sweep (Steady-State Steps 2-20) ===
+--- gemma4_e2b_1n4g_official_0902_0645.log ---
+mode: two-pass (no bypass_mode=True in the resolved config; actor loss_mode ['k3', 'vanilla'])
+steps 2-20 (n=19): step median 172.7 s (mean 172.4, p90 180.3, max 183.4) | rollout 72.4 s (42%) | train 95.9 s (update 77.2 + old_logp 19.4) | other 5.7 s
+prompt 155.8 tok | output length: mean 1918 tok, median of step means 1923 | at cap: mean 0.2% | score first10 0.586 -> last10 0.585 | steps logged 1-20
+per step: 2:173 3:156 4:183 5:179 6:174 7:169 8:177 9:173 10:182 11:178 12:170 13:165 14:168 15:175 16:160 17:170 18:168 19:176 20:180
+wall clock: no TensorBoard events under /workspace/meta-RL/logs/tensorboard; skipped
+--- gemma4_e2b_2n8g_official_0902_0536.log ---
+mode: two-pass (no bypass_mode=True in the resolved config; actor loss_mode ['k3', 'vanilla'])
+steps 2-20 (n=19): step median 108.8 s (mean 112.7, p90 116.6, max 164.0) | rollout 51.1 s (47%) | train 51.2 s (update 40.2 + old_logp 11.2) | other 6.3 s
+prompt 155.8 tok | output length: mean 1919 tok, median of step means 1902 | at cap: mean 0.2% | score first10 0.588 -> last10 0.588 | steps logged 1-20
+per step: 2:108 3:102 4:115 5:114 6:111 7:108 8:119 9:108 10:109 11:113 12:108 13:105 14:105 15:116 16:164 17:107 18:108 19:111 20:112
+wall clock: no TensorBoard events under /workspace/meta-RL/logs/tensorboard; skipped
+--- gemma4_e2b_4n16g_official_0902_0439.log ---
+mode: two-pass (no bypass_mode=True in the resolved config; actor loss_mode ['k3', 'vanilla'])
+steps 2-20 (n=19): step median 76.2 s (mean 76.5, p90 79.6, max 79.8) | rollout 41.4 s (54%) | train 28.9 s (update 21.8 + old_logp 7.1) | other 6.4 s
+prompt 155.8 tok | output length: mean 1915 tok, median of step means 1928 | at cap: mean 0.2% | score first10 0.589 -> last10 0.587 | steps logged 1-20
+per step: 2:76 3:73 4:80 5:77 6:78 7:75 8:80 9:77 10:75 11:78 12:74 13:76 14:75 15:80 16:76 17:74 18:74 19:77 20:78
+wall clock: no TensorBoard events under /workspace/meta-RL/logs/tensorboard; skipped
+--- gemma4_e2b_8n32g_official_0902_0336.log ---
+mode: two-pass (no bypass_mode=True in the resolved config; actor loss_mode ['k3', 'vanilla'])
+steps 2-20 (n=19): step median 63.2 s (mean 63.0, p90 63.9, max 66.2) | rollout 37.6 s (60%) | train 19.0 s (update 13.6 + old_logp 5.4) | other 6.3 s
+prompt 155.8 tok | output length: mean 1913 tok, median of step means 1916 | at cap: mean 0.2% | score first10 0.587 -> last10 0.584 | steps logged 1-20
+per step: 2:62 3:61 4:66 5:63 6:63 7:64 8:63 9:62 10:63 11:64 12:62 13:61 14:62 15:64 16:64 17:63 18:61 19:64 20:63
+wall clock: no TensorBoard events under /workspace/meta-RL/logs/tensorboard; skipped
+--- gemma4_e2b_16n64g_official_0902_0114.log ---
+mode: two-pass (no bypass_mode=True in the resolved config; actor loss_mode ['k3', 'vanilla'])
+steps 2-20 (n=19): step median 57.8 s (mean 57.7, p90 58.6, max 59.1) | rollout 36.3 s (63%) | train 15.3 s (update 10.3 + old_logp 4.9) | other 6.1 s
+prompt 155.8 tok | output length: mean 1919 tok, median of step means 1934 | at cap: mean 0.2% | score first10 0.588 -> last10 0.587 | steps logged 1-20
+per step: 2:57 3:57 4:58 5:58 6:59 7:58 8:58 9:58 10:57 11:58 12:57 13:57 14:56 15:59 16:58 17:57 18:56 19:58 20:58
+wall clock: no TensorBoard events under /workspace/meta-RL/logs/tensorboard; skipped
+--- gemma4_e2b_rl05_16n64g_official_sdpa_0902_0220.log ---
+mode: two-pass (no bypass_mode=True in the resolved config; actor loss_mode ['k3', 'vanilla'])
+steps 2-20 (n=19): step median 78.0 s (mean 78.2, p90 80.6, max 82.0) | rollout 36.2 s (46%) | train 35.7 s (update 29.0 + old_logp 6.9) | other 5.9 s
+prompt 155.8 tok | output length: mean 1917 tok, median of step means 1935 | at cap: mean 0.2% | score first10 0.585 -> last10 0.578 | steps logged 1-20
+per step: 2:82 3:76 4:79 5:77 6:77 7:78 8:80 9:77 10:77 11:76 12:75 13:78 14:80 15:77 16:81 17:79 18:81 19:77 20:79
+wall clock: no TensorBoard events under /workspace/meta-RL/logs/tensorboard; skipped
