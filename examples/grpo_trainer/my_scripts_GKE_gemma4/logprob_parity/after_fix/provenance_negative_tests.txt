@@ -1,0 +1,29 @@
+--- (a) legacy result without provenance (old tool output) -> report must refuse
+[report] refusing to mix results (use one --out per fixture):
+  hf__bf16_sdpa_unpacked.npz: fixture_sha256=None, current fixture is 284db69dddfb0cc864fb8c3c99b06e54c357e16d861f78765a1c5cde42f88b89
+exit=1
+--- (b) result tagged with another fixture's sha256 -> report must refuse
+[report] refusing to mix results (use one --out per fixture):
+  hf__bf16_sdpa_unpacked.npz: fixture_sha256='0000000000000000000000000000000000000000000000000000000000000000', current fixture is 284db69dddfb0cc864fb8c3c99b06e54c357e16d861f78765a1c5cde42f88b89
+exit=1
+--- (c) result computed for a different selection -> report must refuse
+[report] refusing to mix results (use one --out per fixture):
+  hf__bf16_sdpa_unpacked.npz: computed for a different selection
+exit=1
+--- (d) result with a wrong-length sequence -> report must refuse
+[report] refusing to mix results (use one --out per fixture):
+  hf__bf16_sdpa_unpacked.npz: missing/wrong-length sequences [1025], unexpected sequences []
+exit=1
+--- (e) selection.json from fixture A used with fixture B -> report must refuse
+[report] /tmp/parity_v2_neg/selection.json was made from fixture sha256='284db69dddfb0cc864fb8c3c99b06e54c357e16d861f78765a1c5cde42f88b89', not from /workspace/meta-RL/logprob_parity/fixture_t1_notrunc_1021_0723/fixture_step1.npz (sha256=ab8a31743fadcad5d6bb34a2e8f6851d07700a422028197de1909b1a8044b651); use the matching --out or rerun `select`
+exit=1
+--- (f) re-select with another seed while results exist -> select must refuse
+[select] /tmp/parity_v2_neg already holds results for another fixture/selection (1 files); use a fresh --out
+exit=1
+--- (g) T=0.8 / top-k 50 / top-p 0.95 fixture -> select must refuse
+[fixture] not a step-1, T=1, untruncated parity fixture: temperature=0.8 (need 1.0); top_k=50 (need -1/0: no top-k truncation); top_p=0.95 (need 1.0: no top-p truncation) (pass --allow_nonparity_fixture to override)
+exit=1
+--- (h) same with --allow_nonparity_fixture -> warning, proceeds
+[fixture] WARNING: not a step-1, T=1, untruncated parity fixture: temperature=0.8 (need 1.0); top_k=50 (need -1/0: no top-k truncation); top_p=0.95 (need 1.0: no top-p truncation)
+[select] 16 sequences: [24, 44, 363, 515, 573, 1025, 1032, 1106, 1280, 1311, 1354, 1657, 1666, 1706, 1873, 1886]
+exit=0

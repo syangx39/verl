@@ -1,0 +1,22 @@
+{
+ "fixture": "/workspace/meta-RL/logprob_parity/fixture_fixed_1021_0813/fixture_step1.npz",
+ "seed": 0,
+ "indices": [
+  24,
+  44,
+  363,
+  515,
+  573,
+  1025,
+  1032,
+  1106,
+  1280,
+  1311,
+  1354,
+  1657,
+  1666,
+  1706,
+  1873,
+  1886
+ ]
+}

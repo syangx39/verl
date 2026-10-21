@@ -49,3 +49,17 @@ steps 2-20 (n=19): step median 78.0 s (mean 78.2, p90 80.6, max 82.0) | rollout 
 prompt 155.8 tok | output length: mean 1917 tok, median of step means 1935 | at cap: mean 0.2% | score first10 0.585 -> last10 0.578 | steps logged 1-20
 per step: 2:82 3:76 4:79 5:77 6:77 7:78 8:80 9:77 10:77 11:76 12:75 13:78 14:80 15:77 16:81 17:79 18:81 19:77 20:79
 wall clock: no TensorBoard events under /workspace/meta-RL/logs/tensorboard; skipped
+
+=== 4-Step Smoke after the RoPE-buffer fix (PR #8), frozen launcher, 4n16g ===
+--- Steady-State Steps 2-4 ---
+mode: two-pass (no bypass_mode=True in the resolved config; actor loss_mode ['k3', 'vanilla'])
+steps 2-4 (n=3): step median 74.0 s (mean 75.8, p90 78.5, max 79.6) | rollout 37.1 s (50%) | train 33.5 s (update 25.4 + old_logp 8.3) | other 4.3 s
+prompt 154.1 tok | output length: mean 1902 tok, median of step means 1899 | at cap: mean 0.1% | score first3 0.711 -> last3 0.711 | steps logged 1-4
+per step: 2:74 3:74 4:80
+wall clock: no TensorBoard events under /workspace/meta-RL/logs/tensorboard; skipped
+--- All Steps 1-4 ---
+mode: two-pass (no bypass_mode=True in the resolved config; actor loss_mode ['k3', 'vanilla'])
+steps 1-4 (n=4): step median 76.8 s (mean 84.7, p90 102.1, max 111.7) | rollout 38.0 s (49%) | train 34.2 s (update 26.0 + old_logp 8.3) | other 4.3 s
+prompt 153.5 tok | output length: mean 1871 tok, median of step means 1838 | at cap: mean 0.1% | score first4 0.717 -> last4 0.717 | steps logged 1-4
+per step: 1:112 2:74 3:74 4:80
+wall clock: no TensorBoard events under /workspace/meta-RL/logs/tensorboard; skipped

@@ -1,0 +1,6 @@
+{
+ "vllm": "0.29.0",
+ "seconds": 139.7,
+ "logprobs_mode": "processed_logprobs",
+ "note": "prompt_logprobs = prefill scoring path, weights loaded from the checkpoint"
+}

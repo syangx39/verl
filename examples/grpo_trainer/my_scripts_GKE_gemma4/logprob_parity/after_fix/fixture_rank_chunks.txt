@@ -1,0 +1,3 @@
+bad seqs (mean|d|>0.5) per rank-chunk: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+per-seq mean|d| quantiles 50/99/max: [0.0077, 0.0176] 0.0253
+repeat == old: True

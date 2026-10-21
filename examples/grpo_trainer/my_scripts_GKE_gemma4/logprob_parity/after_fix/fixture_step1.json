@@ -1,0 +1,199 @@
+{
+ "global_step": 1,
+ "batch_size": 2048,
+ "shapes": {
+  "prompts": [
+   2048,
+   8192
+  ],
+  "responses": [
+   2048,
+   8192
+  ],
+  "input_ids": [
+   2048,
+   16384
+  ],
+  "attention_mask": [
+   2048,
+   16384
+  ],
+  "position_ids": [
+   2048,
+   16384
+  ],
+  "response_mask": [
+   2048,
+   8192
+  ],
+  "rollout_log_probs": [
+   2048,
+   8192
+  ],
+  "old_log_probs": [
+   2048,
+   8192
+  ],
+  "token_level_scores": [
+   2048,
+   8192
+  ],
+  "token_level_rewards": [
+   2048,
+   8192
+  ],
+  "advantages": [
+   2048,
+   8192
+  ],
+  "returns": [
+   2048,
+   8192
+  ],
+  "old_log_probs_repeat": [
+   2048,
+   8192
+  ],
+  "nt__data_source": [
+   2048
+  ],
+  "nt__reward_model": [
+   2048
+  ],
+  "nt__extra_info": [
+   2048
+  ],
+  "nt__uid": [
+   2048
+  ],
+  "nt____num_turns__": [
+   2048
+  ],
+  "nt__score": [
+   2048
+  ],
+  "nt__acc": [
+   2048
+  ],
+  "nt__fmt": [
+   2048
+  ],
+  "nt__length_penalty": [
+   2048
+  ],
+  "nt__qid": [
+   2048
+  ],
+  "nt__overlong": [
+   2048
+  ],
+  "nt__mv_used": [
+   2048
+  ],
+  "nt__mv_timeout": [
+   2048
+  ],
+  "nt__mv_exc": [
+   2048
+  ],
+  "nt__mv_lenrej": [
+   2048
+  ],
+  "nt__multi_modal_inputs": [
+   2048
+  ],
+  "nt__global_steps": [
+   2048
+  ],
+  "nt__num_cached_tokens": [
+   2048
+  ],
+  "nt__min_global_steps": [
+   2048
+  ],
+  "nt__extras": [
+   2048
+  ],
+  "nt__max_global_steps": [
+   2048
+  ],
+  "nt__reward_extra_info": [
+   2048
+  ]
+ },
+ "dtypes": {
+  "prompts": "int64",
+  "responses": "int64",
+  "input_ids": "int64",
+  "attention_mask": "int64",
+  "position_ids": "int64",
+  "response_mask": "int64",
+  "rollout_log_probs": "float32",
+  "old_log_probs": "float32",
+  "token_level_scores": "float32",
+  "token_level_rewards": "float32",
+  "advantages": "float32",
+  "returns": "float32",
+  "old_log_probs_repeat": "float32",
+  "nt__data_source": "<U25",
+  "nt__reward_model": "<U211",
+  "nt__extra_info": "<U1447",
+  "nt__uid": "<U36",
+  "nt____num_turns__": "int32",
+  "nt__score": "float64",
+  "nt__acc": "float64",
+  "nt__fmt": "float64",
+  "nt__length_penalty": "float64",
+  "nt__qid": "float64",
+  "nt__overlong": "float64",
+  "nt__mv_used": "float64",
+  "nt__mv_timeout": "float64",
+  "nt__mv_exc": "float64",
+  "nt__mv_lenrej": "float64",
+  "nt__multi_modal_inputs": "<U3396",
+  "nt__global_steps": "<U1",
+  "nt__num_cached_tokens": "<U3",
+  "nt__min_global_steps": "<U1",
+  "nt__extras": "<U4",
+  "nt__max_global_steps": "<U1",
+  "nt__reward_extra_info": "<U163"
+ },
+ "rollout": {
+  "temperature": 1.0,
+  "top_p": 1.0,
+  "top_k": -1,
+  "n": 8,
+  "calculate_log_probs": true,
+  "logprobs_mode": "processed_logprobs"
+ },
+ "actor": {
+  "model_dtype": "bfloat16",
+  "strategy": "fsdp",
+  "use_dynamic_bsz": true,
+  "attn_implementation": "flex_attention"
+ },
+ "repeat_error": null,
+ "non_tensor_keys_skipped": [
+  "turn_scores",
+  "raw_prompt",
+  "tool_rewards"
+ ],
+ "model_path": "/workspace/meta-RL/models/gemma-4-E2B-it",
+ "files": {
+  "chat_template.jinja": "0a2c8073c878ab1da004bee933a998606537bbb62016310352c7285c3f01c5b5",
+  "config.json": "1b28f3d2c3100f6c594754b81107428bd7b822a7f48272ca681dae9d2ec38330",
+  "generation_config.json": "d4226bbe3117d2d253ba4609720ba82c6c4ce4627a9a6ae05387c78983ac03de",
+  "model.safetensors": "size=10246621918",
+  "processor_config.json": "32bdf45d2ad4cc29a0822ddd157a182de76644f0419a6228d151495256e9813c",
+  "tokenizer.json": "cc8d3a0ce36466ccc1278bf987df5f71db1719b9ca6b4118264f45cb627bfe0f",
+  "tokenizer_config.json": "9f4fec4b1dc6ecddf8f4a92e9caea5971c0e67d81309f3f9066a2bee8c362633"
+ },
+ "collect_env": {
+  "torch": "2.13.0+cu130",
+  "vllm": "0.29.0",
+  "verl": "0.10.0.dev0",
+  "transformers": "5.12.1",
+  "flashinfer-python": "0.6.18"
+ },
+ "note": "old_log_probs = trainer log-probs before this step's update; old_log_probs_repeat = the same pass run again; rollout_log_probs = sampler log-probs of the sampled tokens. Response-position tensors are aligned with responses/response_mask (right-padded); prompts are left-padded."
+}
