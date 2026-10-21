@@ -1,0 +1,20 @@
+=== fwd1: ranks=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+  canary logp_sum groups: {-973.0188: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]}
+  first diverging module vs rank 0 (largest group): none
+  buffers differing from reference rank: none
+  module list (first 6): ['model.language_model.embed_tokens', 'model.language_model.embed_tokens_per_layer', 'model.language_model.layers.0', 'model.language_model.layers.1', 'model.language_model.layers.2', 'model.language_model.layers.3'] ... total 39
+=== fwd2: ranks=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+  canary logp_sum groups: {-973.0188: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]}
+  first diverging module vs rank 0 (largest group): none
+  buffers differing from reference rank: none
+  module list (first 6): ['model.language_model.embed_tokens', 'model.language_model.embed_tokens_per_layer', 'model.language_model.layers.0', 'model.language_model.layers.1', 'model.language_model.layers.2', 'model.language_model.layers.3'] ... total 39
+=== pre_sync1: ranks=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+  canary logp_sum groups: {-973.0188: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]}
+  first diverging module vs rank 0 (largest group): none
+  buffers differing from reference rank: none
+  module list (first 6): ['model.language_model.embed_tokens', 'model.language_model.embed_tokens_per_layer', 'model.language_model.layers.0', 'model.language_model.layers.1', 'model.language_model.layers.2', 'model.language_model.layers.3'] ... total 39
+=== pre_sync2: ranks=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+  canary logp_sum groups: {-975.0515: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]}
+  first diverging module vs rank 0 (largest group): none
+  buffers differing from reference rank: none
+  module list (first 6): ['model.language_model.embed_tokens', 'model.language_model.embed_tokens_per_layer', 'model.language_model.layers.0', 'model.language_model.layers.1', 'model.language_model.layers.2', 'model.language_model.layers.3'] ... total 39

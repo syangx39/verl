@@ -3,9 +3,9 @@
 Colocated `verl` GRPO (DAPO clip-higher) launcher, GKE A4X (`a4x-highgpu-4g-a4x-pool-7`) manifests, the 20-step scaling logs (`1n4g`–`16n64g`), and a 4-step smoke of the committed launcher for `google/gemma-4-E2B-it` on the `rl-05` workload.
 
 > [!IMPORTANT]
-> **Status: smoke passed; numerical validation and accuracy gate pending.**
+> **Status: smoke passed; trainer–sampler log-prob parity fixed; accuracy gate pending.**
 > - Launch / training-flow smoke: **complete** (§3). Four steps with non-zero updates, driver `exit_code=0`.
-> - Numerical correctness: **pending**. Rollout and trainer log-probs disagree (`k3_kl` 0.85–0.89 even with top-k/top-p off), and the packing gate does not cover the trainer's `flex_attention` path (§2.3, §3.4).
+> - Numerical correctness: **fixed** ([LOGPROB_PARITY.md](LOGPROB_PARITY.md)). The FSDP trainer computed wrong log-probs on ~half of its ranks because RoPE buffers were scrambled at FSDP init; the vLLM rollout was correct. With [`patch_verl_gemma4_rope_buffers.py`](patch_verl_gemma4_rope_buffers.py) applied on every pod, trainer and rollout agree to bf16 noise (step 1 at T=1: `k3_kl` 0.98 → 0.00046, Pearson 0.51 → 0.9992). Trainer-side metrics from earlier runs (k3, entropy, `grad_norm`) are invalid; step times stand.
 > - Accuracy gate: **pending** (§4). Eval is disabled in the smoke, so it says nothing about convergence or accuracy.
 
 ---
@@ -36,7 +36,8 @@ Colocated `verl` GRPO (DAPO clip-higher) launcher, GKE A4X (`a4x-highgpu-4g-a4x-
    - Backward: `BLOCK_M1=32, BLOCK_N1=32, BLOCK_M2=32, BLOCK_N2=32, num_warps=8, num_stages=1`
 3. **Packed-sequence isolation gate (`gemma_pack_gate.py`)**: single GPU, short sequences, `torch.no_grad()`, no memory measurement. It checks that HF's packed-sequence masking (restarted `position_ids`, `attention_mask=None`) keeps packed sequences from attending to each other by comparing `[A; B]` with `[A'; B]` (`A'` = token-shuffled `A`) at `96+80` tokens (inside the sliding window) and `640+560` tokens (crossing it). It passes only if `max |logits_B(A') - logits_B(A)| < 1e-3` and exits `1` otherwise.
    - Verified on GB200 with `--attn sdpa` (current file, sha256 `6855d7b7…`): LEAKAGE max `0.0000` in both rounds, exit `0`. A PASS only reports that no leakage was seen under these conditions; it does not by itself explain training metrics such as `grad_norm`.
-   - **Not covered: `--attn flex_attention`, which the trainer uses.** On torch 2.13 the 80-token reference forward is routed to Inductor's flex-decoding kernel, which has no valid configs here (`NoValidChoicesError`), so the gate exits `1` before reaching a verdict. The gate also does not import verl's `head_dim > 256` tile patch. Packing isolation under `flex_attention` is therefore not verified by this gate.
+   - **Not covered: `--attn flex_attention`, which the trainer uses.** On torch 2.13 the 80-token reference forward is routed to Inductor's flex-decoding kernel, which has no valid configs here (`NoValidChoicesError`), so the gate exits `1` before reaching a verdict. The gate also does not import verl's `head_dim > 256` tile patch. Packing isolation under `flex_attention` is therefore not verified by this gate. The offline parity ladder in [LOGPROB_PARITY.md](LOGPROB_PARITY.md) §2 does cover it: in verl's packed layout, `flex_attention` matches unpacked to bf16 noise.
+4. **Trainer RoPE buffers (required fix)**: transformers' `Gemma4TextRotaryEmbedding` registers its RoPE buffers in hash-randomized `set` order, and verl's FSDP1 `sync_module_states` broadcasts buffers by position, so on ~half of the ranks the RoPE frequencies were scrambled. verl's `module.to(model_dtype)` also rounded them to bf16. Run `patch_verl_gemma4_rope_buffers.py` on every pod (§7); see [LOGPROB_PARITY.md](LOGPROB_PARITY.md).
 
 ---
 
@@ -61,6 +62,7 @@ Colocated `verl` GRPO (DAPO clip-higher) launcher, GKE A4X (`a4x-highgpu-4g-a4x-
 | **Smoke, committed launcher** | `logs/gemma4_e2b_4n16g_smoke4steps_1020_2258.log` | 2–4 (n=3) | **77.7** | 77.9 | 80.6 | 81.3 | 38.2 (49%) | 33.6 | 25.4 | 8.3 | 4.3 |
 | Smoke, incl. compile step | same | 1–4 (n=4) | 79.5 | 90.5 | 114.0 | 128.0 | 39.0 (49%) | 34.6 | 26.2 | 8.5 | 4.3 |
 | Earlier run (pre-fix launcher + manual CLI overrides; superseded) | `logs/gemma4_e2b_4n16g_val4steps_1020_0945.log` | 2–4 (n=3) | 78.3 | 78.8 | 81.4 | 82.2 | 38.1 (49%) | 35.9 | 27.7 | 8.7 | 4.3 |
+| Smoke after the RoPE-buffer fix ([LOGPROB_PARITY.md](LOGPROB_PARITY.md) §6) | `logs/gemma4_e2b_4n16g_smoke4steps_fixed_1021_0822.log` | 2–4 (n=3) | 74.0 | 75.8 | 78.5 | 79.6 | 37.1 (50%) | 33.5 | 25.4 | 8.3 | 4.3 |
 
 Per step (smoke):
 
@@ -77,7 +79,9 @@ Per step (smoke):
 
 This is recorded as an exit-phase issue: it does not change the driver exit code. `RuntimeError: DataLoader worker (pid 6527) is killed by signal: Killed.` appears after `Training Progress: 100% 4/4`. The traceback is raised by PyTorch's DataLoader SIGCHLD handler while the TaskRunner sits in Ray's `run_task_loop()`, with no training frames on the stack, i.e. after `TaskRunner.run()` returned. That is consistent with, but not proof of, Ray SIGKILL-ing the actor's child DataLoader workers at teardown. All four step lines were logged and the driver exited `0`. The same message is present at the end of all six 09-02 20-step logs.
 
-### 3.4 Rollout vs trainer log-probs (`rollout_corr/k3_kl` ≈ 1.3) — pending
+### 3.4 Rollout vs trainer log-probs (`rollout_corr/k3_kl` ≈ 1.3) — resolved
+
+**Resolved ([LOGPROB_PARITY.md](LOGPROB_PARITY.md)).** The gap came from the trainer, not the sampler. On 7 of 16 FSDP ranks the RoPE buffers were scrambled at init, so every log-prob computed on those ranks was wrong; the vLLM rollout matched HF and an offline vLLM prefill to bf16 noise. After `patch_verl_gemma4_rope_buffers.py`, the trainer matches the rollout to bf16 noise. The analysis below was written before the root cause was known and is kept for the record. Its convention argument (truncation cannot explain the gap) still holds.
 
 **Conventions (code, verl pin `ace775e8`, vLLM 0.29.0):**
 - Rollout log-probs: `actor_rollout_ref.rollout.logprobs_mode=processed_logprobs` (verl default in `verl/trainer/config/rollout/rollout.yaml`, passed to the vLLM engine in `vllm_async_server.py`). vLLM applies temperature, then `apply_top_k_top_p` masking, then `log_softmax` (`v1/sample/ops/topk_topp_sampler.py`), i.e. log-probs renormalized over the kept top-k/top-p set.
@@ -119,7 +123,7 @@ The 09-02 runs used an older verl checkout that did not log these metrics, so th
 - **This smoke cannot be used for it**: eval is disabled, and 4 steps × 256 prompts cover 1,024 of the 950,000 training prompts. The gate needs a separate eval-enabled GPU run. Extra Hydra overrides after the launcher are applied last (verified in §3.4: `top_k=-1` replaced the launcher's `top_k=50`), so `trainer.test_freq=<N> trainer.val_before_train=True` turns eval on without editing the frozen block.
 - **Fix on both sides before reading a 1-pp gate**: the held-out set and its size, eval decoding settings, prompt rendering, and number of seeds. At 55% accuracy the binomial standard error is 1.57 pp at N=1,000, 0.70 pp at N=5,000, and 0.22 pp at N=50,000 (the full `val.parquet`). A GPU−TPU difference between two independent evaluations has √2× that error, so N≈1,000 cannot resolve 1 pp.
 - **Prompt rendering**: the OMI2 parquet's user content already contains `<start_of_turn>user … <end_of_turn>\n<start_of_turn>model`, and verl wraps it again in Gemma-4's chat template (`<|turn>user … <turn|>`; see the `PREFLIGHT` sample in the smoke log). The TPU side has to render prompts identically for the comparison to be like-for-like.
-- **Resolve §3.4 first**: whatever its cause, a rollout/trainer gap this large means the trainer is updating on samples from a measurably different policy.
+- **Trainer log-prob parity (§3.4) is resolved**, but only once `patch_verl_gemma4_rope_buffers.py` is applied on every pod. Without it, ~half of the ranks train on wrong log-probs, and an accuracy comparison would be meaningless.
 
 ---
 
@@ -153,7 +157,13 @@ Component columns are per-component medians, so they do not sum to the step medi
 | `verl-qwen3-raycluster.yaml` | 16-node (64-GPU) KubeRay `RayCluster` on `a4x-highgpu-4g-a4x-pool-7` with MNNVL `ComputeDomain` and GCS Fuse mounts |
 | `compute-domain-a4x.yaml` | `ComputeDomain` (`numNodes: 16`) for MNNVL |
 | `priorityclass-verl-high.yaml` | `PriorityClass` `verl-high` |
-| `logs/` | Scaling logs, the smoke log, the truncation-off A/B log, and the superseded pre-fix run |
+| `logs/` | Scaling logs, the smoke logs (before and after the RoPE fix), the truncation-off A/B logs (flex, sdpa), the parity fixture / rank-probe / post-fix verification runs, and the superseded pre-fix run |
+| `LOGPROB_PARITY.md` | Trainer-vs-sampler log-prob parity: method, ladder results, per-rank localization, root cause, fix, verification |
+| `patch_verl_gemma4_rope_buffers.py` | **Required fix.** Sorts module buffers before the FSDP wrap so buffer order matches across ranks; recomputes Gemma-4 RoPE `inv_freq` in fp32 on first forward |
+| `patch_verl_pin_logprob_fixture.py` | Diagnostic, env-gated (`LOGPROB_FIXTURE_DIR`): dumps the pre-update batch with token IDs and rollout/trainer log-probs, plus a repeated trainer pass |
+| `patch_verl_pin_rank_probe.py` | Diagnostic, env-gated (`VERL_RANK_PROBE_DIR`): per-rank canary forward with per-module output and buffer checksums |
+| `gemma4_logprob_parity.py` | Offline parity ladder on a fixture: HF backends, packed vs unpacked, vLLM prefill, online values; summary tables and error-vs-position plots |
+| `logprob_parity/` | Ladder results before and after the fix (`summary.md`, plots, rank-probe comparisons, per-rank chunk stats) |
 
 ---
 
@@ -174,6 +184,7 @@ for pod in $(kubectl get pods -l ray.io/cluster=verl-bench-xiaotongyang -o jsonp
   kubectl exec $pod -c $container -- bash -c "
     uv pip install --python /workspace/verl-pin/.venv/bin/python --quiet math-verify==0.9.0
     python3 /workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gemma4/patch_verl_gemma4_flex_attn.py /workspace/verl-pin/verl/models/transformers/monkey_patch.py
+    python3 /workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gemma4/patch_verl_gemma4_rope_buffers.py /workspace/verl-pin/verl/models/transformers/monkey_patch.py
   " &
 done
 wait
