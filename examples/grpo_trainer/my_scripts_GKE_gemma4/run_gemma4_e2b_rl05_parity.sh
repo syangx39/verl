@@ -29,10 +29,8 @@
 #     the [tokens, vocab] logits tensor ~1.7x Qwen's; 16384 still holds one
 #     full-length (8192+8192) sequence, which is the hard minimum. Raise it
 #     back if actor/perf/max_memory_reserved_gb leaves headroom.
-#   - Attention backend: nothing to set. vLLM detects Gemma4's heterogeneous
-#     head dims (256 local / 512 global) and FORCES TRITON_ATTN itself
-#     (log line "Forcing TRITON_ATTN backend"). Record in the doc as a
-#     shared constraint by construction, not a free variable.
+#   - Attention backend (vLLM): nothing to set; vLLM picks it. Read the
+#     backend actually used from the vLLM server log.
 #   - prefix caching kept =True for config parity; the workload has no
 #     shared prefixes, so if Gemma's sliding-window attention rejects it,
 #     PREFIX_CACHING=False costs nothing.
@@ -215,16 +213,14 @@ exit "${rc}"
 # =============================================================================
 # Bring-up watch list (gemma-specific, check on the 2-step smoke):
 #   1. PREFLIGHT line: roles must render; rendered_tokens ~150 like Qwen.
-#   2. vLLM server log must show "Forcing TRITON_ATTN backend" (Gemma4
-#      heterogeneous head dims); record as a SHARED constraint in the doc.
-#   3. actor/perf/max_memory_reserved_gb after step 2: if < ~100 GB, try
+#   2. actor/perf/max_memory_reserved_gb after step 2: if < ~100 GB, try
 #      PPO_MAX_TOKEN_LEN=32768 to restore the Qwen packing budget.
-#   4. timing_s/agent_loop/num_preempted/max must stay -1/0; if > 0 the
+#   3. timing_s/agent_loop/num_preempted/max must stay -1/0; if > 0 the
 #      KV cache is too small for 8192-cap sequences -> ROLLOUT_MEM=0.40.
-#   5. response_length/clip_ratio and critic/rewards/mean: sanity-compare
+#   4. response_length/clip_ratio and critic/rewards/mean: sanity-compare
 #      the distribution against the Qwen line (~25-30% cap-hit) and against
 #      the Gemma TPU run before reading any step time.
-#   6. Head-node RAM scales with the number of vLLM replicas (W=64 hit
+#   5. Head-node RAM scales with the number of vLLM replicas (W=64 hit
 #      396/400 GiB on the Qwen line): raise the head pod memory limit
 #      before a 64-GPU run.
 # =============================================================================

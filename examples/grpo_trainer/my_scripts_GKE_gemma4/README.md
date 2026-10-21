@@ -3,7 +3,10 @@
 Colocated `verl` GRPO (DAPO clip-higher) launcher, GKE A4X (`a4x-highgpu-4g-a4x-pool-7`) manifests, the 20-step scaling logs (`1n4g`–`16n64g`), and a 4-step smoke of the committed launcher for `google/gemma-4-E2B-it` on the `rl-05` workload.
 
 > [!IMPORTANT]
-> The 4-step smoke only checks launch plumbing, non-zero updates, and step time. Eval is disabled (`trainer.test_freq=-1`, `trainer.val_before_train=False`), so nothing here measures convergence or the customer accuracy gate (§4). The rollout/trainer log-prob mismatch in §3.4 is still open.
+> **Status: smoke passed; numerical validation and accuracy gate pending.**
+> - Launch / training-flow smoke: **complete** (§3). Four steps with non-zero updates, driver `exit_code=0`.
+> - Numerical correctness: **pending**. Rollout and trainer log-probs disagree (`k3_kl` 0.85–0.89 even with top-k/top-p off), and the packing gate does not cover the trainer's `flex_attention` path (§2.3, §3.4).
+> - Accuracy gate: **pending** (§4). Eval is disabled in the smoke, so it says nothing about convergence or accuracy.
 
 ---
 
@@ -27,21 +30,21 @@ Colocated `verl` GRPO (DAPO clip-higher) launcher, GKE A4X (`a4x-highgpu-4g-a4x-
 
 ## 2. Gemma-4 system & kernel notes on GB200
 
-1. **vLLM attention**: Gemma-4 E2B mixes `head_dim=256` (sliding-window layers) and `head_dim=512` (global layers). vLLM 0.29.0 in this image uses FlashInfer here (smoke log: `Using TRTLLM prefill attention (auto-detected)`; TRT-LLM-gen cubins for both `H256` and `H512` are loaded), and no `Forcing TRITON_ATTN backend` line appears. The `TRITON_ATTN` note in the launcher header describes an older vLLM, not this run.
+1. **vLLM attention**: Gemma-4 E2B mixes `head_dim=256` (sliding-window layers) and `head_dim=512` (global layers). The launcher does not set a vLLM attention backend. In this image, vLLM 0.29.0 used FlashInfer (smoke log: `Using TRTLLM prefill attention (auto-detected)`; TRT-LLM-gen cubins for both `H256` and `H512` are loaded).
 2. **Trainer `flex_attention` tile pinning (`head_dim > 256`)**: Inductor's default `flex_attention` tiles overflow the GB200 227 KB SMEM/CTA limit at `head_dim=512`. `_verl_patch_flex_kernel_options()` (in `verl/models/transformers/monkey_patch.py`; `patch_verl_gemma4_flex_attn.py` applies it to a `/workspace/verl-pin` checkout) pins the measured tiles:
    - Forward: `BLOCK_M=32, BLOCK_N=128, num_warps=8, num_stages=1`
    - Backward: `BLOCK_M1=32, BLOCK_N1=32, BLOCK_M2=32, BLOCK_N2=32, num_warps=8, num_stages=1`
 3. **Packed-sequence isolation gate (`gemma_pack_gate.py`)**: single GPU, short sequences, `torch.no_grad()`, no memory measurement. It checks that HF's packed-sequence masking (restarted `position_ids`, `attention_mask=None`) keeps packed sequences from attending to each other by comparing `[A; B]` with `[A'; B]` (`A'` = token-shuffled `A`) at `96+80` tokens (inside the sliding window) and `640+560` tokens (crossing it). It passes only if `max |logits_B(A') - logits_B(A)| < 1e-3` and exits `1` otherwise.
-   - Verified on GB200 with `--attn sdpa`: LEAKAGE max `0.0000` in both rounds, exit `0`.
+   - Verified on GB200 with `--attn sdpa` (current file, sha256 `6855d7b7…`): LEAKAGE max `0.0000` in both rounds, exit `0`. A PASS only reports that no leakage was seen under these conditions; it does not by itself explain training metrics such as `grad_norm`.
    - **Not covered: `--attn flex_attention`, which the trainer uses.** On torch 2.13 the 80-token reference forward is routed to Inductor's flex-decoding kernel, which has no valid configs here (`NoValidChoicesError`), so the gate exits `1` before reaching a verdict. The gate also does not import verl's `head_dim > 256` tile patch. Packing isolation under `flex_attention` is therefore not verified by this gate.
 
 ---
 
-## 3. 4-step smoke of the committed launcher (`4n16g`, `flex_attention`)
+## 3. 4-step smoke of the committed launcher (`4n16g`, `flex_attention`) — complete
 
 ### 3.1 What ran
 
-- Launcher: `run_gemma4_e2b_rl05_parity.sh`, sha256 `c5f5a0f86c56f6991de1f656c19538c50b1e6a3f622062156363bee7a0b850d6` (byte-identical to the file in this directory).
+- Launcher: `run_gemma4_e2b_rl05_parity.sh` at sha256 `c5f5a0f86c56f6991de1f656c19538c50b1e6a3f622062156363bee7a0b850d6`. The file in this directory (sha256 `8927660b03a1f99721287dc347887d9b16cfbd8e8bc943c9b4f13817be0ab318`) differs from it only in comment lines: the stale vLLM attention-backend notes were removed. The non-comment lines are identical; `grep -v '^[[:space:]]*#' run_gemma4_e2b_rl05_parity.sh | sha256sum` gives `5dc43e0787e4b928e25ebb174b637b72de0e5d5c77f2d2d9b52ce4fd87cdef76` for both.
 - Command, in the Ray head pod, right after `source /workspace/setup_env.sh` (which exports `DATA_DIR=.../gsm8k_boxed` and `MODEL_PATH=.../Qwen3-0.6B`):
   `NNODES=4 TOTAL_STEPS=4 bash run_gemma4_e2b_rl05_parity.sh` — no extra overrides.
 - Log checks (`logs/gemma4_e2b_4n16g_smoke4steps_1020_2258.log`):
@@ -70,11 +73,11 @@ Per step (smoke):
 
 "Mean score" is the sampled training reward (T=0.8) on that step's 256 prompts, not held-out accuracy.
 
-### 3.3 `DataLoader worker ... killed` at the end of the log
+### 3.3 Known exit-phase issue: `DataLoader worker ... killed`
 
-`RuntimeError: DataLoader worker (pid 6527) is killed by signal: Killed.` appears after `Training Progress: 100% 4/4`. The traceback is raised by PyTorch's DataLoader SIGCHLD handler while the TaskRunner sits in Ray's `run_task_loop()` with no training frames on the stack, i.e. after `TaskRunner.run()` returned. That is consistent with Ray SIGKILL-ing the actor's child DataLoader workers at actor teardown. All four step lines were logged and the driver exited `0`. The same message is present at the end of the 09-02 20-step logs.
+This is recorded as an exit-phase issue: it does not change the driver exit code. `RuntimeError: DataLoader worker (pid 6527) is killed by signal: Killed.` appears after `Training Progress: 100% 4/4`. The traceback is raised by PyTorch's DataLoader SIGCHLD handler while the TaskRunner sits in Ray's `run_task_loop()`, with no training frames on the stack, i.e. after `TaskRunner.run()` returned. That is consistent with, but not proof of, Ray SIGKILL-ing the actor's child DataLoader workers at teardown. All four step lines were logged and the driver exited `0`. The same message is present at the end of all six 09-02 20-step logs.
 
-### 3.4 Rollout vs trainer log-probs (`rollout_corr/k3_kl` ≈ 1.3) — open
+### 3.4 Rollout vs trainer log-probs (`rollout_corr/k3_kl` ≈ 1.3) — pending
 
 **Conventions (code, verl pin `ace775e8`, vLLM 0.29.0):**
 - Rollout log-probs: `actor_rollout_ref.rollout.logprobs_mode=processed_logprobs` (verl default in `verl/trainer/config/rollout/rollout.yaml`, passed to the vLLM engine in `vllm_async_server.py`). vLLM applies temperature, then `apply_top_k_top_p` masking, then `log_softmax` (`v1/sample/ops/topk_topp_sampler.py`), i.e. log-probs renormalized over the kept top-k/top-p set.
@@ -104,13 +107,13 @@ Per step (smoke):
 - rollout weight sync;
 - token/log-prob alignment.
 
-The cheapest next checks are a 2-step `ATTN_IMPL=sdpa` A/B and an offline single-GPU HF-vs-vLLM log-prob comparison on identical token sequences.
+Next step (separate from this smoke): keep the truncation-off sampling and switch `ATTN_IMPL=sdpa` for 2 steps. This separates the trainer's `flex_attention` path, which the gate does not cover, from the rest. If the gap persists, follow up with an offline single-GPU HF-vs-vLLM log-prob comparison on identical token sequences.
 
 The 09-02 runs used an older verl checkout that did not log these metrics, so they cannot show whether the gap existed then.
 
 ---
 
-## 4. Accuracy gate (not evaluated here)
+## 4. Accuracy gate — pending (not evaluated here)
 
 - **Gate (customer, Meta)**: TPU accuracy ≥ GPU accuracy − 1 percentage point. Example: if the GPU reference is 55%, the TPU run must reach ≥ 54%. No GPU reference accuracy has been measured in this directory yet.
 - **This smoke cannot be used for it**: eval is disabled, and 4 steps × 256 prompts cover 1,024 of the 950,000 training prompts. The gate needs a separate eval-enabled GPU run. Extra Hydra overrides after the launcher are applied last (verified in §3.4: `top_k=-1` replaced the launcher's `top_k=50`), so `trainer.test_freq=<N> trainer.val_before_train=True` turns eval on without editing the frozen block.
