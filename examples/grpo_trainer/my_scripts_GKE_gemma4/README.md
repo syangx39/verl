@@ -5,8 +5,8 @@ Colocated `verl` GRPO (DAPO clip-higher) launcher, GKE A4X (`a4x-highgpu-4g-a4x-
 > [!IMPORTANT]
 > **Status: smoke passed; trainer–sampler log-prob parity fixed; accuracy gate pending.**
 > - Launch / training-flow smoke: **complete** (§3). Four steps with non-zero updates, driver `exit_code=0`.
-> - Numerical correctness: **fixed** ([LOGPROB_PARITY.md](LOGPROB_PARITY.md)). The FSDP trainer computed wrong log-probs on ~half of its ranks because RoPE buffers were scrambled at FSDP init; the vLLM rollout was correct. With [`patch_verl_gemma4_rope_buffers.py`](patch_verl_gemma4_rope_buffers.py) applied on every pod, trainer and rollout agree to bf16 noise (step 1 at T=1: `k3_kl` 0.98 → 0.00046, Pearson 0.51 → 0.9992). Trainer-side metrics from earlier runs (k3, entropy, `grad_norm`) are invalid; step times stand.
-> - Accuracy gate: **pending** (§4). Eval is disabled in the smoke, so it says nothing about convergence or accuracy.
+> - Numerical correctness: **fixed** ([LOGPROB_PARITY.md](LOGPROB_PARITY.md)). The FSDP trainer computed wrong log-probs on ~half of its ranks because RoPE buffers were scrambled at FSDP init; the vLLM rollout was correct. With [`patch_verl_gemma4_rope_buffers.py`](patch_verl_gemma4_rope_buffers.py) applied on every pod, trainer and rollout agree to bf16 noise (step 1 at T=1: `k3_kl` 0.98 → 0.00046, Pearson 0.51 → 0.9992). Trainer-side metrics from earlier runs (k3, entropy, `grad_norm`) are invalid. Their step times are kept as a historical record; the post-fix 4-step smoke shows no obvious regression (§3.2), but post-fix throughput has not been measured.
+> - Accuracy / convergence gate: **pending** (§4). Eval is disabled in the smoke, so it says nothing about convergence or accuracy.
 
 ---
 

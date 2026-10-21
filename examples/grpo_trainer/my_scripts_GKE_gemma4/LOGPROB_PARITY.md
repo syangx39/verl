@@ -1,6 +1,6 @@
 # Gemma-4 E2B: trainer vs sampler log-prob parity (root cause + fix)
 
-**Status: fixed.** Trainer and sampler log-probs now agree to bf16 noise. The accuracy gate (README §4) is still pending.
+**Status: fixed.** Trainer and sampler log-probs now agree to bf16 noise. The accuracy / convergence gate (README §4) is still pending.
 
 The online FSDP trainer computed wrong log-probs on about half of its data-parallel ranks. On those ranks the RoPE frequency buffers were scrambled during FSDP initialization, because transformers registers them in a per-process random order and FSDP1 broadcasts buffers by position. The vLLM rollout was correct all along. [`patch_verl_gemma4_rope_buffers.py`](patch_verl_gemma4_rope_buffers.py) fixes it.
 
@@ -17,7 +17,7 @@ The online FSDP trainer computed wrong log-probs on about half of its data-paral
 Production config after the fix (frozen launcher: T=0.8, top-k 50, top-p 0.95; 4 steps):
 - `rollout_corr/k3_kl` ≈ 7e-4 (was 1.31–1.40)
 - Pearson 0.997 (was 0.41)
-- steps 2–4 median 74.0 s, so throughput is unchanged (§6)
+- steps 2–4 median 74.0 s (77.7 s before the fix): no obvious step-time regression in this 4-step smoke (§6)
 
 ---
 
@@ -41,6 +41,16 @@ Experimental conditions:
 - **Metrics.** Per-token \|dlogp\| mean / p50 / p99 / max, signed mean, prob-MAE and k3. Error is also plotted against absolute token position, with the 512-token sliding window marked.
 
 Harness: [`gemma4_logprob_parity.py`](gemma4_logprob_parity.py) (`select → hf → vllm → report`). Fixtures and per-token results are kept in `gs://xiaotongyang-bucket/meta-rl/GKE_repro/meta-RL/logprob_parity/` (`/workspace/meta-RL/logprob_parity/` in the pods).
+
+The harness refuses to mix results:
+- Every stage checks that the fixture is a parity fixture: dumped at step 1, T=1, no top-k/top-p, and sampled from the initial weights (`nt__global_steps` = 0). `--allow_nonparity_fixture` overrides this check.
+- `selection.json` and every `hf__*`/`vllm__*` result carry the fixture's sha256 and the selected indices. `report` exits if any result does not match the current fixture and selection, or if its per-sequence lengths are wrong.
+
+Use one `--out` directory per fixture. The before/after results below were produced by the first version of the harness, which lacked these checks, but each fixture had its own directory, so nothing was mixed. Re-running the hardened harness on the post-fix fixture gives:
+- the HF and online rows exactly;
+- the vLLM rows within run-to-run noise ([`after_fix/summary_rerun_hardened_tool.md`](logprob_parity/after_fix/summary_rerun_hardened_tool.md)).
+
+The refusal cases are exercised in [`after_fix/provenance_negative_tests.txt`](logprob_parity/after_fix/provenance_negative_tests.txt).
 
 ---
 
@@ -149,14 +159,15 @@ Every online pair now sits on the same curve as the offline bf16 implementations
 
   Before the fix, the same smoke gave k3 1.31–1.40, kl 1.55–1.65, Pearson 0.41, entropy 0.40 and `grad_norm` 4.7–9.1 (README §3).
   - The remaining kl ≈ 0.008 nats/token is the expected top-k/top-p effect. Rollout log-probs are renormalized over the kept set; the trainer's are full-vocabulary (README §3.4). It has the expected sign (rollout ≥ trainer), and k3 ≈ 7e-4.
-  - Steps 2–4: median 74.0 s (pre-fix smoke 77.7 s; 20-step reference 76.2 s), so throughput is unchanged. Driver `exit_code=0`.
+  - Steps 2–4: median 74.0 s (pre-fix smoke 77.7 s; 20-step reference 76.2 s). This 4-step smoke shows no obvious step-time regression. It is not a throughput measurement: the fix changes the gradients, and with them later response lengths, which drive step time. Driver `exit_code=0`.
 
 ---
 
 ## 7. Impact on earlier results
 
-- Every Gemma-4 run on this verl pin before the fix (the smokes and A/B runs in PRs #6 and #7) computed `old_log_prob`, and therefore the policy gradient, on ~half of the ranks with scrambled RoPE. Their **step times are unaffected**: the fix changes no compute shapes. Their log-prob, entropy, `grad_norm` and any convergence or accuracy reading are not valid. Pre-fix step-1 `grad_norm` was 4.7–9.1; post-fix it is 0.44 at T=1.
-- The 09-02 scaling logs came from a different image and verl checkout and do not log these metrics. Whether they were affected is not verified; their step-time numbers stand.
+- Every Gemma-4 run on this verl pin before the fix (the smokes and A/B runs in PRs #6 and #7) computed `old_log_prob`, and therefore the policy gradient, on ~half of the ranks with scrambled RoPE. Their log-prob, entropy, `grad_norm` and any convergence or accuracy reading are not valid. Pre-fix step-1 `grad_norm` was 4.7–9.1; post-fix it is 0.44 at T=1.
+- Their step times are kept as a historical record only. The fix does not change the shapes being computed, but it does change the gradients, and with them the response lengths of later steps, which drive step time. Beyond the 4-step smoke above (no obvious regression), post-fix step time has not been measured.
+- The 09-02 scaling logs came from a different image and verl checkout and do not log these metrics. Whether they were affected is not verified; their step times are likewise a historical record, not a post-fix measurement.
 - The pre-fix k3 varied from run to run (0.85–1.60 across the flex/sdpa A/B runs) because each run drew a different number and set of mismatched ranks. Each worker's hash order is random, so the count of bad ranks among the 15 non-zero ranks is Binomial(15, ½). The earlier flex-vs-sdpa k3 difference therefore says nothing about the backends, consistent with the review note that the two rollouts were different. Logs: `logs/gemma4_e2b_4n16g_diag_notrunc_1021_0610.log` (flex), `logs/gemma4_e2b_4n16g_diag_notrunc_sdpa_1021_0652.log` (sdpa).
 - Other models are exposed wherever a module registers buffers in hash-dependent order under FSDP1 `sync_module_states`. The buffer sort guards every module, not only Gemma-4.
 
