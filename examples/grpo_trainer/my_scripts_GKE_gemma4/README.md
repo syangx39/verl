@@ -6,6 +6,7 @@ Colocated `verl` GRPO (DAPO clip-higher) launcher, GKE A4X (`a4x-highgpu-4g-a4x-
 > **Status: smoke passed; trainer–sampler log-prob parity fixed; accuracy gate pending.**
 > - Launch / training-flow smoke: **complete** (§3). Four steps with non-zero updates, driver `exit_code=0`.
 > - Numerical correctness: **fixed** ([LOGPROB_PARITY.md](LOGPROB_PARITY.md)). The FSDP trainer computed wrong log-probs on ~half of its ranks because RoPE buffers were scrambled at FSDP init; the vLLM rollout was correct. With [`patch_verl_gemma4_rope_buffers.py`](patch_verl_gemma4_rope_buffers.py) applied on every pod, trainer and rollout agree to bf16 noise (step 1 at T=1: `k3_kl` 0.98 → 0.00046, Pearson 0.51 → 0.9992). Trainer-side metrics from earlier runs (k3, entropy, `grad_norm`) are invalid. Their step times are kept as a historical record; the post-fix 4-step smoke shows no obvious regression (§3.2), but post-fix throughput has not been measured.
+> - Fix persistence and guard: the launcher now runs [`gemma4_node_prep.py`](gemma4_node_prep.py) on every launch, which brings every Ray node to "verl pin + managed patches" and aborts unless all nodes pass. Inside the trainer, the `[GEMMA4-ROPE]` guard checks every rank's RoPE buffers right after the FSDP wrap and fails the whole job if any rank is wrong ([ROPE_GUARD.md](ROPE_GUARD.md)).
 > - Accuracy / convergence gate: **pending** (§4). Eval is disabled in the smoke, so it says nothing about convergence or accuracy.
 
 ---
@@ -37,7 +38,7 @@ Colocated `verl` GRPO (DAPO clip-higher) launcher, GKE A4X (`a4x-highgpu-4g-a4x-
 3. **Packed-sequence isolation gate (`gemma_pack_gate.py`)**: single GPU, short sequences, `torch.no_grad()`, no memory measurement. It checks that HF's packed-sequence masking (restarted `position_ids`, `attention_mask=None`) keeps packed sequences from attending to each other by comparing `[A; B]` with `[A'; B]` (`A'` = token-shuffled `A`) at `96+80` tokens (inside the sliding window) and `640+560` tokens (crossing it). It passes only if `max |logits_B(A') - logits_B(A)| < 1e-3` and exits `1` otherwise.
    - Verified on GB200 with `--attn sdpa` (current file, sha256 `6855d7b7…`): LEAKAGE max `0.0000` in both rounds, exit `0`. A PASS only reports that no leakage was seen under these conditions; it does not by itself explain training metrics such as `grad_norm`.
    - **Not covered: `--attn flex_attention`, which the trainer uses.** On torch 2.13 the 80-token reference forward is routed to Inductor's flex-decoding kernel, which has no valid configs here (`NoValidChoicesError`), so the gate exits `1` before reaching a verdict. The gate also does not import verl's `head_dim > 256` tile patch. Packing isolation under `flex_attention` is therefore not verified by this gate. The offline parity ladder in [LOGPROB_PARITY.md](LOGPROB_PARITY.md) §2 does cover it: in verl's packed layout, `flex_attention` matches unpacked to bf16 noise.
-4. **Trainer RoPE buffers (required fix)**: transformers' `Gemma4TextRotaryEmbedding` registers its RoPE buffers in hash-randomized `set` order, and verl's FSDP1 `sync_module_states` broadcasts buffers by position, so on ~half of the ranks the RoPE frequencies were scrambled. verl's `module.to(model_dtype)` also rounded them to bf16. Run `patch_verl_gemma4_rope_buffers.py` on every pod (§7); see [LOGPROB_PARITY.md](LOGPROB_PARITY.md).
+4. **Trainer RoPE buffers (required fix)**: transformers' `Gemma4TextRotaryEmbedding` registers its RoPE buffers in hash-randomized `set` order, and verl's FSDP1 `sync_module_states` broadcasts buffers by position, so on ~half of the ranks the RoPE frequencies were scrambled. verl's `module.to(model_dtype)` also rounded them to bf16. The launcher installs the fix on every node at every launch (`gemma4_node_prep.py`), and the `[GEMMA4-ROPE]` guard verifies it on every rank; see [ROPE_GUARD.md](ROPE_GUARD.md) and [LOGPROB_PARITY.md](LOGPROB_PARITY.md).
 
 ---
 
@@ -45,7 +46,7 @@ Colocated `verl` GRPO (DAPO clip-higher) launcher, GKE A4X (`a4x-highgpu-4g-a4x-
 
 ### 3.1 What ran
 
-- Launcher: `run_gemma4_e2b_rl05_parity.sh` at sha256 `c5f5a0f86c56f6991de1f656c19538c50b1e6a3f622062156363bee7a0b850d6`. The file in this directory (sha256 `8927660b03a1f99721287dc347887d9b16cfbd8e8bc943c9b4f13817be0ab318`) differs from it only in comment lines: the stale vLLM attention-backend notes were removed. The non-comment lines are identical; `grep -v '^[[:space:]]*#' run_gemma4_e2b_rl05_parity.sh | sha256sum` gives `5dc43e0787e4b928e25ebb174b637b72de0e5d5c77f2d2d9b52ce4fd87cdef76` for both.
+- Launcher: the 4-step smoke ran `run_gemma4_e2b_rl05_parity.sh` at sha256 `c5f5a0f86c56f6991de1f656c19538c50b1e6a3f622062156363bee7a0b850d6` (`8927660b03a1f99721287dc347887d9b16cfbd8e8bc943c9b4f13817be0ab318` after removing stale vLLM comment lines; non-comment sha256 `5dc43e0787e4b928e25ebb174b637b72de0e5d5c77f2d2d9b52ce4fd87cdef76`). The current launcher (`8646c17331d84ac95a5183ffae4880f2150889a864fe1ff88ba5c79390ea66d0`) adds the pre-launch `gemma4_node_prep.py` call and `VERL_GEMMA4_ROPE_REPORT_DIR=${GUARD_DIR}` (verified in `logs/gemma4_e2b_4n16g_guard_smoke2_1021_1926.log`; see [ROPE_GUARD.md](ROPE_GUARD.md)).
 - Command, in the Ray head pod, right after `source /workspace/setup_env.sh` (which exports `DATA_DIR=.../gsm8k_boxed` and `MODEL_PATH=.../Qwen3-0.6B`):
   `NNODES=4 TOTAL_STEPS=4 bash run_gemma4_e2b_rl05_parity.sh` — no extra overrides.
 - Log checks (`logs/gemma4_e2b_4n16g_smoke4steps_1020_2258.log`):
@@ -123,7 +124,7 @@ The 09-02 runs used an older verl checkout that did not log these metrics, so th
 - **This smoke cannot be used for it**: eval is disabled, and 4 steps × 256 prompts cover 1,024 of the 950,000 training prompts. The gate needs a separate eval-enabled GPU run. Extra Hydra overrides after the launcher are applied last (verified in §3.4: `top_k=-1` replaced the launcher's `top_k=50`), so `trainer.test_freq=<N> trainer.val_before_train=True` turns eval on without editing the frozen block.
 - **Fix on both sides before reading a 1-pp gate**: the held-out set and its size, eval decoding settings, prompt rendering, and number of seeds. At 55% accuracy the binomial standard error is 1.57 pp at N=1,000, 0.70 pp at N=5,000, and 0.22 pp at N=50,000 (the full `val.parquet`). A GPU−TPU difference between two independent evaluations has √2× that error, so N≈1,000 cannot resolve 1 pp.
 - **Prompt rendering**: the OMI2 parquet's user content already contains `<start_of_turn>user … <end_of_turn>\n<start_of_turn>model`, and verl wraps it again in Gemma-4's chat template (`<|turn>user … <turn|>`; see the `PREFLIGHT` sample in the smoke log). The TPU side has to render prompts identically for the comparison to be like-for-like.
-- **Trainer log-prob parity (§3.4) is resolved**, but only once `patch_verl_gemma4_rope_buffers.py` is applied on every pod. Without it, ~half of the ranks train on wrong log-probs, and an accuracy comparison would be meaningless.
+- **Trainer log-prob parity (§3.4) is resolved.** Without the fix, ~half of the ranks train on wrong log-probs and an accuracy comparison would be meaningless. The launcher now enforces the fix on every launch, and the guard stops the job before the optimizer is built if any rank's RoPE buffers are wrong ([ROPE_GUARD.md](ROPE_GUARD.md)).
 
 ---
 
@@ -148,7 +149,8 @@ Component columns are per-component medians, so they do not sum to the step medi
 
 | File | Description |
 |---|---|
-| `run_gemma4_e2b_rl05_parity.sh` | Launcher: frozen `rl-05` block, `GEMMA_DATA_DIR` / `GEMMA_MODEL_PATH` isolation, chat-template preflight, string-quoted Ray env vars, prints `[driver] main_ppo finished with exit_code=N` and exits with it |
+| `run_gemma4_e2b_rl05_parity.sh` | Launcher: frozen `rl-05` block, `GEMMA_DATA_DIR` / `GEMMA_MODEL_PATH` isolation, chat-template preflight, node prep on every launch (aborts unless every node passes), string-quoted Ray env vars, prints `[driver] main_ppo finished with exit_code=N` and exits with it |
+| `gemma4_node_prep.py` | Run by the launcher on the Ray head: one hard-node-affinity task per alive node; pins `math-verify` (+2 deps), rebuilds the managed verl files from the pin + patchers, restores any other modified tracked file, import-checks, and writes per-node provenance (`<guard_dir>/node_prep.json`) |
 | `maxtext_math_reward.py` | Math reward (`compute_score`) matching MaxText `rl-05` grading (`math-verify` + `sympy`) |
 | `patch_verl_gemma4_flex_attn.py` | Idempotent patcher adding `_verl_patch_flex_kernel_options` (`head_dim > 256` tiles) to `monkey_patch.py` |
 | `gemma_pack_gate.py` | Packed-sequence isolation gate (§2.3); exits `1` on FAIL or error |
@@ -159,9 +161,13 @@ Component columns are per-component medians, so they do not sum to the step medi
 | `priorityclass-verl-high.yaml` | `PriorityClass` `verl-high` |
 | `logs/` | Scaling logs, the smoke logs (before and after the RoPE fix), the truncation-off A/B logs (flex, sdpa), the parity fixture / rank-probe / post-fix verification runs, and the superseded pre-fix run |
 | `LOGPROB_PARITY.md` | Trainer-vs-sampler log-prob parity: method, ladder results, per-rank localization, root cause, fix, verification |
-| `patch_verl_gemma4_rope_buffers.py` | **Required fix.** Sorts module buffers before the FSDP wrap so buffer order matches across ranks; recomputes Gemma-4 RoPE `inv_freq` in fp32 on first forward |
-| `patch_verl_pin_logprob_fixture.py` | Diagnostic, env-gated (`LOGPROB_FIXTURE_DIR`): dumps the pre-update batch with token IDs and rollout/trainer log-probs, plus a repeated trainer pass |
-| `patch_verl_pin_rank_probe.py` | Diagnostic, env-gated (`VERL_RANK_PROBE_DIR`): per-rank canary forward with per-module output and buffer checksums |
+| `patch_verl_gemma4_rope_buffers.py` | **Required fix + guard** (v2, upgrade-safe: replaces any older block). Sorts module buffers before the FSDP wrap; installs the `[GEMMA4-ROPE]` guard (registration check, all-rank init checkpoint after the FSDP wrap that rebuilds RoPE `inv_freq` in fp32, first-forward check) and its 2-line hook in `transformer_impl.py` ([ROPE_GUARD.md](ROPE_GUARD.md)) |
+| `gemma4_guard_check.py` | Validates a run's evidence by unique node and unique rank: node prep, rank-0 guard report, per-rank records, driver exit code, steps; `--expect-fail-rank R` for the negative test |
+| `test_gemma4_rope_guard.py` | Deterministic single-process tests of the installed guard (classifier states, tolerances, zeros / non-finite, rebuild, registration, checkpoint, fault injection, simulated FSDP1 broadcast) |
+| `ROPE_GUARD.md` | Fix persistence (node prep) and the `[GEMMA4-ROPE]` guard: design, tolerances, evidence (unit tests, positive smoke, deterministic negative test) |
+| `rope_guard/` | Evidence for `ROPE_GUARD.md`: node-prep reports, guard reports, checker outputs, unit-test output |
+| `patch_verl_pin_logprob_fixture.py` | Diagnostic, env-gated (`LOGPROB_FIXTURE_DIR`): dumps the pre-update batch with token IDs and rollout/trainer log-probs, plus a repeated trainer pass. Not applied by node prep, which restores the file it touches |
+| `patch_verl_pin_rank_probe.py` | Diagnostic, env-gated (`VERL_RANK_PROBE_DIR`): per-rank canary forward with per-module output and buffer checksums. Not applied by node prep, which rebuilds `transformer_impl.py` from the pin |
 | `gemma4_logprob_parity.py` | Offline parity ladder on a fixture: HF backends, packed vs unpacked, vLLM prefill, online values; summary tables and error-vs-position plots |
 | `logprob_parity/` | Ladder results before and after the fix (`summary.md`, plots, rank-probe comparisons, per-rank chunk stats) |
 
@@ -178,16 +184,11 @@ kubectl get raycluster verl-bench-xiaotongyang
 ```
 
 ### Prepare workers (`verl-disagg-cu130-arm64` image, `/workspace/verl-pin`)
+Nothing to do by hand: the launcher runs `gemma4_node_prep.py` before `main_ppo` on every launch (pinned `math-verify`, flex tiles, `[GEMMA4-ROPE]` fix + guard on every alive Ray node; see [ROPE_GUARD.md](ROPE_GUARD.md)). To prepare and check the nodes without launching (Ray head pod):
 ```bash
-for pod in $(kubectl get pods -l ray.io/cluster=verl-bench-xiaotongyang -o jsonpath='{.items[*].metadata.name}'); do
-  container=$(kubectl get pod $pod -o jsonpath='{.spec.containers[0].name}')
-  kubectl exec $pod -c $container -- bash -c "
-    uv pip install --python /workspace/verl-pin/.venv/bin/python --quiet math-verify==0.9.0
-    python3 /workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gemma4/patch_verl_gemma4_flex_attn.py /workspace/verl-pin/verl/models/transformers/monkey_patch.py
-    python3 /workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gemma4/patch_verl_gemma4_rope_buffers.py /workspace/verl-pin/verl/models/transformers/monkey_patch.py
-  " &
-done
-wait
+source /workspace/setup_env.sh
+python3 /workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gemma4/gemma4_node_prep.py \
+  --report /workspace/meta-RL/logs/gemma4_guard/node_prep_$(date +%m%d_%H%M).json
 ```
 
 ### Optional packing gate (GPU worker pod)
@@ -200,8 +201,10 @@ python3 /workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gemma4/gemm
 ```bash
 source /workspace/setup_env.sh
 SCRIPT_DIR=/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gemma4
-LOG=/workspace/meta-RL/logs/gemma4_e2b_4n16g_smoke4steps_$(date +%m%d_%H%M).log
-NNODES=4 TOTAL_STEPS=4 bash "$SCRIPT_DIR/run_gemma4_e2b_rl05_parity.sh" 2>&1 | tee "$LOG"
+EXP=gemma4_e2b_4n16g_smoke4steps_$(date +%m%d_%H%M)
+LOG=/workspace/meta-RL/logs/$EXP.log
+EXPERIMENT_NAME=$EXP NNODES=4 TOTAL_STEPS=4 bash "$SCRIPT_DIR/run_gemma4_e2b_rl05_parity.sh" 2>&1 | tee "$LOG"
 grep -a "\[driver\]" "$LOG"                     # [driver] main_ppo finished with exit_code=0
+python3 "$SCRIPT_DIR/gemma4_guard_check.py" --log "$LOG" --guard-dir /workspace/meta-RL/logs/gemma4_guard/$EXP --world 16 --steps 4
 python3 "$SCRIPT_DIR/step_time_report.py" "$LOG" 2 4
 ```

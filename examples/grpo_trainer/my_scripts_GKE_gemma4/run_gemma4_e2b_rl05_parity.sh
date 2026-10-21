@@ -128,6 +128,17 @@ print("---------------------------------------------")
 EOF
 fi
 
+########################### node prep (every launch) ######################
+# Brings EVERY alive Ray node to "verl pin + managed patches" (flex tiles, [GEMMA4-ROPE] fix + guard), pins
+# math-verify, verifies the imports, and records per-node provenance; aborts the launch unless every node passes.
+# The guard itself runs inside the trainer and writes per-rank evidence to GUARD_DIR (see ROPE_GUARD.md).
+GUARD_DIR=${GEMMA4_GUARD_DIR:-/workspace/meta-RL/logs/gemma4_guard}/${EXPERIMENT_NAME}
+mkdir -p "$GUARD_DIR"
+LAUNCHER_SHA256=$(sha256sum "$0" | cut -d' ' -f1)
+echo "[provenance] launcher=$0 sha256=${LAUNCHER_SHA256} guard_dir=${GUARD_DIR}"
+python3 "$SCRIPT_DIR/gemma4_node_prep.py" --patch-dir "$SCRIPT_DIR" --report "$GUARD_DIR/node_prep.json" \
+    --min-gpu-nodes "$NNODES" --launcher-sha256 "$LAUNCHER_SHA256"
+
 ########################### launch ########################################
 # [GB200] block inherited from the Qwen rl-05 line (enforce_eager=False and
 # free_cache_engine=False are measured [SYS] deviations from upstream; both
@@ -192,6 +203,7 @@ python3 -m verl.trainer.main_ppo \
     "++ray_kwargs.ray_init.runtime_env.env_vars.REWARD_DUMP_EVERY=\"${REWARD_DUMP_EVERY}\"" \
     "++ray_kwargs.ray_init.runtime_env.env_vars.VLLM_NO_USAGE_STATS=\"1\"" \
     "++ray_kwargs.ray_init.runtime_env.env_vars.DO_NOT_TRACK=\"1\"" \
+    "++ray_kwargs.ray_init.runtime_env.env_vars.VERL_GEMMA4_ROPE_REPORT_DIR=${GUARD_DIR}" \
     trainer.balance_batch=True \
     trainer.logger='["console","tensorboard"]' \
     trainer.project_name=${PROJECT_NAME} \

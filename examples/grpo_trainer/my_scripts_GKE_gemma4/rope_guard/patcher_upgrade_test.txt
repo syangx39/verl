@@ -1,0 +1,25 @@
+# patch_verl_gemma4_rope_buffers.py upgrade semantics (run on copies; sha256 of the patcher: 6d22ce33a767c1029bf94264ffeb9bb07bf13843e1f80939f6f1ef985ffaf5e2)
+# fresh = verl pin ace775e8 + flex patch; v1pod = monkey_patch.py / transformer_impl.py copied from a pod carrying the PR #8 v1 block + rank-probe diagnostic
+$ patcher --print-version
+{"version": "2", "block_sha256": "2d750b2b0c718b581831c6aa9130717e5dcf47e5938715de58caa2d42ae0b8f4"}
+$ patcher --verl-root fresh   # first install
+GEMMA4-ROPE PATCH: verl/models/transformers/monkey_patch.py APPLIED (version 2, sha256 9be46b096f096ab1)
+GEMMA4-ROPE PATCH: verl/workers/engine/fsdp/transformer_impl.py APPLIED (version 2, sha256 9a43adb81f9e8d39)
+$ patcher --verl-root fresh   # again
+GEMMA4-ROPE PATCH: verl/models/transformers/monkey_patch.py UP-TO-DATE (version 2, sha256 9be46b096f096ab1)
+GEMMA4-ROPE PATCH: verl/workers/engine/fsdp/transformer_impl.py UP-TO-DATE (version 2, sha256 9a43adb81f9e8d39)
+$ patcher v1pod/verl/models/transformers/monkey_patch.py   # legacy CLI form, in-place upgrade of a v1 pod file
+GEMMA4-ROPE PATCH: verl/models/transformers/monkey_patch.py UPGRADED from v1 (version 2, sha256 6c3fa88a5a1eaf85)
+GEMMA4-ROPE PATCH: verl/workers/engine/fsdp/transformer_impl.py APPLIED (version 2, sha256 e80b07077c40bdda)
+$ grep -c 'rank-independent buffer order + fp32 RoPE frequencies' v1pod/.../monkey_patch.py   # v1 block markers left
+0
+$ grep -c '\[GEMMA4-ROPE\] begin' v1pod/.../monkey_patch.py
+1
+$ diff fresh v1pod monkey_patch.py   # only a pre-existing blank line before the pod's flex block differs
+556d555
+< 
+$ sed -n '/_build_fsdp_module(module)$/,+3p' fresh/.../transformer_impl.py
+        module = self._build_fsdp_module(module)
+        from verl.models.transformers.monkey_patch import _verl_gemma4_rope_init_checkpoint as _g4_ckpt  # [GEMMA4-ROPE]
+        _g4_ckpt(module, forward_only=self.engine_config.forward_only)  # [GEMMA4-ROPE] v2 init checkpoint, see ROPE_GUARD.md
+        log_gpu_memory_usage("After FSDP", logger=None)
