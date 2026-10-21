@@ -20,6 +20,7 @@
 #              bf16 kernel tiling differences, expected small)
 # =============================================================================
 import argparse
+import sys
 import torch
 
 
@@ -114,11 +115,12 @@ def main():
 
     print("\n===== overall =====")
     if max(r1[0], r2[0]) < 1e-3:
-        print("PASS: keep use_remove_padding=True with this attention impl; "
-              "the 80x grad_norm is then a model property, not a packing bug.")
+        print("PASS: no cross-sequence leakage in either round with this attention impl "
+              "(short sequences, no grad; see README section 2.3 for what this does not cover).")
     else:
         print("FAIL: packing leaks under this attention impl; run with REMOVE_PADDING=False "
               "(and solve its memory cost separately) or move to an impl whose masking passes this gate.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

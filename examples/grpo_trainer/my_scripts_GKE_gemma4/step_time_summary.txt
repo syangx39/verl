@@ -1,15 +1,15 @@
-=== 4-Step Validation Run on a4x-highgpu-4g-a4x-pool-7 (4n16g, flex_attention) ===
+=== 4-Step Smoke Validation Run on a4x-highgpu-4g-a4x-pool-7 (4n16g, flex_attention) ===
 --- Steady-State Steps 2-4 ---
 mode: two-pass (no bypass_mode=True in the resolved config; actor loss_mode ['k3', 'vanilla'])
-steps 2-4 (n=3): step median 78.3 s (mean 78.8, p90 81.4, max 82.2) | rollout 38.1 s (49%) | train 35.9 s (update 27.7 + old_logp 8.7) | other 4.3 s
-prompt 154.1 tok | output length: mean 1895 tok, median of step means 1892 | at cap: mean 0.1% | score first3 0.711 -> last3 0.711 | steps logged 1-4
-per step: 2:76 3:78 4:82
+steps 2-4 (n=3): step median 77.7 s (mean 77.9, p90 80.6, max 81.3) | rollout 38.2 s (49%) | train 33.6 s (update 25.4 + old_logp 8.3) | other 4.3 s
+prompt 154.1 tok | output length: mean 1911 tok, median of step means 1878 | at cap: mean 0.1% | score first3 0.711 -> last3 0.711 | steps logged 1-4
+per step: 2:75 3:78 4:81
 wall clock: no TensorBoard events under /workspace/meta-RL/logs/tensorboard; skipped
 --- All Steps 1-4 (incl. Step 1 Compilation) ---
 mode: two-pass (no bypass_mode=True in the resolved config; actor loss_mode ['k3', 'vanilla'])
-steps 1-4 (n=4): step median 80.2 s (mean 92.0, p90 116.8, max 131.6) | rollout 38.4 s (48%) | train 37.5 s (update 29.0 + old_logp 8.8) | other 4.3 s
-prompt 153.5 tok | output length: mean 1862 tok, median of step means 1827 | at cap: mean 0.1% | score first4 0.715 -> last4 0.715 | steps logged 1-4
-per step: 1:132 2:76 3:78 4:82
+steps 1-4 (n=4): step median 79.5 s (mean 90.5, p90 114.0, max 128.0) | rollout 39.0 s (49%) | train 34.6 s (update 26.2 + old_logp 8.5) | other 4.3 s
+prompt 153.5 tok | output length: mean 1874 tok, median of step means 1825 | at cap: mean 0.1% | score first4 0.715 -> last4 0.715 | steps logged 1-4
+per step: 1:128 2:75 3:78 4:81
 wall clock: no TensorBoard events under /workspace/meta-RL/logs/tensorboard; skipped
 
 === Official 20-Step Scaling Sweep (Steady-State Steps 2-20) ===
