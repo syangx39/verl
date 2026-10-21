@@ -2,7 +2,7 @@
 
 > [!IMPORTANT]
 > **Status:** Evaluation dataset (`eval_5000.parquet`), prompt-token ID fixture (`eval_5000_prompt_tokens.parquet`), and 200-step GPU baseline launcher (`run_gemma4_e2b_rl05_accuracy_baseline.sh`) are frozen prior to launching the 200-step GPU baseline runs.
-> - **Customer gate (Meta):** $\text{Acc}_{\text{TPU}} \ge \text{Acc}_{\text{GPU}} - 1.0\text{ pp}$ under identical recipe, training budget, prompt token IDs, and grading.
+> - **Customer gate (Meta):** $\overline{\text{Acc}}_{\text{TPU}}(200) \ge \overline{\text{Acc}}_{\text{GPU}}(200) - 1.0\text{ pp}$, where $\overline{\text{Acc}}(200) = \frac{1}{3}\sum_{s=1}^{3} \text{Acc}_s(200)$ is the **3-seed arithmetic mean** held-out greedy accuracy on `eval_5000.parquet` at the pre-declared **final checkpoint (step 200)** under identical recipe, training budget, prompt token IDs, and grading (§3.1).
 
 ---
 
@@ -46,7 +46,7 @@ At $N = 5{,}000$ and $\hat{p} \approx 0.55$, the single-run binomial standard er
 
 | Knob | Value | Notes |
 |---|---|---|
-| Base recipe | [`run_gemma4_e2b_rl05_parity.sh`](run_gemma4_e2b_rl05_parity.sh) | Unchanged frozen `rl-05` training parameters (`train_batch_size=256`, `rollout.n=8`, `ppo_mini_batch_size=256` [$\mu=1$], `lr=1e-6`, `clip=0.2/0.28`, $\beta=0$, `max_prompt=8192`, `max_response=8192`, `T=0.8`, `top_k=50`, `top_p=0.95`, `ATTN_IMPL=flex_attention`) |
+| Base recipe | [`run_gemma4_e2b_rl05_parity.sh`](run_gemma4_e2b_rl05_parity.sh) | Unchanged frozen `rl-05` training parameters (`train_batch_size=256`, `rollout.n=8`, `ppo_mini_batch_size=256` [$\mu=1$], `lr=5e-7`, `lr_warmup_steps_ratio=0.05`, `clip=0.2/0.28`, $\beta=0$, `max_prompt=8192`, `max_response=8192`, `T=0.8`, `top_k=50`, `top_p=0.95`, `ATTN_IMPL=flex_attention`) |
 | RoPE fix & guard | Step 0 (`gemma4_node_prep.py` + `[GEMMA4-ROPE v2]`) | Enforced automatically on every launch ([ROPE_GUARD.md](ROPE_GUARD.md)) |
 | Training horizon | `TOTAL_STEPS=200` | 200 GRPO steps $\times$ 2,048 completions/step = 409,600 training completions (51,200 prompts) |
 | Eval dataset | `eval_5000.parquet` | 5,000 non-overlapping unique problems (§1) |
@@ -54,7 +54,26 @@ At $N = 5{,}000$ and $\hat{p} \approx 0.55$, the single-run binomial standard er
 | Eval decoding | Greedy (`do_sample=False, temperature=0, top_k=-1, top_p=1.0, n=1`) | Deterministic argmax decoding (`max_response_length=8192`) |
 | Grading | [`maxtext_math_reward.py`](maxtext_math_reward.py) (`compute_score`) | `math-verify==0.9.0`; logs `acc` ($\in \{0,1\}$), `fmt` ($\in \{0,1\}$), and `score = acc + 0.1 * fmt` |
 | Per-sample dumps | `trainer.validation_data_dir`, `trainer.rollout_data_dir` | Writes `<eval_dump_dir>/val/<step>.jsonl` (5,000 rows per eval step) and `<eval_dump_dir>/train/<step>.jsonl` (2,048 rows per train step) |
-| Seeds | `SEED=1` first; then `SEED=2`, `SEED=3` | Sets `data.seed`, `actor_rollout_ref.rollout.seed`, `actor_rollout_ref.actor.data_loader_seed`, and `actor_rollout_ref.actor.fsdp_config.seed` |
+| Seeds | `SEED=1`, `SEED=2`, `SEED=3` | Sets `data.seed`, `actor_rollout_ref.rollout.seed`, `actor_rollout_ref.actor.data_loader_seed`, and `actor_rollout_ref.actor.fsdp_config.seed` |
+
+### 3.1 Pre-Registered Statistical Gate Definition (`TPU ≥ GPU − 1.0 pp`)
+
+To avoid post-hoc cherry-picking across intermediate checkpoints or individual seeds, the customer acceptance gate is pre-registered as follows:
+
+1. **Primary Pass/Fail Criterion (Step 200, 3-Seed Mean):**
+   - Let $\text{Acc}_{\text{dev}, s}(t) \in [0, 100]$ denote the greedy held-out accuracy (%) on `eval_5000.parquet` for platform $\text{dev} \in \{\text{GPU}, \text{TPU}\}$, seed $s \in \{1, 2, 3\}$, at training step $t \in \{0, 20, \dots, 200\}$.
+   - The primary benchmark metric is the **3-seed arithmetic mean at the final checkpoint ($t = 200$)**:
+     $$\overline{\text{Acc}}_{\text{dev}}(200) = \frac{1}{3}\sum_{s=1}^{3} \text{Acc}_{\text{dev}, s}(200)$$
+   - The gate passes if and only if:
+     $$\overline{\text{Acc}}_{\text{TPU}}(200) \ge \overline{\text{Acc}}_{\text{GPU}}(200) - 1.0\text{ pp}$$
+   - Intermediate checkpoints ($t \in \{20, 40, \dots, 180\}$) are **not** used to pick a best-of-run checkpoint ($\max_t$) for the gate decision.
+2. **Required Companion Reporting (Full Trajectory & Seed Dispersion):**
+   - **Full 11-point learning curve (`steps 0, 20, 40, ..., 200`):** Report every individual seed's curve $\text{Acc}_{\text{dev}, s}(t)$ alongside the 3-seed mean curve $\overline{\text{Acc}}_{\text{dev}}(t)$.
+   - **Across-seed dispersion:** At every evaluated step $t$ (and specifically at $t = 200$), report the across-seed sample standard deviation
+     $$s_{\text{seed}}(t) = \sqrt{\frac{1}{3 - 1}\sum_{s=1}^{3}\bigl(\text{Acc}_{\text{dev}, s}(t) - \overline{\text{Acc}}_{\text{dev}}(t)\bigr)^2}$$
+     and the 3-seed min/max range $[\min_s \text{Acc}_{\text{dev}, s}(t),\ \max_s \text{Acc}_{\text{dev}, s}(t)]$ (produced automatically by [`gemma4_eval_report.py`](gemma4_eval_report.py) under `## Multi-seed summary`).
+   - **Within-seed & paired uncertainty:** Report the single-run binomial SE $\sqrt{\hat{p}(1-\hat{p})/5000}$ and the paired SE of $\Delta_s(t) = \text{Acc}_{\text{dev}, s}(t) - \text{Acc}_{\text{dev}, s}(0)$ (`+Gained / -Lost` on the identical 5,000 problems).
+   - **Step 0 base-model sanity check:** Verify $\text{Acc}_{\text{TPU}}(0)$ vs $\text{Acc}_{\text{GPU}}(0)$ before any gradient update on the identical `eval_5000_prompt_tokens.parquet`.
 
 ---
 
