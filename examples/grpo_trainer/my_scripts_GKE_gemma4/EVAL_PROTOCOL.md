@@ -1,0 +1,82 @@
+# Gemma-4 E2B (`rl-05`) Frozen Evaluation & 200-Step GPU Baseline Protocol (PR #9, step 1)
+
+> [!IMPORTANT]
+> **Status:** Evaluation dataset (`eval_5000.parquet`), prompt-token ID fixture (`eval_5000_prompt_tokens.parquet`), and 200-step GPU baseline launcher (`run_gemma4_e2b_rl05_accuracy_baseline.sh`) are frozen prior to launching the 200-step GPU baseline runs.
+> - **Customer gate (Meta):** $\text{Acc}_{\text{TPU}} \ge \text{Acc}_{\text{GPU}} - 1.0\text{ pp}$ under identical recipe, training budget, prompt token IDs, and grading.
+
+---
+
+## 1. Frozen Held-Out Evaluation Set (`eval_5000.parquet`)
+
+Built deterministically by [`build_gemma4_eval_set.py`](build_gemma4_eval_set.py) (`sha256: f0b1837cb2c6c0b98478c3c4b2858bd89375805b6612be0fb1c6efac7f68f260`); full provenance in [`eval_5k/manifest.json`](eval_5k/manifest.json).
+
+### 1.1 Why raw `val.parquet` had to be filtered & deduplicated
+
+| Dataset | Path | SHA256 | Rows | Unique normalized questions | Overlap with `train.parquet` |
+|---|---|---|---:|---:|---:|
+| `train.parquet` | `/workspace/meta-RL/data/openmathinstruct2/train.parquet` | `5404981a07c78a5c02d4f493293fc30bd1ddb42908376566fa9a1020abbdf01b` | 950,000 | 591,477 | — |
+| `val.parquet` | `/workspace/meta-RL/data/openmathinstruct2/val.parquet` | `ded5dc67f4c70401c749155cd2a1392e85631ed24b098e1c7686f735619161f5` | 50,000 | — | **37,372 / 50,000 (74.7%)** |
+| **Non-overlapping `val` pool** | — | — | 12,628 | **11,652** | **0 (0.0%)** |
+| **Frozen `eval_5000.parquet`** | `/workspace/meta-RL/data/openmathinstruct2/gemma4_eval_5k/eval_5000.parquet` | `d092a9c5e80aa2b3cf8e4e12d8367769e770f69ee6627ff1285fd5693efc662d` | **5,000** | **5,000** | **0 (0.0%)** |
+
+### 1.2 Selection rule (deterministic, seed-free)
+
+1. Extract the question body from `row["prompt"][0]["content"]` (between the instruction prefix and `<end_of_turn>`).
+2. Normalize to `key = re.sub(r"[\W_]+", "", question.lower())`.
+3. Exclude every `val.parquet` row whose `key` appears in `train.parquet` (37,372 rows removed) or duplicates an earlier `val.parquet` row with the same `key` (keeping the lowest `val_index`, leaving 11,652 unique non-overlapping problems).
+4. Sort the 11,652 survivors by `sha256(key.encode("utf-8")).hexdigest()` ascending and take the first **5,000** rows, preserving the exact `val.parquet` Arrow schema.
+
+At $N = 5{,}000$ and $\hat{p} \approx 0.55$, the single-run binomial standard error is $\sqrt{\hat{p}(1-\hat{p})/N} \approx 0.70\text{ pp}$ (and paired differences across steps or seeds on the same 5,000 problems have even smaller standard error, typically $0.3\text{–}0.4\text{ pp}$).
+
+---
+
+## 2. Frozen Prompt-Token ID Fixture (`eval_5000_prompt_tokens.parquet`)
+
+- **Committed file:** [`eval_5k/eval_5000_prompt_tokens.parquet`](eval_5k/eval_5000_prompt_tokens.parquet) (also on FUSE at `/workspace/meta-RL/data/openmathinstruct2/gemma4_eval_5k/eval_5000_prompt_tokens.parquet`)
+- **SHA256:** `a54fbb327d9c60545c49edfc26107b21a1e55f3ef9e673d80024c79e821b5ca4`
+- **Columns:** `eval_pos` (`0..4999`), `val_index` (original row index in `val.parquet`), `key_sha256`, `n_prompt_tokens`, `prompt_token_ids` (`list<int32>`).
+- **Prompt rendering kept as-is for this round:** `openmathinstruct2/*.parquet` stores user message content that already contains `<start_of_turn>user\n...<end_of_turn>\n<start_of_turn>model`, and `verl`'s `SingleTurnAgentLoop` (`Gemma4VLContinuousTokenBuilder` via `Gemma4Processor` / `GemmaTokenizer`) wraps it in Gemma-4's `<bos><|turn>user\n...<turn|>\n<|turn>model\n<|thought>\n` template.
+  - Verified against the 256 online rollout prompts in `/workspace/meta-RL/logprob_parity/fixture_fixed_1021_0813/fixture_step1.npz`: **256 / 256 prompts matched token-for-token (`n_exact = 256, n_mismatch = 0`)**.
+  - Token length distribution across the 5,000 eval prompts: `min = 91`, `p50 = 148`, `mean = 167.0`, `max = 2,268` (zero prompts truncated at `max_prompt_length = 8,192`).
+  - For GPU–TPU comparison, the TPU evaluation pipeline can either consume `prompt_token_ids` directly from `eval_5000_prompt_tokens.parquet` or verify that its rendered prompt token IDs match `prompt_token_ids` bit-for-bit.
+
+---
+
+## 3. Frozen 200-Step GPU Baseline Protocol (`run_gemma4_e2b_rl05_accuracy_baseline.sh`)
+
+| Knob | Value | Notes |
+|---|---|---|
+| Base recipe | [`run_gemma4_e2b_rl05_parity.sh`](run_gemma4_e2b_rl05_parity.sh) | Unchanged frozen `rl-05` training parameters (`train_batch_size=256`, `rollout.n=8`, `ppo_mini_batch_size=256` [$\mu=1$], `lr=1e-6`, `clip=0.2/0.28`, $\beta=0$, `max_prompt=8192`, `max_response=8192`, `T=0.8`, `top_k=50`, `top_p=0.95`, `ATTN_IMPL=flex_attention`) |
+| RoPE fix & guard | Step 0 (`gemma4_node_prep.py` + `[GEMMA4-ROPE v2]`) | Enforced automatically on every launch ([ROPE_GUARD.md](ROPE_GUARD.md)) |
+| Training horizon | `TOTAL_STEPS=200` | 200 GRPO steps $\times$ 2,048 completions/step = 409,600 training completions (51,200 prompts) |
+| Eval dataset | `eval_5000.parquet` | 5,000 non-overlapping unique problems (§1) |
+| Eval schedule | `trainer.val_before_train=True`, `trainer.test_freq=20` | 11 checkpoints: step **0** (base model before any update) and steps **20, 40, 60, 80, 100, 120, 140, 160, 180, 200** |
+| Eval decoding | Greedy (`do_sample=False, temperature=0, top_k=-1, top_p=1.0, n=1`) | Deterministic argmax decoding (`max_response_length=8192`) |
+| Grading | [`maxtext_math_reward.py`](maxtext_math_reward.py) (`compute_score`) | `math-verify==0.9.0`; logs `acc` ($\in \{0,1\}$), `fmt` ($\in \{0,1\}$), and `score = acc + 0.1 * fmt` |
+| Per-sample dumps | `trainer.validation_data_dir`, `trainer.rollout_data_dir` | Writes `<eval_dump_dir>/val/<step>.jsonl` (5,000 rows per eval step) and `<eval_dump_dir>/train/<step>.jsonl` (2,048 rows per train step) |
+| Seeds | `SEED=1` first; then `SEED=2`, `SEED=3` | Sets `data.seed`, `actor_rollout_ref.rollout.seed`, `actor_rollout_ref.actor.data_loader_seed`, and `actor_rollout_ref.actor.fsdp_config.seed` |
+
+---
+
+## 4. Launch & Verification Commands (Ray head pod)
+
+```bash
+source /workspace/setup_env.sh
+SCRIPT_DIR=/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gemma4
+
+# Launch 200-step Seed 1 baseline on 16n64g (or NNODES=4 for 4n16g)
+SEED=1 NNODES=16 TOTAL_STEPS=200 \
+  bash "$SCRIPT_DIR/run_gemma4_e2b_rl05_accuracy_baseline.sh" \
+  2>&1 | tee /workspace/meta-RL/logs/gemma4_e2b_rl05_16n64g_s200_seed1.log
+
+# Verify guard evidence across all nodes and ranks
+python3 "$SCRIPT_DIR/gemma4_guard_check.py" \
+  --log /workspace/meta-RL/logs/gemma4_e2b_rl05_16n64g_s200_seed1.log \
+  --guard-dir /workspace/meta-RL/logs/gemma4_guard/<EXPERIMENT_NAME> \
+  --world 64 --steps 200
+
+# Summarize held-out accuracy curve (steps 0, 20, ..., 200) and paired SEs
+python3 "$SCRIPT_DIR/gemma4_eval_report.py" \
+  --run seed1=/workspace/meta-RL/logs/gemma4_eval/<EXPERIMENT_NAME> \
+  --log seed1=/workspace/meta-RL/logs/gemma4_e2b_rl05_16n64g_s200_seed1.log
+```

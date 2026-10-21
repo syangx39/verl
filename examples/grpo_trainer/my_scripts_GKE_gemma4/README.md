@@ -118,13 +118,13 @@ The 09-02 runs used an older verl checkout that did not log these metrics, so th
 
 ---
 
-## 4. Accuracy gate — pending (not evaluated here)
+## 4. Accuracy gate — protocol frozen ([EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)); 200-step baseline in progress
 
-- **Gate (customer, Meta)**: TPU accuracy ≥ GPU accuracy − 1 percentage point. Example: if the GPU reference is 55%, the TPU run must reach ≥ 54%. No GPU reference accuracy has been measured in this directory yet.
-- **This smoke cannot be used for it**: eval is disabled, and 4 steps × 256 prompts cover 1,024 of the 950,000 training prompts. The gate needs a separate eval-enabled GPU run. Extra Hydra overrides after the launcher are applied last (verified in §3.4: `top_k=-1` replaced the launcher's `top_k=50`), so `trainer.test_freq=<N> trainer.val_before_train=True` turns eval on without editing the frozen block.
-- **Fix on both sides before reading a 1-pp gate**: the held-out set and its size, eval decoding settings, prompt rendering, and number of seeds. At 55% accuracy the binomial standard error is 1.57 pp at N=1,000, 0.70 pp at N=5,000, and 0.22 pp at N=50,000 (the full `val.parquet`). A GPU−TPU difference between two independent evaluations has √2× that error, so N≈1,000 cannot resolve 1 pp.
-- **Prompt rendering**: the OMI2 parquet's user content already contains `<start_of_turn>user … <end_of_turn>\n<start_of_turn>model`, and verl wraps it again in Gemma-4's chat template (`<|turn>user … <turn|>`; see the `PREFLIGHT` sample in the smoke log). The TPU side has to render prompts identically for the comparison to be like-for-like.
-- **Trainer log-prob parity (§3.4) is resolved.** Without the fix, ~half of the ranks train on wrong log-probs and an accuracy comparison would be meaningless. The launcher now enforces the fix on every launch, and the guard stops the job before the optimizer is built if any rank's RoPE buffers are wrong ([ROPE_GUARD.md](ROPE_GUARD.md)).
+- **Gate (customer, Meta)**: TPU accuracy ≥ GPU accuracy − 1 percentage point. Example: if the GPU reference is 55%, the TPU run must reach ≥ 54%.
+- **Frozen held-out set (`eval_5000.parquet`)**: built deterministically by [`build_gemma4_eval_set.py`](build_gemma4_eval_set.py) ([`eval_5k/manifest.json`](eval_5k/manifest.json)). In raw `val.parquet` (50,000 rows), **37,372 rows (74.7%) overlap `train.parquet`** after alphanumeric normalization. Excluding all train-overlapping questions and deduplicating by question leaves 11,652 unique problems, from which 5,000 are selected by ascending `sha256(key)` (`eval_5000.parquet`, sha256 `d092a9c5e80aa2b3cf8e4e12d8367769e770f69ee6627ff1285fd5693efc662d`, binomial SE $\approx 0.70\text{ pp}$ at 55%).
+- **Frozen prompt-token ID fixture**: [`eval_5k/eval_5000_prompt_tokens.parquet`](eval_5k/eval_5000_prompt_tokens.parquet) (sha256 `a54fbb327d9c60545c49edfc26107b21a1e55f3ef9e673d80024c79e821b5ca4`), rendered through `verl`'s `Gemma4VLContinuousTokenBuilder` (`Gemma4Processor` + `GemmaTokenizer`) and verified 256/256 token-exact against online rollout prompts.
+- **Frozen 200-step baseline protocol ([`run_gemma4_e2b_rl05_accuracy_baseline.sh`](run_gemma4_e2b_rl05_accuracy_baseline.sh))**: `TOTAL_STEPS=200`, `trainer.val_before_train=True`, `trainer.test_freq=20` (11 checkpoints: steps `0, 20, ..., 200`), greedy decoding (`do_sample=False, temperature=0, top_k=-1, top_p=1.0, n=1`), explicit `SEED=1` (then `2`, `3`).
+- **Trainer log-prob parity (§3.4) and persistence/guard ([ROPE_GUARD.md](ROPE_GUARD.md)) are resolved and enforced on every launch.**
 
 ---
 
@@ -166,6 +166,11 @@ Component columns are per-component medians, so they do not sum to the step medi
 | `test_gemma4_rope_guard.py` | Deterministic single-process tests of the installed guard (classifier states, tolerances, zeros / non-finite, rebuild, registration, checkpoint, fault injection, simulated FSDP1 broadcast) |
 | `ROPE_GUARD.md` | Fix persistence (node prep) and the `[GEMMA4-ROPE]` guard: design, tolerances, evidence (unit tests, positive smoke, deterministic negative test) |
 | `rope_guard/` | Evidence for `ROPE_GUARD.md`: node-prep reports, guard reports, checker outputs, unit-test output |
+| `EVAL_PROTOCOL.md` | Frozen 5,000-problem evaluation set (`eval_5000.parquet`), prompt-token ID fixture (`eval_5000_prompt_tokens.parquet`), and 200-step GPU baseline protocol |
+| `build_gemma4_eval_set.py` | Deterministic builder for `eval_5000.parquet` (zero overlap with `train.parquet`) and `eval_5000_prompt_tokens.parquet` |
+| `run_gemma4_e2b_rl05_accuracy_baseline.sh` | Frozen 200-step GPU baseline wrapper around `run_gemma4_e2b_rl05_parity.sh` (`val_before_train=True`, `test_freq=20`, greedy decoding, explicit `SEED`) |
+| `gemma4_eval_report.py` | Summarizes held-out `eval_5000` accuracy curves, binomial & paired standard errors vs step 0, and multi-seed statistics |
+| `eval_5k/` | `manifest.json` and `eval_5000_prompt_tokens.parquet` (frozen prompt token IDs for all 5,000 eval problems) |
 | `patch_verl_pin_logprob_fixture.py` | Diagnostic, env-gated (`LOGPROB_FIXTURE_DIR`): dumps the pre-update batch with token IDs and rollout/trainer log-probs, plus a repeated trainer pass. Not applied by node prep, which restores the file it touches |
 | `patch_verl_pin_rank_probe.py` | Diagnostic, env-gated (`VERL_RANK_PROBE_DIR`): per-rank canary forward with per-module output and buffer checksums. Not applied by node prep, which rebuilds `transformer_impl.py` from the pin |
 | `gemma4_logprob_parity.py` | Offline parity ladder on a fixture: HF backends, packed vs unpacked, vLLM prefill, online values; summary tables and error-vs-position plots |
