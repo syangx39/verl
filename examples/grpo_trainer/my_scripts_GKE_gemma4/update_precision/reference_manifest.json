@@ -1,0 +1,83 @@
+{
+  "what": "Provenance of the preserved PR #9 BF16 seed-1 reference (original recipe). Kept as a separate cohort; not pooled with any revised-precision run.",
+  "run": "gemma4_e2b_rl05_16n64g_s200_seed1_1021_1955",
+  "pr9": {
+    "head": "4c23cccf536bbe1901953a0b1e001f26e95c824d",
+    "merge_commit": "0ca3ebcd1a52dba9fd920158bb739fecb3023362",
+    "report": "eval_5k/seed1_16n64g/seed1_report.md",
+    "driver_log": "logs/gemma4_e2b_rl05_16n64g_s200_seed1_1021_1955.log",
+    "guard_check": "eval_5k/seed1_16n64g/guard_check.txt"
+  },
+  "hardware": {
+    "cluster": "gke_supercomputer-testing_us-central1_a4x-baker, RayCluster verl-bench-xiaotongyang",
+    "nodes": 16,
+    "gpus": "64 x GB200 (a4x-highgpu-4g)",
+    "pods": "head + 15 GPU workers (+ head GPUs), all started 2026-10-20T09:21Z, restartCount 0 at 2026-10-22T17:26Z; hostnames identical to eval_5k/seed1_16n64g/node_prep.json"
+  },
+  "image": "us-central1-docker.pkg.dev/supercomputer-testing/pirillo-gcr/verl-disagg-cu130-arm64@sha256:70e1f1ed758188fd7e17716f5cb697d93fbd22ed4760613d6b97fed58eda571d",
+  "packages": {
+    "python": "/workspace/verl-pin/.venv/bin/python (3.12)",
+    "torch": "2.13.0+cu130",
+    "transformers": "5.12.1",
+    "vllm": "0.29.0",
+    "ray": "2.55.1",
+    "flash-attn": "2.8.3",
+    "math-verify": "0.9.0",
+    "latex2sympy2_extended": "1.11.0",
+    "antlr4-python3-runtime": "4.9.3"
+  },
+  "verl": {
+    "pin": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+    "root": "/workspace/verl-pin",
+    "pristine_sha256": {
+      "verl/models/transformers/monkey_patch.py": "13e502a0a7b1470fe37bc98a24f221719e312b3146c6fc9bac91a738f80d2783",
+      "verl/workers/engine/fsdp/transformer_impl.py": "79d8779fb2a0b8a1ac7b3ec85fba2521ac8cae079925a497c4366fd77f8abfbe"
+    },
+    "managed_sha256": {
+      "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+      "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+    },
+    "rope_patch": {"version": "2", "block_sha256": "2d750b2b0c718b581831c6aa9130717e5dcf47e5938715de58caa2d42ae0b8f4"}
+  },
+  "scripts_sha256": {
+    "run_gemma4_e2b_rl05_parity.sh": "8646c17331d84ac95a5183ffae4880f2150889a864fe1ff88ba5c79390ea66d0",
+    "run_gemma4_e2b_rl05_accuracy_baseline.sh": "2a37aad5d1a03ce5a1d2f5aaacec8402666e35e5aad17d3ef175e40dd92d4e2e",
+    "maxtext_math_reward.py": "c3cb63755c0bf4d6f52199b589127c063405112a1ed5363fc6ea78f846dda83b",
+    "patch_verl_gemma4_rope_buffers.py": "6d22ce33a767c1029bf94264ffeb9bb07bf13843e1f80939f6f1ef985ffaf5e2",
+    "patch_verl_gemma4_flex_attn.py": "5f03d3e5e5719f4f13ed8b138c1c39c898208cf9196fad75f349eae58d8d220d",
+    "gemma4_node_prep.py": "65b572dd6d2b4f36b7936404c6587da740a7716ca490def44d001897000732ac"
+  },
+  "model": {
+    "id": "google/gemma-4-E2B-it",
+    "path": "/workspace/meta-RL/models/gemma-4-E2B-it",
+    "sha256": {
+      "config.json": "1b28f3d2c3100f6c594754b81107428bd7b822a7f48272ca681dae9d2ec38330",
+      "generation_config.json": "d4226bbe3117d2d253ba4609720ba82c6c4ce4627a9a6ae05387c78983ac03de",
+      "tokenizer.json": "cc8d3a0ce36466ccc1278bf987df5f71db1719b9ca6b4118264f45cb627bfe0f",
+      "tokenizer_config.json": "9f4fec4b1dc6ecddf8f4a92e9caea5971c0e67d81309f3f9066a2bee8c362633",
+      "model.safetensors": "2db5482b20d746879bb3ef79b5203e9075a2e2b98f54ec7c2f281c1477ddc550"
+    },
+    "checkpoint_dtype": "bfloat16 (single model.safetensors, 10,246,621,918 bytes)",
+    "trainable_elements_held_by_optimizer": 5104297536
+  },
+  "data": {
+    "train": {"path": "/workspace/meta-RL/data/openmathinstruct2/train.parquet", "sha256": "5404981a07c78a5c02d4f493293fc30bd1ddb42908376566fa9a1020abbdf01b", "rows": 950000},
+    "val_raw": {"path": "/workspace/meta-RL/data/openmathinstruct2/val.parquet", "sha256": "ded5dc67f4c70401c749155cd2a1392e85631ed24b098e1c7686f735619161f5", "rows": 50000},
+    "eval": {"path": "/workspace/meta-RL/data/openmathinstruct2/gemma4_eval_5k/eval_5000.parquet", "sha256": "d092a9c5e80aa2b3cf8e4e12d8367769e770f69ee6627ff1285fd5693efc662d", "rows": 5000, "manifest": "eval_5k/manifest.json"},
+    "eval_prompt_tokens": {"path": "eval_5k/eval_5000_prompt_tokens.parquet", "sha256": "a54fbb327d9c60545c49edfc26107b21a1e55f3ef9e673d80024c79e821b5ca4"},
+    "eval_question_identity": "qid = extra_info.index (val.parquet row); 5,000 unique qids per eval dump; qid set, input and ground-truth hashes identical across all 11 checkpoints (update_precision/audit_seed1/audit.md)"
+  },
+  "resolved_actor_config": {
+    "strategy": "fsdp (FSDP1), use_orig_params=False, sync_module_states=True",
+    "fsdp_config.model_dtype": "bfloat16 (module.to(bfloat16) in transformer_impl._build_module)",
+    "mixed_precision": "default: param_dtype=bf16, reduce_dtype=fp32, buffer_dtype=fp32",
+    "optimizer": "torch.optim.AdamW(lr=1e-6, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.01, foreach=None, fused=None)",
+    "lr_schedule": "constant, lr_warmup_steps=-1, lr_warmup_steps_ratio=0.0",
+    "clip_grad": 1.0,
+    "ppo": "train_batch_size=256, rollout.n=8, ppo_mini_batch_size=256 (one update per rollout), clip 0.2/0.28, use_kl_loss=False, entropy_coeff=0, token-mean loss",
+    "rollout": "vLLM 0.29.0, tp=1, T=0.8, top_p=0.95, top_k=50, max_response_length=8192",
+    "eval": "greedy (do_sample=False, temperature=0, top_k=-1, top_p=1.0, n=1), val_before_train=True, test_freq=20",
+    "seeds": "data.seed=1, rollout.seed=1, actor.data_loader_seed=1, actor.fsdp_config.seed=1"
+  },
+  "runtime_optimizer_precision": "Measured in PR #10 (update_precision/probe/): optimizer-held params, grads, exp_avg and exp_avg_sq are all torch.bfloat16 on all 64 ranks; no FP32 master copy exists in this path."
+}

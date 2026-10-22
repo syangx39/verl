@@ -407,10 +407,17 @@ def _plot_run(label: str, data: dict, plot_dir: pathlib.Path) -> list[pathlib.Pa
     ax2.set_ylabel("timing_s/step (s)", color="#555555")
     ax.set_ylim(1600, 2100)
     ax2.set_ylim(50, 115)
+    # Annotate step times above the clipped axis instead of silently cutting them off.
+    gen_s = [log_steps[s].get("timing_s/gen", float("nan")) for s in ts]
+    for s, v, g in zip(ts[1:], step_s[1:], gen_s[1:]):
+        if v > 115:
+            ax2.plot([s], [114], marker="^", color="#d62728", markersize=7, clip_on=False)
+            ax2.annotate(f"step {s}: {v:.0f}s (rollout {g:.0f}s), off scale", (s, 114), textcoords="offset points",
+                         xytext=(-215, -30), fontsize=7.5, color="#d62728")
     ax2.grid(False)
     h1, l1 = ax.get_legend_handles_labels()
     h2, l2 = ax2.get_legend_handles_labels()
-    ax.legend(h1 + h2, l1 + l2, loc="upper right", fontsize=8.0)
+    ax.legend(h1 + h2, l1 + l2, loc="lower left", fontsize=8.0)
 
     fig.tight_layout(rect=[0, 0, 1, 0.96])
     p2 = plot_dir / f"{label}_training_diagnostics.png"
