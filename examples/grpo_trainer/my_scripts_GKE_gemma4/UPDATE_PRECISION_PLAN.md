@@ -6,18 +6,18 @@ Investigate why the numerically stable Gemma-4 `rl-05` run in [PR #9](https://gi
 
 The first hypotheses to test are ineffective small updates with BF16 persistent weights / optimizer state, and weak or misleading training reward signal. Neither is an established root cause. This work should produce measured update evidence and a reproducible recipe decision, including a negative result if precision is not responsible.
 
-**Status: plan only.** No new training run, optimizer change, or precision fix is included in this initial commit.
+**Status: items 1–2 complete, item 3 running** ([UPDATE_PRECISION_RESULTS.md](UPDATE_PRECISION_RESULTS.md)). The initial commit was plan only.
 
 ## Plan
 
 ### 1. Preserve the reference and inspect existing evidence
 
-- [ ] Keep the original PR #9 BF16 seed 1 as a separate reference. Record source/image/patch hashes, model identity, resolved config, and data/prompt/eval fingerprints.
-- [ ] Pair step-0 and trained eval outputs by stable question identity; assert unique IDs and matching input/ground truth before computing gained/lost questions, paired uncertainty, or a paired bootstrap interval. Do not rely on row count or positional zip alone.
-- [ ] Validate the existing full training dumps: 256 prompt groups with 8 completions each, matching inputs/answers within each group. Distinguish repeated question IDs from distinct group occurrences if necessary.
-- [ ] Report actual reward variance, constant-reward / zero-advantage groups, all-correct and all-wrong groups, and groups whose reward differences come only from format credit. Separate accuracy from format reward.
-- [ ] Inspect a small sample of incorrect and correct-to-incorrect eval answers for extraction/scoring errors.
-- [ ] Correct report presentation where needed: show or annotate timing outliers, avoid describing format improvement as monotonic, and avoid attributing correctness flips to decision boundaries without supporting logits.
+- [x] Keep the original PR #9 BF16 seed 1 as a separate reference. Record source/image/patch hashes, model identity, resolved config, and data/prompt/eval fingerprints. — done: [`update_precision/reference_manifest.json`](update_precision/reference_manifest.json).
+- [x] Pair step-0 and trained eval outputs by stable question identity; assert unique IDs and matching input/ground truth before computing gained/lost questions, paired uncertainty, or a paired bootstrap interval. Do not rely on row count or positional zip alone. — done: unique `qid`s, input/ground-truth hashes checked across all checkpoints and the replicate; bootstrap intervals ([results](UPDATE_PRECISION_RESULTS.md#12-eval-pairing-by-question-identity-and-the-eval-noise-floor) §1.2).
+- [x] Validate the existing full training dumps: 256 prompt groups with 8 completions each, matching inputs/answers within each group. Distinguish repeated question IDs from distinct group occurrences if necessary. — done: 200 steps × 256 groups × 8, no mixed groups ([results](UPDATE_PRECISION_RESULTS.md#13-training-groups-and-reward-signal) §1.3).
+- [x] Report actual reward variance, constant-reward / zero-advantage groups, all-correct and all-wrong groups, and groups whose reward differences come only from format credit. Separate accuracy from format reward. — done ([results](UPDATE_PRECISION_RESULTS.md#13-training-groups-and-reward-signal) §1.3).
+- [x] Inspect a small sample of incorrect and correct-to-incorrect eval answers for extraction/scoring errors. — done, incl. correct→wrong eval transitions; re-scoring reproduces all labels (0/600 changed) ([results](UPDATE_PRECISION_RESULTS.md#14-grading-audit) §1.4).
+- [x] Correct report presentation where needed: show or annotate timing outliers, avoid describing format improvement as monotonic, and avoid attributing correctness flips to decision boundaries without supporting logits. — done in EVAL_PROTOCOL.md §5 / README §4 ([results](UPDATE_PRECISION_RESULTS.md#15-presentation-corrections-to-the-pr-9-docs) §1.5).
 
 Defer new replication launches until these checks guide the next experiment. Any already running or completed replication remains evidence for the original BF16 recipe; this plan does not stop or discard it.
 
@@ -25,21 +25,21 @@ Defer new replication launches until these checks guide the next experiment. Any
 
 Use the same model, objective and a captured frozen batch. Preserve token IDs, masks, advantages, recorded log-probs and the global loss denominator.
 
-- [ ] Inspect actual optimizer-owned parameters, gradients, `exp_avg` and `exp_avg_sq` dtypes at runtime, including whether an FP32 master copy exists. Config names alone are insufficient.
-- [ ] Record the LR actually used, optimizer settings, gradient norm before/after clipping, and finite status.
-- [ ] Snapshot persistent parameters before and after the update; subtract in FP32. Report global and per-tensor update norm, relative update norm, and fraction of changed elements, including small/norm tensors.
-- [ ] Separately measure changes in persistent trainer weights and the BF16 weights exposed to rollout. Small FP32 updates may accumulate before becoming visible after casting.
-- [ ] Run an optimizer-only counterfactual with identical initial numerical parameter values, captured gradients, and initial Adam states. Compare the FP32 update with the update retained in BF16.
-- [ ] Distinguish final weight write-back rounding from BF16 Adam-state arithmetic. An FP32-master-plus-FP32-moments variant changes both; it does not by itself isolate either effect.
+- [x] Inspect actual optimizer-owned parameters, gradients, `exp_avg` and `exp_avg_sq` dtypes at runtime, including whether an FP32 master copy exists. Config names alone are insufficient. — done: bf16 param / grad / `exp_avg` / `exp_avg_sq`, no FP32 master ([results](UPDATE_PRECISION_RESULTS.md#22-runtime-dtypes-and-settings-all-64-ranks) §2.2).
+- [x] Record the LR actually used, optimizer settings, gradient norm before/after clipping, and finite status. — done: lr 1e-6 read from the param group at the step; grads finite (no non-finite skip in any log) ([results](UPDATE_PRECISION_RESULTS.md#22-runtime-dtypes-and-settings-all-64-ranks) §2.2).
+- [x] Snapshot persistent parameters before and after the update; subtract in FP32. Report global and per-tensor update norm, relative update norm, and fraction of changed elements, including small/norm tensors. — done: global, per flat tensor and per original-parameter category ([results](UPDATE_PRECISION_RESULTS.md#23-v1-results-applied-vs-ideal-update) §2.3–2.4).
+- [x] Separately measure changes in persistent trainer weights and the BF16 weights exposed to rollout. Small FP32 updates may accumulate before becoming visible after casting. — done: BF16-cast visibility per step and cumulative, both precisions ([results](UPDATE_PRECISION_RESULTS.md#24-v2-moments-vs-write-back-per-parameter-categories-rollout-visibility) §2.4).
+- [x] Run an optimizer-only counterfactual with identical initial numerical parameter values, captured gradients, and initial Adam states. Compare the FP32 update with the update retained in BF16. — done in-run on the captured post-clip gradients of each step (shadow FP32 AdamW from the same BF16-quantized values cast to FP32 and fresh moments) ([results](UPDATE_PRECISION_RESULTS.md#21-method) §2.1).
+- [x] Distinguish final weight write-back rounding from BF16 Adam-state arithmetic. An FP32-master-plus-FP32-moments variant changes both; it does not by itself isolate either effect. — done for steps 1–2 with a 2×2 (moments × write-back) ([results](UPDATE_PRECISION_RESULTS.md#24-v2-moments-vs-write-back-per-parameter-categories-rollout-visibility) §2.4); long-run moment effects noted as open in §2.5.
 
 For initial-value matching, cast the same BF16-quantized reference weights to FP32 for the counterfactual. Do not silently compare them with a differently initialized or higher-precision checkpoint. A low changed-element fraction on one step is evidence to investigate, not proof that learning is impossible.
 
 ### 3. Run a controlled precision comparison only if warranted
 
-- [ ] If the probe supports the precision hypothesis, add a configuration with FP32 persistent optimizer weights/master and FP32 moments while retaining BF16 model computation and rollout where supported; verify the actual runtime dtypes.
+- [x] If the probe supports the precision hypothesis, add a configuration with FP32 persistent optimizer weights/master and FP32 moments while retaining BF16 model computation and rollout where supported; verify the actual runtime dtypes. — done: `++actor_rollout_ref.actor.fsdp_config.model_dtype=fp32`; runtime dtypes verified fp32 for params, grads and moments; compute stays bf16 (FSDP mixed precision default) ([results](UPDATE_PRECISION_RESULTS.md#22-runtime-dtypes-and-settings-all-64-ranks) §2.2).
 - [ ] Keep the initial numerical weights, data order, prompt/reward, batch size, objective, LR schedule, clipping, and eval protocol fixed for the comparison.
 - [ ] Preserve the Gemma-4 recipe from PR #9: GRPO advantages, PPO clipping, and global token-mean aggregation. Do not substitute the earlier Qwen REINFORCE/TIS recipe.
-- [ ] Re-run the RoPE guard and trainer–sampler log-prob diagnostics, then a short operational check before a full run.
+- [x] Re-run the RoPE guard and trainer–sampler log-prob diagnostics, then a short operational check before a full run. — done in the 2-step FP32 probe runs: RoPE guard PASS 64/64, `k3_kl` 0.00071–0.00072, memory and step time unchanged.
 - [ ] For end-to-end comparisons, measure gradient differences rather than requiring identical gradients after precision paths diverge. Only the optimizer-only probe reuses exactly the same captured gradients.
 - [ ] If precision is not supported as the cause, record that finding and select the next single-factor investigation from the reward, update, or eval evidence. Avoid changing precision, LR, prompt and reward together.
 
