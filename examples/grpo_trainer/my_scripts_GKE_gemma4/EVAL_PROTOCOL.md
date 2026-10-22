@@ -48,7 +48,7 @@ At $N = 5{,}000$ and $\hat{p} \approx 0.55$, the single-run binomial standard er
 
 | Knob | Value | Notes |
 |---|---|---|
-| Base recipe | [`run_gemma4_e2b_rl05_parity.sh`](run_gemma4_e2b_rl05_parity.sh) | Unchanged frozen `rl-05` training parameters (`train_batch_size=256`, `rollout.n=8`, `ppo_mini_batch_size=256` [$\mu=1$], `lr=5e-7`, `lr_warmup_steps_ratio=0.05`, `clip=0.2/0.28`, $\beta=0$, `max_prompt=8192`, `max_response=8192`, `T=0.8`, `top_k=50`, `top_p=0.95`, `ATTN_IMPL=flex_attention`) |
+| Base recipe | [`run_gemma4_e2b_rl05_parity.sh`](run_gemma4_e2b_rl05_parity.sh) | Unchanged frozen `rl-05` training parameters (`train_batch_size=256`, `rollout.n=8`, `ppo_mini_batch_size=256` [$\mu=1$], `lr=1e-6`, `clip=0.2/0.28`, $\beta=0$, `max_prompt=8192`, `max_response=8192`, `T=0.8`, `top_k=50`, `top_p=0.95`, `ATTN_IMPL=flex_attention`) |
 | RoPE fix & guard | Step 0 (`gemma4_node_prep.py` + `[GEMMA4-ROPE v2]`) | Enforced automatically on every launch ([ROPE_GUARD.md](ROPE_GUARD.md)) |
 | Training horizon | `TOTAL_STEPS=200` | 200 GRPO steps $\times$ 2,048 completions/step = 409,600 training completions (51,200 prompts) |
 | Eval dataset | `eval_5000.parquet` | 5,000 non-overlapping unique problems (§1) |
@@ -136,4 +136,20 @@ Exact output of [`gemma4_eval_report.py`](gemma4_eval_report.py) ([`eval_5k/seed
   - Base held-out accuracy (`step 0`): **36.26% ± 0.68 pp** (`1,813 / 5,000`), format compliance **93.94%**, mean reward **0.4565**.
   - Final checkpoint held-out accuracy (`step 200`): **36.80% ± 0.68 pp** (`1,840 / 5,000`, $\Delta = +0.54\text{ pp}$, paired SE `0.49 pp`, `+309 / -282`), format compliance **96.70%** ($\Delta = +2.76\text{ pp}$), mean reward **0.4647**.
   - Plateau across steps 60–200 (8 checkpoints): mean accuracy **37.12%** ($\Delta = +0.86\text{ pp}$ vs step 0), range **36.68% – 37.50%** (peak at step 120: **37.50%**, $\Delta = +1.24\text{ pp}$).
-  - Online training reward (`critic/score/mean`, $T=0.8$, 2,048 completions/step): rose from **0.6906** (steps 1–20 mean) to **0.7124** (steps 181–200 mean).
+  - Online training reward (`critic/score/mean`, $T=0.8$, 2,048 completions/step): rose from **0.6906** (steps 1–20 mean; sampled accuracy **59.27%**, format **97.96%**) to **0.7124** (steps 181–200 mean; sampled accuracy **61.31%**, format **99.34%**).
+
+![Seed 1 Held-Out Evaluation Curve](eval_5k/seed1_16n64g/seed1_eval_curve.png)
+
+![Seed 1 Online Training & Numerical Guard Diagnostics](eval_5k/seed1_16n64g/seed1_training_diagnostics.png)
+
+### 5.3 Seed 1 Key Findings & Conclusions
+
+1. **End-to-end 200-step numerical stability & RoPE guard verification (`16n64g`, 64 ranks):**
+   - All 16 nodes passed `gemma4_node_prep.py` in `10.6s`, all 64 unique FSDP actor ranks rebuilt `256/256` RoPE `inv_freq` buffers to bit-exact FP32 at `init_checkpoint`, and all 64 unique ranks passed the `first_forward` guard with zero buffer drift (`restored=[]`).
+   - Across all 200 training steps (`409,600` completions), `rollout_corr/k3_kl` remained tightly bounded in **`[0.000640, 0.000739]`** (median **`0.000684`**, vs. pre-fix `~0.98–1.35`), and `training/rollout_actor_probs_pearson_corr` stayed in **`[0.99714, 0.99730]`** (median **`0.99721`**).
+   - `actor/grad_norm` stayed well-behaved in **`[0.1289, 3.3281]`** (median **`0.2588`**, vs. pre-fix `10–350`), and the run completed cleanly (`exit_code=0`, steps 2–200 median step time **`70.14s`**).
+2. **Held-out `eval_5000` learning trajectory & format convergence:**
+   - **Format compliance (`<reasoning>...</reasoning>...<answer>...</answer>`)** rose monotonically from **`93.94%`** at step 0 to **`95.94%`** at step 40 and **`96.70%`** (`+2.76 pp`) at step 200 (and from `97.96%` to `99.34%` on online sampled rollouts).
+   - **Held-out greedy accuracy (`eval_5000`, $N=5{,}000$)** rose from **`36.26% ± 0.68 pp`** at step 0 (`1,813 / 5,000`) to a steady plateau across steps 60–200 with mean **`37.12%`** ($\Delta = +0.86\text{ pp}$ vs step 0; every checkpoint from step 20 to step 200 had positive net question gain `+Gained > -Lost`), peaking at step 120 (**`37.50%`**, $\Delta = +1.24\text{ pp}$, `+333 / -271`, $z = +2.53$) and finishing at step 200 at **`36.80% ± 0.68 pp`** ($\Delta = +0.54\text{ pp}$, paired SE `0.49 pp`, `+309 / -282`).
+3. **Why ~300 questions flip in each direction (`+Gained ≈ 310 / -Lost ≈ 270`) despite greedy ($T=0$) evaluation:**
+   - With constant `lr=1e-6` over 200 steps on `OpenMathInstruct-2` (a harder mixed MATH + GSM8K question pool where `gemma-4-E2B-it` base accuracy is `36.26%`), roughly `~11.5%` of the 5,000 held-out problems sit near the greedy decision boundary and flip trajectory as the policy updates (`+309` newly solved vs `-282` newly missed at step 200, giving paired SE `0.49 pp`). This empirical step-to-step variance (`36.68% – 37.50%` across steps 60–200) directly validates why the pre-registered gate (§3.1) fixes the comparison checkpoint at **step 200** and averages across **3 seeds** rather than cherry-picking a single checkpoint.

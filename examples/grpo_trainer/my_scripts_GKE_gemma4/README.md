@@ -7,7 +7,7 @@ Colocated `verl` GRPO (DAPO clip-higher) launcher, GKE A4X (`a4x-highgpu-4g-a4x-
 > - Launch / training-flow smoke: **complete** (§3). Four steps with non-zero updates, driver `exit_code=0`.
 > - Numerical correctness: **fixed** ([LOGPROB_PARITY.md](LOGPROB_PARITY.md)). The FSDP trainer computed wrong log-probs on ~half of its ranks because RoPE buffers were scrambled at FSDP init; the vLLM rollout was correct. With [`patch_verl_gemma4_rope_buffers.py`](patch_verl_gemma4_rope_buffers.py) applied on every pod, trainer and rollout agree to bf16 noise (step 1 at T=1: `k3_kl` 0.98 → 0.00046, Pearson 0.51 → 0.9992). Trainer-side metrics from earlier runs (k3, entropy, `grad_norm`) are invalid. Their step times are kept as a historical record; the post-fix 4-step smoke shows no obvious regression (§3.2), but post-fix throughput has not been measured.
 > - Fix persistence and guard: the launcher now runs [`gemma4_node_prep.py`](gemma4_node_prep.py) on every launch, which brings every Ray node to "verl pin + managed patches" and aborts unless all nodes pass. Inside the trainer, the `[GEMMA4-ROPE]` guard checks every rank's RoPE buffers right after the FSDP wrap and fails the whole job if any rank is wrong ([ROPE_GUARD.md](ROPE_GUARD.md)).
-> - Accuracy / convergence gate: **pending** (§4). Eval is disabled in the smoke, so it says nothing about convergence or accuracy.
+> - Accuracy / convergence gate: **Seed 1 complete (`200/200` steps on `16n64g`), Seeds 2 & 3 in progress** (§4, [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)). Held-out `eval_5000` greedy accuracy improved from **36.26% ± 0.68 pp** at step 0 to a steps 60–200 plateau mean of **37.12%** (+0.86 pp; peak **37.50%** at step 120, final step 200 **36.80%** [+0.54 pp]), with format compliance rising from **93.94%** to **96.70%** (+2.76 pp) and `k3_kl = 0.000640 – 0.000739` across all 200 steps.
 
 ---
 
@@ -129,6 +129,10 @@ The 09-02 runs used an older verl checkout that did not log these metrics, so th
   - Numerical stability across all 200 steps: `rollout_corr/k3_kl = 0.000640 – 0.000739` (median `0.000684`), `actor/grad_norm = 0.1289 – 3.3281` (median `0.2588`).
   - Held-out `eval_5000` greedy accuracy curve: step 0 **36.26% ± 0.68 pp** (format **93.94%**) $\to$ step 60 **37.32%** (+1.06 pp) $\to$ step 120 **37.50%** (+1.24 pp) $\to$ step 180 **37.34%** (+1.08 pp) $\to$ step 200 **36.80% ± 0.68 pp** (+0.54 pp vs step 0, paired SE `0.49 pp`, format **96.70%** [+2.76 pp]; mean across steps 60–200 = **37.12%** [+0.86 pp]).
 - **Trainer log-prob parity (§3.4) and persistence/guard ([ROPE_GUARD.md](ROPE_GUARD.md)) are resolved and enforced on every launch.**
+
+![Seed 1 Held-Out Evaluation Curve](eval_5k/seed1_16n64g/seed1_eval_curve.png)
+
+![Seed 1 Online Training & Numerical Guard Diagnostics](eval_5k/seed1_16n64g/seed1_training_diagnostics.png)
 
 ---
 
