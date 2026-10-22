@@ -10,6 +10,11 @@
 #   clip 0.2/0.28 (DAPO clip-higher); prompt cap 8192 / response cap 8192;
 #   sampling 0.8/50/0.95; lr 1e-6; grad clip 1.0 (verl default);
 #   reward = maxtext_math_reward.compute_score; dataset OpenMathInstruct-2.
+# Precision [PR10]: FP32 persistent weights + FP32 Adam moments
+#   (actor fsdp_config.model_dtype=fp32), BF16 compute via FSDP mixed precision,
+#   BF16 rollout weights. The PR #9 BF16 reference (launcher sha256 8646c173...,
+#   model_dtype=bfloat16) wrote back only 12-17% of each AdamW update at lr 1e-6;
+#   see UPDATE_PRECISION_RESULTS.md. Changing this line = new recipe / cohort.
 # TPU anchor for the GEMMA line: [TBD -- fill in the tianyu run id and its
 #   config once available; every [RL05]/[MAXTEXT] tag below inherits from
 #   the Qwen line and must be re-verified against the Gemma TPU config].
@@ -173,7 +178,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.entropy_coeff=0 \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
-    actor_rollout_ref.actor.fsdp_config.model_dtype=bfloat16 \
+    actor_rollout_ref.actor.fsdp_config.model_dtype=fp32 \
     actor_rollout_ref.ref.log_prob_use_dynamic_bsz=True \
     actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=${ppo_max_token_len_per_gpu} \
     actor_rollout_ref.ref.fsdp_config.param_offload=False \

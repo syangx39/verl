@@ -20,7 +20,7 @@ Colocated `verl` GRPO (DAPO clip-higher) launcher, GKE A4X (`a4x-highgpu-4g-a4x-
 | Batch & rollout | `train_batch_size=256`, `rollout.n=8` | 2,048 completions per step, `ppo_mini_batch_size=256` ($\mu=1$ update per step) |
 | Sequence lengths | `max_prompt_length=8192`, `max_response_length=8192` | `filter_overlong_prompts=False`, `truncation=error` |
 | Algorithm & loss | `adv_estimator=grpo`, `use_kl_loss=False` ($\beta=0$) | Clip-higher `clip_ratio_low=0.2`, `clip_ratio_high=0.28`, `entropy_coeff=0` |
-| Optimizer | `lr=1e-6`, `grad_clip=1.0` | FSDP (`bfloat16`), gradient checkpointing, `use_remove_padding=True` |
+| Optimizer & precision | `lr=1e-6`, `grad_clip=1.0`, AdamW (0.9, 0.999), wd 0.01 | FSDP1 with **FP32 persistent weights and Adam moments** (`actor.fsdp_config.model_dtype=fp32`, since PR #10; launcher sha256 `7d511735…`), BF16 compute (FSDP mixed precision) and BF16 rollout weights; gradient checkpointing, `use_remove_padding=True`. The PR #9 BF16 reference used `model_dtype=bfloat16` (launcher sha256 `8646c173…`) |
 | Dynamic batching | `ppo_max_token_len_per_gpu=16384` | Lowered from Qwen's 32768 because of Gemma-4's 262,144-token vocab (peak reserved HBM 51–53 GB/GPU in the smoke) |
 | Rollout (vLLM) | `tp=1`, `gpu_memory_utilization=0.30` | `temperature=0.8`, `top_p=0.95`, `top_k=50`, `max_num_batched_tokens=32768`, chunked prefill, prefix caching |
 | Trainer attention | `attn_implementation=flex_attention` (`ATTN_IMPL`) | With the `[GEMMA4]` Triton tile pinning for `head_dim=512` (§2) |
