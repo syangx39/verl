@@ -1,0 +1,313 @@
+#!/usr/bin/env python3
+"""Paired comparison of two Gemma-4 runs that share seed / data order (PR #10 item 3: BF16 vs FP32 master).
+
+Both runs must be on the same eval set and the same training data order (same data.seed), so that step k trains on
+the same 256 prompts in both. The script checks that, then reports:
+
+  1. Held-out eval at every common checkpoint, paired by validated `qid` (unique ids, identical input and
+     ground-truth hashes): accuracy of each run, B - A difference, paired SE, question-paired bootstrap 95% interval,
+     gained / lost, and each run's own change vs its step 0. Step 0 scores identical weights in both runs, so the
+     step-0 difference is the eval noise floor.
+  2. Training accuracy (T = 0.8 rollouts) per step on identical prompts: B - A per step, and its mean and SE over
+     step windows (the steps are independent prompt batches, so the window mean's SE is sd / sqrt(n)).
+  3. Per-step diagnostics from the driver logs: rollout_corr/k3_kl, actor/grad_norm, actor/entropy,
+     response_length/mean, critic/score/mean, timing_s/step (medians over windows).
+
+Usage:
+    python3 gemma4_ab_compare.py --a bf16=<eval_dump_dir_A> --a-log <driver_log_A> \\
+        --b fp32=<eval_dump_dir_B> --b-log <driver_log_B> [--max-step 60] [--out-json x.json] [--out-md x.md]
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import math
+import os
+import re
+import statistics
+import sys
+
+
+def _rows(path):
+    with open(path, errors="replace") as f:
+        for line in f:
+            if line.strip():
+                yield json.loads(line)
+
+
+def _h(s) -> str:
+    return hashlib.sha1(str(s).encode("utf-8", "replace")).hexdigest()[:16]
+
+
+def _steps(d, sub):
+    p = os.path.join(d, sub)
+    return sorted(int(f[:-6]) for f in os.listdir(p) if f.endswith(".jsonl") and f[:-6].isdigit()) if os.path.isdir(p) else []
+
+
+def _load_val(path):
+    rows = list(_rows(path))
+    out = {str(r["qid"]): (float(r["acc"]), float(r["fmt"]), _h(r.get("input")), _h(r.get("gts")), r.get("output", ""))
+           for r in rows}
+    if len(out) != len(rows):
+        raise ValueError(f"{path}: duplicate qids")
+    return out
+
+
+def _paired(a, b, B=2000, seed=0):
+    import numpy as np
+
+    qids = sorted(a)
+    if set(qids) != set(b):
+        raise ValueError("qid sets differ")
+    bad = [q for q in qids if a[q][2:4] != b[q][2:4]]
+    if bad:
+        raise ValueError(f"{len(bad)} qids with different input/ground truth")
+    d = np.array([b[q][0] - a[q][0] for q in qids])
+    rng = np.random.default_rng(seed)
+    means = np.array([d[rng.integers(0, len(d), len(d))].mean() for _ in range(B)])
+    lo, hi = np.percentile(means, [2.5, 97.5])
+    return {"acc_a": 100 * float(np.mean([a[q][0] for q in qids])), "acc_b": 100 * float(np.mean([b[q][0] for q in qids])),
+            "fmt_a": 100 * float(np.mean([a[q][1] for q in qids])), "fmt_b": 100 * float(np.mean([b[q][1] for q in qids])),
+            "delta_pp": 100 * float(d.mean()), "se_pp": 100 * float(d.std(ddof=1) / math.sqrt(len(d))),
+            "boot95_pp": [100 * float(lo), 100 * float(hi)], "gained": int((d > 0).sum()), "lost": int((d < 0).sum()),
+            "identical_outputs": int(sum(a[q][4] == b[q][4] for q in qids)), "n": len(qids)}
+
+
+STEP_RE = re.compile(r"\bstep:(\d+)\s+-\s+(.*)")
+KEYS = ("rollout_corr/k3_kl", "actor/grad_norm", "actor/entropy", "response_length/mean", "critic/score/mean",
+        "timing_s/step", "response_length/clip_ratio")
+
+
+def _log_steps(path):
+    out = {}
+    if not path or not os.path.exists(path):
+        return out
+    for line in open(path, errors="replace"):
+        m = STEP_RE.search(line)
+        if not m:
+            continue
+        kv = {}
+        for part in m.group(2).split(" - "):
+            if ":" in part:
+                k, v = part.split(":", 1)
+                v = re.sub(r"^np\.\w+\((.*)\)$", r"\1", v.strip())
+                try:
+                    kv[k.strip()] = float(v)
+                except ValueError:
+                    pass
+        out[int(m.group(1))] = kv
+    return out
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--a", required=True, help="label=eval_dump_dir (reference)")
+    ap.add_argument("--b", required=True, help="label=eval_dump_dir (variant)")
+    ap.add_argument("--a-log", default="")
+    ap.add_argument("--b-log", default="")
+    ap.add_argument("--max-step", type=int, default=10**9)
+    ap.add_argument("--out-json", default="")
+    ap.add_argument("--out-md", default="")
+    ap.add_argument("--plot", default="", help="write a 2x2 PNG summary here (needs matplotlib)")
+    ap.add_argument("--replicate", action="append", default=[],
+                    help="label=eval_dump_dir of another run on the same eval set; its step-0 accuracy joins the "
+                         "identical-weights band in the plot")
+    args = ap.parse_args()
+    la, da = args.a.split("=", 1)
+    lb, db = args.b.split("=", 1)
+
+    res = {"a": {"label": la, "dir": da}, "b": {"label": lb, "dir": db}, "eval": {}, "train": {}, "diag": {}}
+    va = {s: _load_val(os.path.join(da, "val", f"{s}.jsonl")) for s in _steps(da, "val") if s <= args.max_step}
+    vb = {s: _load_val(os.path.join(db, "val", f"{s}.jsonl")) for s in _steps(db, "val") if s <= args.max_step}
+    common = sorted(set(va) & set(vb))
+    for s in common:
+        res["eval"][s] = {"b_minus_a": _paired(va[s], vb[s], seed=s)}
+        if s and 0 in va and 0 in vb:
+            res["eval"][s]["a_vs_step0"] = _paired(va[0], va[s], seed=100 + s)
+            res["eval"][s]["b_vs_step0"] = _paired(vb[0], vb[s], seed=200 + s)
+
+    tsteps = sorted(set(_steps(da, "train")) & set(_steps(db, "train")))
+    tsteps = [s for s in tsteps if s <= args.max_step]
+    per = {}
+    for s in tsteps:
+        ra = list(_rows(os.path.join(da, "train", f"{s}.jsonl")))
+        rb = list(_rows(os.path.join(db, "train", f"{s}.jsonl")))
+        same = sorted({str(r["qid"]) for r in ra}) == sorted({str(r["qid"]) for r in rb})
+        acc = lambda rr: 100 * sum(float(r["acc"]) for r in rr) / len(rr)  # noqa: E731
+        fmt = lambda rr: 100 * sum(float(r["fmt"]) for r in rr) / len(rr)  # noqa: E731
+        per[s] = {"same_prompts": same, "acc_a": acc(ra), "acc_b": acc(rb), "fmt_a": fmt(ra), "fmt_b": fmt(rb)}
+    res["train"]["per_step"] = per
+
+    def window(lo, hi):
+        sel = [per[s] for s in tsteps if lo <= s <= hi]
+        if len(sel) < 2:
+            return None
+        d = [x["acc_b"] - x["acc_a"] for x in sel]
+        return {"steps": [lo, hi], "n": len(sel), "acc_a": statistics.mean(x["acc_a"] for x in sel),
+                "acc_b": statistics.mean(x["acc_b"] for x in sel), "diff_mean": statistics.mean(d),
+                "diff_se": statistics.stdev(d) / math.sqrt(len(d)), "fmt_a": statistics.mean(x["fmt_a"] for x in sel),
+                "fmt_b": statistics.mean(x["fmt_b"] for x in sel)}
+
+    if tsteps:
+        last = tsteps[-1]
+        wins = [(1, min(10, last)), (11, min(20, last)), (21, min(40, last)), (41, min(60, last)), (1, last)]
+        wins = list(dict.fromkeys((lo, hi) for lo, hi in wins if hi >= lo))
+        res["train"]["windows"] = [w for w in (window(lo, hi) for lo, hi in wins) if w]
+        res["train"]["all_same_prompts"] = all(x["same_prompts"] for x in per.values())
+
+    ga, gb = _log_steps(args.a_log), _log_steps(args.b_log)
+    for lo, hi in ((1, 20), (21, 40), (41, 60)):
+        row = {}
+        for k in KEYS:
+            xa = [ga[s][k] for s in ga if lo <= s <= hi and s <= args.max_step and k in ga[s]]
+            xb = [gb[s][k] for s in gb if lo <= s <= hi and s <= args.max_step and k in gb[s]]
+            if xa and xb:
+                row[k] = {"a_median": statistics.median(xa), "b_median": statistics.median(xb), "n_a": len(xa), "n_b": len(xb)}
+        if row:
+            res["diag"][f"{lo}-{hi}"] = row
+
+    L = [f"### Paired A/B: `{lb}` (B) vs `{la}` (A)", ""]
+    L.append(f"- A: `{da}`  B: `{db}`; eval checkpoints in common: {common}; training steps in common: "
+             f"{tsteps[0] if tsteps else '-'}–{tsteps[-1] if tsteps else '-'}; identical prompts at every common step: "
+             f"{res['train'].get('all_same_prompts')}.")
+    L.append("")
+    L.append("| Eval step | A acc (%) | B acc (%) | B − A (pp) | paired SE | bootstrap 95% | +gained / −lost (B vs A) | "
+             "A vs own step 0 (pp) | B vs own step 0 (pp, 95%) | identical outputs |")
+    L.append("|---:|---:|---:|---:|---:|---|---|---:|---|---:|")
+    for s in common:
+        e = res["eval"][s]
+        x = e["b_minus_a"]
+        a0 = f"{e['a_vs_step0']['delta_pp']:+.2f}" if "a_vs_step0" in e else "—"
+        b0 = (f"{e['b_vs_step0']['delta_pp']:+.2f} [{e['b_vs_step0']['boot95_pp'][0]:+.2f}, {e['b_vs_step0']['boot95_pp'][1]:+.2f}]"
+              if "b_vs_step0" in e else "—")
+        L.append(f"| {s} | {x['acc_a']:.2f} | {x['acc_b']:.2f} | **{x['delta_pp']:+.2f}** | {x['se_pp']:.2f} | "
+                 f"[{x['boot95_pp'][0]:+.2f}, {x['boot95_pp'][1]:+.2f}] | +{x['gained']} / −{x['lost']} | {a0} | {b0} | "
+                 f"{x['identical_outputs']} / {x['n']} |")
+    L.append("")
+    if res["train"].get("windows"):
+        L.append("| Training steps (identical prompts) | n | A train acc (%) | B train acc (%) | B − A mean (pp) | SE (pp) | "
+                 "A format (%) | B format (%) |")
+        L.append("|---|---:|---:|---:|---:|---:|---:|---:|")
+        for w in res["train"]["windows"]:
+            L.append(f"| {w['steps'][0]}–{w['steps'][1]} | {w['n']} | {w['acc_a']:.2f} | {w['acc_b']:.2f} | "
+                     f"**{w['diff_mean']:+.2f}** | {w['diff_se']:.2f} | {w['fmt_a']:.2f} | {w['fmt_b']:.2f} |")
+        L.append("")
+    if res["diag"]:
+        L.append("| Steps | metric | A median | B median |")
+        L.append("|---|---|---:|---:|")
+        for win, row in res["diag"].items():
+            for k, v in row.items():
+                L.append(f"| {win} | `{k}` | {v['a_median']:.4g} | {v['b_median']:.4g} |")
+    md = "\n".join(L) + "\n"
+    print(md)
+    if args.out_json:
+        json.dump(res, open(args.out_json, "w"), indent=1, sort_keys=True)
+    if args.out_md:
+        open(args.out_md, "w").write(md)
+    if args.plot:
+        rep = {}
+        for item in args.replicate:
+            lab, d = item.split("=", 1)
+            p = os.path.join(d, "val", "0.jsonl")
+            if os.path.exists(p):
+                rows = list(_rows(p))
+                rep[lab] = 100 * sum(float(r["acc"]) for r in rows) / len(rows)
+        _plot(res, la, lb, ga, gb, rep, args.plot)
+    return 0
+
+
+def _rolling(x, w):
+    return [sum(x[max(0, i - w + 1): i + 1]) / (i - max(0, i - w + 1) + 1) for i in range(len(x))]
+
+
+def _plot(res, la, lb, ga, gb, rep, path):
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    plt.rcParams.update({"font.size": 10, "axes.grid": True, "grid.alpha": 0.35, "axes.facecolor": "#fafafa"})
+    ca, cb = "#7f7f7f", "#1f77b4"
+    fig, axes = plt.subplots(2, 2, figsize=(14, 9.5), dpi=150)
+    fig.suptitle(f"Gemma-4 E2B rl-05, seed 1, 16n64g: {lb} vs {la} (identical prompts per step)", fontsize=13,
+                 fontweight="bold")
+
+    ax = axes[0, 0]
+    es = sorted(res["eval"])
+    ya = {s: res["eval"][s]["b_minus_a"]["acc_a"] for s in es}
+    yb = {s: res["eval"][s]["b_minus_a"]["acc_b"] for s in es}
+    for lab, ys_d, other, c in ((la, ya, yb, ca), (lb, yb, ya, cb)):
+        ys = [ys_d[s] for s in es]
+        se = [100 * math.sqrt((y / 100) * (1 - y / 100) / 5000) for y in ys]
+        ax.errorbar(es, ys, yerr=se, fmt="-o", color=c, capsize=4, lw=2, label=f"{lab} (± binomial SE)")
+        for s, y in zip(es, ys):
+            ax.annotate(f"{y:.2f}", (s, y), textcoords="offset points", xytext=(14, 6 if y >= other[s] else -14),
+                        ha="left", fontsize=8.5, color=c)
+    s0 = [res["eval"][0]["b_minus_a"]["acc_a"], res["eval"][0]["b_minus_a"]["acc_b"], *rep.values()] if 0 in res["eval"] else []
+    if s0:
+        ax.axhspan(min(s0), max(s0), color="#ffbb78", alpha=0.35,
+                   label=f"step-0 evals of identical weights ({len(s0)} runs): {min(s0):.2f}–{max(s0):.2f}")
+    ax.set_title("A. Held-out greedy accuracy on eval_5000 (paired by qid)")
+    ax.set_xlabel("Training step")
+    ax.set_ylabel("Accuracy (%)")
+    ax.set_xticks(es)
+    ax.legend(loc="upper left", fontsize=8.5)
+
+    per = res["train"]["per_step"]
+    ts = sorted(per)
+    aa = [per[s]["acc_a"] for s in ts]
+    bb = [per[s]["acc_b"] for s in ts]
+    ax = axes[0, 1]
+    ax.plot(ts, aa, color=ca, alpha=0.25, lw=1)
+    ax.plot(ts, bb, color=cb, alpha=0.25, lw=1)
+    ax.plot(ts, _rolling(aa, 10), color=ca, lw=2.2, label=f"{la}: 10-step rolling mean")
+    ax.plot(ts, _rolling(bb, 10), color=cb, lw=2.2, label=f"{lb}: 10-step rolling mean")
+    ax.set_title("B. Training accuracy (T=0.8, 2,048 completions/step, same prompts)")
+    ax.set_xlabel("Training step")
+    ax.set_ylabel("Sampled accuracy (%)")
+    ax.legend(loc="lower right", fontsize=8.5)
+
+    ax = axes[1, 0]
+    d = [b - a for a, b in zip(aa, bb)]
+    ax.bar(ts, d, color=[cb if x >= 0 else "#d62728" for x in d], alpha=0.5, width=0.8, label="per-step difference")
+    ax.plot(ts, _rolling(d, 10), color="#111111", lw=2, label="10-step rolling mean")
+    ax.axhline(0, color="#555555", lw=1)
+    for w in res["train"].get("windows", []):
+        lo, hi = w["steps"]
+        if (lo, hi) == (1, ts[-1]):
+            continue
+        ax.hlines(w["diff_mean"], lo, hi, color="#2ca02c", lw=2.5)
+        ax.annotate(f"{w['diff_mean']:+.2f} ± {2 * w['diff_se']:.2f}", ((lo + hi) / 2, w["diff_mean"]),
+                    textcoords="offset points", xytext=(0, 8), ha="center", fontsize=8.5, color="#2ca02c")
+    ax.set_title(f"C. Train-acc difference {lb} − {la}, identical prompts (window mean ± 2 SE)")
+    ax.set_xlabel("Training step")
+    ax.set_ylabel("pp")
+    ax.legend(loc="upper left", fontsize=8.5)
+
+    ax = axes[1, 1]
+    for g, lab, c in ((ga, la, ca), (gb, lb, cb)):
+        xs = [s for s in ts if s in g and "response_length/mean" in g[s]]
+        ax.plot(xs, _rolling([g[s]["response_length/mean"] for s in xs], 10), color=c, lw=2,
+                label=f"{lab}: mean response length (10-step rolling)")
+    ax2 = ax.twinx()
+    for g, lab, c in ((ga, la, ca), (gb, lb, cb)):
+        xs = [s for s in ts if s in g and "actor/entropy" in g[s]]
+        ax2.plot(xs, _rolling([g[s]["actor/entropy"] for s in xs], 10), color=c, lw=1.5, ls="--",
+                 label=f"{lab}: entropy (right)")
+    ax2.grid(False)
+    ax.set_title("D. Response length (tokens) and policy entropy")
+    ax.set_xlabel("Training step")
+    ax.set_ylabel("tokens")
+    ax2.set_ylabel("entropy")
+    h1, l1 = ax.get_legend_handles_labels()
+    h2, l2 = ax2.get_legend_handles_labels()
+    ax.legend(h1 + h2, l1 + l2, loc="lower left", fontsize=8)
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

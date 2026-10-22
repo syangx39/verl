@@ -6,7 +6,7 @@ Investigate why the numerically stable Gemma-4 `rl-05` run in [PR #9](https://gi
 
 The first hypotheses to test are ineffective small updates with BF16 persistent weights / optimizer state, and weak or misleading training reward signal. Neither is an established root cause. This work should produce measured update evidence and a reproducible recipe decision, including a negative result if precision is not responsible.
 
-**Status: items 1–2 complete, item 3 running** ([UPDATE_PRECISION_RESULTS.md](UPDATE_PRECISION_RESULTS.md)). The initial commit was plan only.
+**Status: items 1–3 complete; item 4 proposed, awaiting approval** ([UPDATE_PRECISION_RESULTS.md](UPDATE_PRECISION_RESULTS.md)). The initial commit was plan only.
 
 ## Plan
 
@@ -37,11 +37,11 @@ For initial-value matching, cast the same BF16-quantized reference weights to FP
 ### 3. Run a controlled precision comparison only if warranted
 
 - [x] If the probe supports the precision hypothesis, add a configuration with FP32 persistent optimizer weights/master and FP32 moments while retaining BF16 model computation and rollout where supported; verify the actual runtime dtypes. — done: `++actor_rollout_ref.actor.fsdp_config.model_dtype=fp32`; runtime dtypes verified fp32 for params, grads and moments; compute stays bf16 (FSDP mixed precision default) ([results](UPDATE_PRECISION_RESULTS.md#22-runtime-dtypes-and-settings-all-64-ranks) §2.2).
-- [ ] Keep the initial numerical weights, data order, prompt/reward, batch size, objective, LR schedule, clipping, and eval protocol fixed for the comparison.
-- [ ] Preserve the Gemma-4 recipe from PR #9: GRPO advantages, PPO clipping, and global token-mean aggregation. Do not substitute the earlier Qwen REINFORCE/TIS recipe.
+- [x] Keep the initial numerical weights, data order, prompt/reward, batch size, objective, LR schedule, clipping, and eval protocol fixed for the comparison. — done: single override `model_dtype=fp32`; identical prompt `qid`s verified at all 60 steps ([results](UPDATE_PRECISION_RESULTS.md#3-controlled-precision-comparison-plan-item-3--complete-60-steps-seed-1) §3).
+- [x] Preserve the Gemma-4 recipe from PR #9: GRPO advantages, PPO clipping, and global token-mean aggregation. Do not substitute the earlier Qwen REINFORCE/TIS recipe. — done: same frozen launcher and wrapper ([results](UPDATE_PRECISION_RESULTS.md#3-controlled-precision-comparison-plan-item-3--complete-60-steps-seed-1) §3).
 - [x] Re-run the RoPE guard and trainer–sampler log-prob diagnostics, then a short operational check before a full run. — done in the 2-step FP32 probe runs: RoPE guard PASS 64/64, `k3_kl` 0.00071–0.00072, memory and step time unchanged.
-- [ ] For end-to-end comparisons, measure gradient differences rather than requiring identical gradients after precision paths diverge. Only the optimizer-only probe reuses exactly the same captured gradients.
-- [ ] If precision is not supported as the cause, record that finding and select the next single-factor investigation from the reward, update, or eval evidence. Avoid changing precision, LR, prompt and reward together.
+- [x] For end-to-end comparisons, measure gradient differences rather than requiring identical gradients after precision paths diverge. Only the optimizer-only probe reuses exactly the same captured gradients. — done at the level of per-window gradient-norm medians (BF16 0.26 / 0.24 / 0.31 vs FP32 0.24 / 0.34 / 0.22); per-parameter gradient differences were not measured ([results](UPDATE_PRECISION_RESULTS.md#3-controlled-precision-comparison-plan-item-3--complete-60-steps-seed-1) §3.3).
+- [x] If precision is not supported as the cause, record that finding and select the next single-factor investigation from the reward, update, or eval evidence. Avoid changing precision, LR, prompt and reward together. — not triggered: precision is supported (training accuracy +1.87 pp on identical prompts in steps 41–60; [results](UPDATE_PRECISION_RESULTS.md#3-controlled-precision-comparison-plan-item-3--complete-60-steps-seed-1) §3.4).
 
 Short runs establish numerical and operational behavior; they do not establish a convergence gain.
 

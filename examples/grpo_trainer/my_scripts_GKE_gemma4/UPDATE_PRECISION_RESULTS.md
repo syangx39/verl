@@ -3,9 +3,9 @@
 Plan and checklist: [UPDATE_PRECISION_PLAN.md](UPDATE_PRECISION_PLAN.md). This file records measured results per plan item, including negative or inconclusive ones. Evidence lives in [`update_precision/`](update_precision/).
 
 > [!IMPORTANT]
-> **Status:** item 1 (audit of existing evidence) and item 2 (1–2-step effective-update probe) are complete. Item 3 (BF16 / FP32 controlled comparison) is running. Item 4 (frozen candidate, 200-step seed 1, seeds 2/3 decision) has not started.
+> **Status:** items 1–3 are complete. Item 4 (freeze a candidate, 200-step seed 1, then decide on seeds 2/3) is waiting for approval of the candidate (§4).
 >
-> **What is established:** in the original recipe the optimizer holds BF16 parameters and BF16 Adam moments, and most of each AdamW update is lost when it is written back to the BF16 weights. **What is not established yet:** that this is the reason held-out accuracy did not improve. That is what the item-3 comparison tests.
+> **What is established:** in the original recipe the optimizer holds BF16 parameters and BF16 Adam moments, and most of each AdamW update is lost when it is written back to the BF16 weights (item 2). Changing only that, to FP32 persistent weights and moments, makes the model learn measurably faster on identical training prompts over 60 steps, and its held-out accuracy rises at every checkpoint relative to its own step 0 (item 3). **What is not established:** the size of the held-out gain at the predeclared 200-step endpoint, or across seeds. The 60-step held-out difference between the two arms is in the same direction but small relative to eval noise.
 
 ## Summary
 
@@ -17,6 +17,7 @@ Plan and checklist: [UPDATE_PRECISION_PLAN.md](UPDATE_PRECISION_PLAN.md). This f
 | Are updates retained? | **BF16:** 0.50% / 0.27% of elements change at steps 1 / 2; ‖applied‖/‖ideal‖ = **0.167 / 0.124**, cos(applied, ideal) = **0.107 / 0.090**. **FP32 control** (`model_dtype=fp32` only): ‖applied‖/‖ideal‖ = **1.0000**, cos = **1.0000**. | §2.3 |
 | Which part loses the update? | **Write-back rounding.** On the same gradients, BF16 moments with FP32 write-back reproduce the intended update (cos 1.0000); FP32 moments with BF16 write-back lose as much as the real optimizer (‖·‖/‖ideal‖ 0.166 / 0.116). The changed set matches the round-to-nearest prediction (99.5% / 99.6%). Every parameter category is affected, including norms. | §2.3–2.4 |
 | What does the rollout see? | Per step, about 0.5% of BF16 casts change in both runs; with an FP32 master the visible change accumulates (0.494% → 0.593% after two steps), with BF16 it does not (0.498% → 0.493%). | §2.4 |
+| Does FP32 persistent precision learn faster (60 steps, seed 1, identical prompts)? | **Yes, on the training distribution:** training-accuracy gap FP32 − BF16 grows from +0.24 pp (steps 1–10) to **+1.87 pp (steps 41–60, SE 0.23)**; format 99.8% vs 99.0%. **Held-out:** FP32 vs its own step 0 **+1.40 / +2.02 / +2.20 pp** at steps 20 / 40 / 60 (all intervals exclude 0). FP32 − BF16 is +0.90 / +1.30 / +0.72 pp; only step 40's interval excludes 0. | §3 |
 
 ## 1. Audit of existing evidence (plan item 1)
 
@@ -167,16 +168,59 @@ FP32 persistent weights apply the intended update for attention, MLP and embeddi
 - Established: the original recipe's optimizer has no FP32 master copy, and BF16 write-back discards most of each AdamW update at lr 1e-6 (measured on all 64 ranks, two steps, real gradients).
 - Not established: that this explains the held-out result. Steps 1–2 do not show long-run behavior (for example, with BF16 moments the β₂ = 0.999 decay of `exp_avg_sq` is itself below BF16 resolution, which only matters over many steps), and a probe does not measure learning. Item 3 measures the end-to-end effect.
 
-## 3. Controlled precision comparison (plan item 3) — running
+## 3. Controlled precision comparison (plan item 3) — complete (60 steps, seed 1)
 
-- **Arm FP32:** `gemma4_e2b_rl05_16n64g_s60_fp32ab_seed1_1022_1744` (started 2026-10-22T17:44Z): the frozen accuracy wrapper and launcher (`run_gemma4_e2b_rl05_accuracy_baseline.sh` sha256 `2a37aad5…`, `run_gemma4_e2b_rl05_parity.sh` sha256 `8646c173…`), `SEED=1`, `NNODES=16`, `TOTAL_STEPS=60`, eval at steps 0 / 20 / 40 / 60 on `eval_5000`, with the single override `++actor_rollout_ref.actor.fsdp_config.model_dtype=fp32` (FP32 persistent weights and moments; compute stays BF16 through FSDP mixed precision; rollout weights are BF16 casts). No probe hook in this run.
-- **Arm BF16:** the preserved PR #9 seed 1, steps 0–60 (same seed and data order, so the same prompts at every step).
-- **Kept fixed:** initial weights, data order, prompts and reward, batch size, GRPO objective with PPO clipping and global token-mean loss, LR schedule, clipping, eval protocol; RoPE guard and trainer–sampler log-prob diagnostics are re-checked.
-- **Comparison:** (a) training accuracy on identical prompts, paired by step; (b) held-out accuracy at steps 20 / 40 / 60, paired by `qid`, read against the identical-weights noise floor (§1.2); (c) gradient norms, `k3_kl`, entropy, response length and step time. A 60-step comparison shows operational and early learning behavior; it is not a convergence result.
+- **Arm FP32:** `gemma4_e2b_rl05_16n64g_s60_fp32ab_seed1_1022_1744` (2026-10-22T17:44Z–19:53Z): the frozen accuracy wrapper and launcher (`run_gemma4_e2b_rl05_accuracy_baseline.sh` sha256 `2a37aad5…`, `run_gemma4_e2b_rl05_parity.sh` sha256 `8646c173…`), `SEED=1`, `NNODES=16`, `TOTAL_STEPS=60`, eval at steps 0 / 20 / 40 / 60 on `eval_5000`. Single override: `++actor_rollout_ref.actor.fsdp_config.model_dtype=fp32` (FP32 persistent weights and moments, verified at runtime in §2.2). Compute stays BF16 through FSDP mixed precision, and rollout weights are BF16 casts. No probe hook. Exit 0, 60 / 60 steps; RoPE guard PASS on 64 / 64 ranks ([guard check](update_precision/ab_fp32_vs_bf16/guard_check.txt)); driver log [`logs/gemma4_e2b_rl05_16n64g_s60_fp32ab_seed1_1022_1744.log`](logs/gemma4_e2b_rl05_16n64g_s60_fp32ab_seed1_1022_1744.log).
+- **Arm BF16:** the preserved PR #9 seed 1, steps 0–60.
+- **Kept fixed:** initial weights, data order (the same 256 prompt `qid`s verified at every one of the 60 steps), prompts and reward, batch size, GRPO objective with PPO clipping and global token-mean loss, LR schedule, clipping, eval protocol.
+- **Predeclared comparisons** (written before the run finished): (a) training accuracy on identical prompts, paired by step; (b) held-out accuracy at steps 20 / 40 / 60, paired by `qid`, read against the identical-weights noise floor; (c) gradient norms, `k3_kl`, entropy, response length, step time.
+- Output of [`gemma4_ab_compare.py`](gemma4_ab_compare.py): [`ab_fp32_vs_bf16_s60.md`](update_precision/ab_fp32_vs_bf16/ab_fp32_vs_bf16_s60.md) / [`.json`](update_precision/ab_fp32_vs_bf16/ab_fp32_vs_bf16_s60.json).
 
-## 4. Revised baseline (plan item 4) — not started
+![FP32 vs BF16 A/B, 60 steps](update_precision/ab_fp32_vs_bf16/ab_fp32_vs_bf16_s60.png)
 
-Depends on item 3. A revised recipe would be frozen (launcher change and new hash) before a 200-step seed 1 is run; it is reported as its own cohort and not pooled with the BF16 seeds.
+### 3.1 (a) Training accuracy on identical prompts
+
+| Steps | BF16 train acc (%) | FP32 train acc (%) | FP32 − BF16 (pp) | SE over steps (pp) | format BF16 / FP32 (%) |
+|---|---:|---:|---:|---:|---|
+| 1–10 | 59.56 | 59.80 | +0.24 | 0.24 | 97.72 / 98.39 |
+| 11–20 | 58.98 | 59.38 | +0.41 | 0.28 | 98.19 / 99.31 |
+| 21–40 | 59.92 | 61.40 | **+1.48** | 0.20 | 98.66 / 99.76 |
+| 41–60 | 59.26 | 61.13 | **+1.87** | 0.23 | 98.98 / 99.78 |
+| 1–60 | 59.48 | 60.71 | **+1.22** | 0.14 | 98.53 / 99.46 |
+
+Each step trains on the same 256 prompts in both arms, so per-step differences remove prompt difficulty; the SE treats steps as independent batches.
+
+### 3.2 (b) Held-out `eval_5000` (greedy, paired by `qid`)
+
+| Step | BF16 (%) | FP32 (%) | FP32 − BF16 (pp) | bootstrap 95% | +gained / −lost | BF16 vs own step 0 | FP32 vs own step 0 (95%) | identical outputs |
+|---:|---:|---:|---:|---|---|---:|---|---:|
+| 0 (identical weights) | 36.26 | 35.84 | −0.42 | [−1.32, +0.46] | +258 / −279 | — | — | 279 / 5000 |
+| 20 | 36.34 | 37.24 | +0.90 | [−0.06, +1.90] | +335 / −290 | +0.08 | **+1.40** [+0.48, +2.44] | 128 / 5000 |
+| 40 | 36.56 | 37.86 | **+1.30** | [+0.26, +2.30] | +353 / −288 | +0.30 | **+2.02** [+1.04, +3.02] | 36 / 5000 |
+| 60 | 37.32 | 38.04 | +0.72 | [−0.24, +1.72] | +344 / −308 | +1.06 | **+2.20** [+1.22, +3.20] | 29 / 5000 |
+
+Noise floor: the three step-0 evals of identical base weights (BF16 seed-1 run, BF16 seed-2 run, FP32 run) scored 36.26%, 36.74% and 35.84%: a 0.90 pp range from eval nondeterminism alone. Against their mean (36.28%), FP32 is +0.96 / +1.58 / +1.76 pp at steps 20 / 40 / 60 and BF16 is +0.06 / +0.28 / +1.04 pp.
+
+### 3.3 (c) Diagnostics (window medians, BF16 → FP32)
+
+| Steps | `k3_kl` | `grad_norm` | entropy | mean response length (tokens) | train reward | step time (s) |
+|---|---|---|---|---|---|---|
+| 1–20 | 0.000697 → 0.000694 | 0.259 → 0.241 | 0.196 → 0.197 | 1937 → 1915 | 0.691 → 0.699 | 69.2 → 64.9 |
+| 21–40 | 0.000688 → 0.000706 | 0.243 → 0.340 | 0.193 → 0.201 | 1887 → 1815 | 0.700 → 0.712 | 66.3 → 67.1 |
+| 41–60 | 0.000686 → 0.000732 | 0.312 → 0.218 | 0.193 → 0.216 | 1917 → 1806 | 0.699 → 0.715 | 68.8 → 67.8 |
+
+### 3.4 Reading
+
+- **Precision is supported as a cause of the weak learning.** With only the persistent-weight / moment precision changed, the FP32 arm pulls ahead on identical training prompts, and the gap grows with training: +0.24 pp in steps 1–10, +1.87 pp in steps 41–60 (about 8 SE). This is consistent with item 2: the BF16 arm keeps 12–17% of each intended update, the FP32 arm all of it.
+- **Held-out moves in the same direction, with limited resolution.** FP32 improves at every checkpoint relative to its own step 0 (+1.40 / +2.02 / +2.20 pp; all intervals exclude zero) and relative to the mean of the three identical-weights step-0 evals (+0.96 / +1.58 / +1.76 pp). The direct FP32 − BF16 difference is +0.90 / +1.30 / +0.72 pp; only step 40's interval excludes zero. BF16's step-60 value (37.32%) is inside the band it occupied over steps 60–200 (36.68–37.50%).
+- **Behavior to watch in a longer run:** FP32 policy entropy rises after step 30 (window median 0.197 → 0.216) while BF16 stays near 0.193; FP32 responses get about 100 tokens shorter; `k3_kl` stays at BF16-noise level but edges up (0.000694 → 0.000732). Step time and memory are unchanged.
+- **Limitations:** one seed, 60 steps, one eval pass per checkpoint (eval nondeterminism about ±0.45 pp per pass). The magnitude of the held-out gain at step 200 is unknown; this comparison establishes early learning behavior, not convergence.
+
+## 4. Revised baseline (plan item 4) — proposed, awaiting approval
+
+- **Candidate recipe:** the PR #9 recipe with FP32 persistent weights and Adam moments (`actor_rollout_ref.actor.fsdp_config.model_dtype=fp32`; BF16 compute and rollout unchanged). Nothing else changes: LR, GRPO objective, reward and format credit, sampling, eval protocol.
+- **Proposed next steps:** commit the candidate as a launcher change with a new sha256 (freeze), then run a 200-step seed 1 with the frozen 5,000-question greedy eval (steps 0, 20, …, 200). Report the full trajectory and the predeclared step-200 endpoint with question-paired uncertainty against the preserved BF16 reference. Then decide on seeds 2/3. The FP32 recipe is a new cohort and is not pooled with the BF16 seeds. The 60-step A/B run is not reused as seed 1 because it ran on the pre-freeze launcher with an override.
+- **Possible later single-factor checks** (not part of this candidate): the ~70% zero-advantage groups and the format-only advantage share (§1.3); eval nondeterminism, e.g. repeated greedy passes or batch-invariant decoding, which needs an agreed eval-protocol change.
 
 ## Reproduction
 
@@ -195,7 +239,11 @@ NNODES=16 TOTAL_STEPS=2 EXPERIMENT_NAME=<exp> bash $D/run_gemma4_e2b_rl05_parity
   ++ray_kwargs.ray_init.runtime_env.env_vars.VERL_OPTIM_PROBE_DIR=/workspace/meta-RL/logs/gemma4_optim_probe/<exp> \
   '++ray_kwargs.ray_init.runtime_env.env_vars.VERL_OPTIM_PROBE_STEPS="2"'
 python3 $D/gemma4_optim_probe_report.py --probe-dir /workspace/meta-RL/logs/gemma4_optim_probe/<exp> --world 64 --label <label>
-# item 3: FP32 arm
+# item 3: FP32 arm, then the paired comparison
 SEED=1 NNODES=16 TOTAL_STEPS=60 EXPERIMENT_NAME=<exp> bash $D/run_gemma4_e2b_rl05_accuracy_baseline.sh \
   ++actor_rollout_ref.actor.fsdp_config.model_dtype=fp32
+E=/workspace/meta-RL/logs/gemma4_eval; L=/workspace/meta-RL/logs
+python3 $D/gemma4_ab_compare.py --a bf16=$E/gemma4_e2b_rl05_16n64g_s200_seed1_1021_1955 --a-log $L/gemma4_e2b_rl05_16n64g_s200_seed1_1021_1955.log \
+  --b fp32=$E/<exp> --b-log $L/<exp>.log --max-step 60 --replicate bf16_seed2run=$E/gemma4_e2b_rl05_16n64g_s200_seed2_1022_0301 \
+  --out-md ab.md --out-json ab.json --plot ab.png
 ```
