@@ -1,0 +1,332 @@
+{
+ "checks": [
+  {
+   "check": "node_prep verdict PASS",
+   "detail": "PASS",
+   "ok": true
+  },
+  {
+   "check": "node_prep one ok record per alive node",
+   "detail": "16 records / 16 alive nodes",
+   "ok": true
+  },
+  {
+   "check": "node_prep managed files identical on every node",
+   "detail": "{\"verl/models/transformers/monkey_patch.py\": \"9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7\", \"verl/workers/engine/fsdp/transformer_impl.py\": \"9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263\"}",
+   "ok": true
+  },
+  {
+   "check": "exactly one guard report for role=actor",
+   "detail": "found 1",
+   "ok": true
+  },
+  {
+   "check": "guard report covers ranks 0..W-1",
+   "detail": "world_size=16 ranks=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]",
+   "ok": true
+  },
+  {
+   "check": "guard report: all ranks PASS",
+   "detail": "n_fail=0",
+   "ok": true
+  },
+  {
+   "check": "no fault injected",
+   "detail": "null",
+   "ok": true
+  },
+  {
+   "check": "every rank rebuilt fp32 bit-exact",
+   "detail": "",
+   "ok": true
+  },
+  {
+   "check": "per-rank init records for ranks 0..W-1",
+   "detail": "have [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]",
+   "ok": true
+  },
+  {
+   "check": "per-rank init records: all PASS",
+   "detail": "",
+   "ok": true
+  },
+  {
+   "check": "per-rank init records: all buffers post-rebuild fp32 bit-exact",
+   "detail": "64 buffers",
+   "ok": true
+  },
+  {
+   "check": "no fault applied",
+   "detail": "[]",
+   "ok": true
+  },
+  {
+   "check": "first-forward records for ranks 0..W-1",
+   "detail": "have [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]",
+   "ok": true
+  },
+  {
+   "check": "first-forward records: all PASS, nothing restored",
+   "detail": "",
+   "ok": true
+  },
+  {
+   "check": "driver exit_code=0",
+   "detail": "exit_code=0",
+   "ok": true
+  },
+  {
+   "check": ">= 2 training steps logged",
+   "detail": "steps=[1, 2]",
+   "ok": true
+  }
+ ],
+ "driver_exit_code": 0,
+ "guard_dir": "/workspace/meta-RL/logs/gemma4_guard/gemma4_e2b_4n16g_guard_smoke2_1021_1926",
+ "guard_report": {
+  "failed_ranks": [],
+  "fault": null,
+  "fp32_rope": true,
+  "kind": "gemma4_rope_guard",
+  "max_rel_err_vs_fp32_accepted_pre": 0.0036525134959225084,
+  "n_fail": 0,
+  "n_pass": 16,
+  "per_rank": [
+   [
+    0,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-7h2nr",
+    "0",
+    [
+     "bf16"
+    ],
+    true
+   ],
+   [
+    1,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-7h2nr",
+    "1",
+    [
+     "bf16"
+    ],
+    true
+   ],
+   [
+    2,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-7h2nr",
+    "2",
+    [
+     "bf16"
+    ],
+    true
+   ],
+   [
+    3,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-7h2nr",
+    "3",
+    [
+     "bf16"
+    ],
+    true
+   ],
+   [
+    4,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-49pf9",
+    "0",
+    [
+     "bf16"
+    ],
+    true
+   ],
+   [
+    5,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-49pf9",
+    "1",
+    [
+     "bf16"
+    ],
+    true
+   ],
+   [
+    6,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-49pf9",
+    "2",
+    [
+     "bf16"
+    ],
+    true
+   ],
+   [
+    7,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-49pf9",
+    "3",
+    [
+     "bf16"
+    ],
+    true
+   ],
+   [
+    8,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-lxr22",
+    "0",
+    [
+     "bf16"
+    ],
+    true
+   ],
+   [
+    9,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-lxr22",
+    "1",
+    [
+     "bf16"
+    ],
+    true
+   ],
+   [
+    10,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-lxr22",
+    "2",
+    [
+     "bf16"
+    ],
+    true
+   ],
+   [
+    11,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-lxr22",
+    "3",
+    [
+     "bf16"
+    ],
+    true
+   ],
+   [
+    12,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-9qz2k",
+    "0",
+    [
+     "bf16"
+    ],
+    true
+   ],
+   [
+    13,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-9qz2k",
+    "1",
+    [
+     "bf16"
+    ],
+    true
+   ],
+   [
+    14,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-9qz2k",
+    "2",
+    [
+     "bf16"
+    ],
+    true
+   ],
+   [
+    15,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-9qz2k",
+    "3",
+    [
+     "bf16"
+    ],
+    true
+   ]
+  ],
+  "per_rank_fields": [
+   "rank",
+   "status",
+   "host",
+   "cuda_visible_devices",
+   "pre_states",
+   "post_bit_exact"
+  ],
+  "phase": "init_checkpoint",
+  "pre_states": {
+   "bf16": 64
+  },
+  "ranks": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15
+  ],
+  "role": "actor",
+  "tolerances": {
+   "atol": 1e-10,
+   "rtol_bf16": 0.0078125,
+   "rtol_fp32": 4e-06
+  },
+  "version": "2",
+  "world_size": 16
+ },
+ "log": "/workspace/meta-RL/logs/gemma4_e2b_4n16g_guard_smoke2_1021_1926.log",
+ "mode": "positive",
+ "node_prep": {
+  "actions": [
+   "pinned_packages_already_satisfied:pinned_packages_already_satisfied",
+   "verl/models/transformers/monkey_patch.py:unchanged",
+   "verl/workers/engine/fsdp/transformer_impl.py:unchanged"
+  ],
+  "managed_sha256": {
+   "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+   "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+  },
+  "n_nodes": 16,
+  "packages": {
+   "antlr4-python3-runtime": "4.9.3",
+   "flash-attn": "2.8.3",
+   "latex2sympy2_extended": "1.11.0",
+   "math-verify": "0.9.0",
+   "ray": "2.55.1",
+   "torch": "2.13.0+cu130",
+   "transformers": "5.12.1",
+   "vllm": "0.29.0"
+  },
+  "python": "/workspace/verl-pin/.venv/bin/python",
+  "rope_patch": {
+   "block_sha256": "2d750b2b0c718b581831c6aa9130717e5dcf47e5938715de58caa2d42ae0b8f4",
+   "version": "2"
+  },
+  "verl_head": "ace775e87d8765bcdd114aac734ab71da5367a0f"
+ },
+ "role": "actor",
+ "steps_logged": [
+  1,
+  2
+ ],
+ "verdict": "PASS",
+ "world": 16
+}

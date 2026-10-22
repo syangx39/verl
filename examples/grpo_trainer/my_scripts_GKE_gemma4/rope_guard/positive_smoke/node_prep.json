@@ -1,0 +1,1422 @@
+{
+ "consistency": {
+  "import.monkey_patch_file": {
+   "n_distinct": 1,
+   "value": "/workspace/verl-pin/verl/models/transformers/monkey_patch.py"
+  },
+  "import.packages": {
+   "n_distinct": 1,
+   "value": {
+    "antlr4-python3-runtime": "4.9.3",
+    "flash-attn": "2.8.3",
+    "latex2sympy2_extended": "1.11.0",
+    "math-verify": "0.9.0",
+    "ray": "2.55.1",
+    "torch": "2.13.0+cu130",
+    "transformers": "5.12.1",
+    "vllm": "0.29.0"
+   }
+  },
+  "import.python": {
+   "n_distinct": 1,
+   "value": "/workspace/verl-pin/.venv/bin/python"
+  },
+  "import.rope_block_sha256": {
+   "n_distinct": 1,
+   "value": "2d750b2b0c718b581831c6aa9130717e5dcf47e5938715de58caa2d42ae0b8f4"
+  },
+  "import.rope_patch_version": {
+   "n_distinct": 1,
+   "value": "2"
+  },
+  "import.transformer_impl_file": {
+   "n_distinct": 1,
+   "value": "/workspace/verl-pin/verl/workers/engine/fsdp/transformer_impl.py"
+  },
+  "import.verl_file": {
+   "n_distinct": 1,
+   "value": "/workspace/verl-pin/verl/__init__.py"
+  },
+  "managed_sha256": {
+   "n_distinct": 1,
+   "value": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   }
+  },
+  "modified_files": {
+   "n_distinct": 1,
+   "value": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   }
+  },
+  "python": {
+   "n_distinct": 1,
+   "value": "/workspace/verl-pin/.venv/bin/python"
+  },
+  "verl_head": {
+   "n_distinct": 1,
+   "value": "ace775e87d8765bcdd114aac734ab71da5367a0f"
+  },
+  "verl_root": {
+   "n_distinct": 1,
+   "value": "/workspace/verl-pin"
+  }
+ },
+ "errors": [],
+ "kind": "gemma4_node_prep",
+ "launcher_sha256": "8646c17331d84ac95a5183ffae4880f2150889a864fe1ff88ba5c79390ea66d0",
+ "n_gpu_nodes": 16,
+ "n_nodes": 16,
+ "node_ips": [
+  "10.4.20.7",
+  "10.4.28.7",
+  "10.4.29.9",
+  "10.4.33.13",
+  "10.4.35.8",
+  "10.4.39.10",
+  "10.4.40.7",
+  "10.4.43.10",
+  "10.4.45.7",
+  "10.4.46.7",
+  "10.4.48.7",
+  "10.4.50.7",
+  "10.4.52.10",
+  "10.4.56.10",
+  "10.4.61.7",
+  "10.4.81.10"
+ ],
+ "node_prep_sha256": "65b572dd6d2b4f36b7936404c6587da740a7716ca490def44d001897000732ac",
+ "nodes": [
+  {
+   "actions": [
+    {
+     "action": "pinned_packages_already_satisfied"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/models/transformers/monkey_patch.py",
+     "sha256_before": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+     "sha256_expected": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/workers/engine/fsdp/transformer_impl.py",
+     "sha256_before": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263",
+     "sha256_expected": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+    }
+   ],
+   "errors": [],
+   "hostname": "verl-bench-xiaotongyang-gpu-workers-worker-lfth2",
+   "image_verl_pin": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "import": {
+    "apply_monkey_patch_wrapped": true,
+    "engine_uses_wrapped_apply_monkey_patch": true,
+    "has_flex_patch": true,
+    "has_init_checkpoint": true,
+    "hook_in_build_model_optimizer": true,
+    "monkey_patch_file": "/workspace/verl-pin/verl/models/transformers/monkey_patch.py",
+    "packages": {
+     "antlr4-python3-runtime": "4.9.3",
+     "flash-attn": "2.8.3",
+     "latex2sympy2_extended": "1.11.0",
+     "math-verify": "0.9.0",
+     "ray": "2.55.1",
+     "torch": "2.13.0+cu130",
+     "transformers": "5.12.1",
+     "vllm": "0.29.0"
+    },
+    "python": "/workspace/verl-pin/.venv/bin/python",
+    "python_version": "3.12.3",
+    "rope_block_sha256": "2d750b2b0c718b581831c6aa9130717e5dcf47e5938715de58caa2d42ae0b8f4",
+    "rope_blocks": 1,
+    "rope_patch_version": "2",
+    "transformer_impl_file": "/workspace/verl-pin/verl/workers/engine/fsdp/transformer_impl.py",
+    "verl_file": "/workspace/verl-pin/verl/__init__.py"
+   },
+   "managed_sha256": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "modified_files": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "node_id": "b18885966d93115fbff42907d26fd740ed56f4f6c59d4356b737812a",
+   "node_ip": "10.4.20.7",
+   "ok": true,
+   "patcher_output": [
+    [
+     "[patch_verl_gemma4_flex_attn] patched: /tmp/g4prep_y0cgzmqa/verl/models/transformers/monkey_patch.py"
+    ],
+    [
+     "GEMMA4-ROPE PATCH: verl/models/transformers/monkey_patch.py APPLIED (version 2, sha256 9be46b096f096ab1)",
+     "GEMMA4-ROPE PATCH: verl/workers/engine/fsdp/transformer_impl.py APPLIED (version 2, sha256 9a43adb81f9e8d39)"
+    ]
+   ],
+   "pid": 32997,
+   "pinned_before": {
+    "antlr4-python3-runtime": "4.9.3",
+    "latex2sympy2_extended": "1.11.0",
+    "math-verify": "0.9.0"
+   },
+   "pristine_sha256": {
+    "verl/models/transformers/monkey_patch.py": "13e502a0a7b1470fe37bc98a24f221719e312b3146c6fc9bac91a738f80d2783",
+    "verl/workers/engine/fsdp/transformer_impl.py": "79d8779fb2a0b8a1ac7b3ec85fba2521ac8cae079925a497c4366fd77f8abfbe"
+   },
+   "python": "/workspace/verl-pin/.venv/bin/python",
+   "ray_node_ip": "10.4.20.7",
+   "seconds": 8.0,
+   "verl_head": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "verl_root": "/workspace/verl-pin"
+  },
+  {
+   "actions": [
+    {
+     "action": "pinned_packages_already_satisfied"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/models/transformers/monkey_patch.py",
+     "sha256_before": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+     "sha256_expected": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/workers/engine/fsdp/transformer_impl.py",
+     "sha256_before": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263",
+     "sha256_expected": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+    }
+   ],
+   "errors": [],
+   "hostname": "verl-bench-xiaotongyang-gpu-workers-worker-jzzzj",
+   "image_verl_pin": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "import": {
+    "apply_monkey_patch_wrapped": true,
+    "engine_uses_wrapped_apply_monkey_patch": true,
+    "has_flex_patch": true,
+    "has_init_checkpoint": true,
+    "hook_in_build_model_optimizer": true,
+    "monkey_patch_file": "/workspace/verl-pin/verl/models/transformers/monkey_patch.py",
+    "packages": {
+     "antlr4-python3-runtime": "4.9.3",
+     "flash-attn": "2.8.3",
+     "latex2sympy2_extended": "1.11.0",
+     "math-verify": "0.9.0",
+     "ray": "2.55.1",
+     "torch": "2.13.0+cu130",
+     "transformers": "5.12.1",
+     "vllm": "0.29.0"
+    },
+    "python": "/workspace/verl-pin/.venv/bin/python",
+    "python_version": "3.12.3",
+    "rope_block_sha256": "2d750b2b0c718b581831c6aa9130717e5dcf47e5938715de58caa2d42ae0b8f4",
+    "rope_blocks": 1,
+    "rope_patch_version": "2",
+    "transformer_impl_file": "/workspace/verl-pin/verl/workers/engine/fsdp/transformer_impl.py",
+    "verl_file": "/workspace/verl-pin/verl/__init__.py"
+   },
+   "managed_sha256": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "modified_files": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "node_id": "2e6968a62e9ab78eea6b1d0528a3c995b44499ed4199d578f8e94da6",
+   "node_ip": "10.4.28.7",
+   "ok": true,
+   "patcher_output": [
+    [
+     "[patch_verl_gemma4_flex_attn] patched: /tmp/g4prep_hvqi9xd8/verl/models/transformers/monkey_patch.py"
+    ],
+    [
+     "GEMMA4-ROPE PATCH: verl/models/transformers/monkey_patch.py APPLIED (version 2, sha256 9be46b096f096ab1)",
+     "GEMMA4-ROPE PATCH: verl/workers/engine/fsdp/transformer_impl.py APPLIED (version 2, sha256 9a43adb81f9e8d39)"
+    ]
+   ],
+   "pid": 23104,
+   "pinned_before": {
+    "antlr4-python3-runtime": "4.9.3",
+    "latex2sympy2_extended": "1.11.0",
+    "math-verify": "0.9.0"
+   },
+   "pristine_sha256": {
+    "verl/models/transformers/monkey_patch.py": "13e502a0a7b1470fe37bc98a24f221719e312b3146c6fc9bac91a738f80d2783",
+    "verl/workers/engine/fsdp/transformer_impl.py": "79d8779fb2a0b8a1ac7b3ec85fba2521ac8cae079925a497c4366fd77f8abfbe"
+   },
+   "python": "/workspace/verl-pin/.venv/bin/python",
+   "ray_node_ip": "10.4.28.7",
+   "seconds": 13.3,
+   "verl_head": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "verl_root": "/workspace/verl-pin"
+  },
+  {
+   "actions": [
+    {
+     "action": "pinned_packages_already_satisfied"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/models/transformers/monkey_patch.py",
+     "sha256_before": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+     "sha256_expected": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/workers/engine/fsdp/transformer_impl.py",
+     "sha256_before": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263",
+     "sha256_expected": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+    }
+   ],
+   "errors": [],
+   "hostname": "verl-bench-xiaotongyang-gpu-workers-worker-7h2nr",
+   "image_verl_pin": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "import": {
+    "apply_monkey_patch_wrapped": true,
+    "engine_uses_wrapped_apply_monkey_patch": true,
+    "has_flex_patch": true,
+    "has_init_checkpoint": true,
+    "hook_in_build_model_optimizer": true,
+    "monkey_patch_file": "/workspace/verl-pin/verl/models/transformers/monkey_patch.py",
+    "packages": {
+     "antlr4-python3-runtime": "4.9.3",
+     "flash-attn": "2.8.3",
+     "latex2sympy2_extended": "1.11.0",
+     "math-verify": "0.9.0",
+     "ray": "2.55.1",
+     "torch": "2.13.0+cu130",
+     "transformers": "5.12.1",
+     "vllm": "0.29.0"
+    },
+    "python": "/workspace/verl-pin/.venv/bin/python",
+    "python_version": "3.12.3",
+    "rope_block_sha256": "2d750b2b0c718b581831c6aa9130717e5dcf47e5938715de58caa2d42ae0b8f4",
+    "rope_blocks": 1,
+    "rope_patch_version": "2",
+    "transformer_impl_file": "/workspace/verl-pin/verl/workers/engine/fsdp/transformer_impl.py",
+    "verl_file": "/workspace/verl-pin/verl/__init__.py"
+   },
+   "managed_sha256": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "modified_files": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "node_id": "829cc375733a864df20a27eda9b6ecab8581066f73ab5b3d64d20a29",
+   "node_ip": "10.4.29.9",
+   "ok": true,
+   "patcher_output": [
+    [
+     "[patch_verl_gemma4_flex_attn] patched: /tmp/g4prep_je939q8e/verl/models/transformers/monkey_patch.py"
+    ],
+    [
+     "GEMMA4-ROPE PATCH: verl/models/transformers/monkey_patch.py APPLIED (version 2, sha256 9be46b096f096ab1)",
+     "GEMMA4-ROPE PATCH: verl/workers/engine/fsdp/transformer_impl.py APPLIED (version 2, sha256 9a43adb81f9e8d39)"
+    ]
+   ],
+   "pid": 36255,
+   "pinned_before": {
+    "antlr4-python3-runtime": "4.9.3",
+    "latex2sympy2_extended": "1.11.0",
+    "math-verify": "0.9.0"
+   },
+   "pristine_sha256": {
+    "verl/models/transformers/monkey_patch.py": "13e502a0a7b1470fe37bc98a24f221719e312b3146c6fc9bac91a738f80d2783",
+    "verl/workers/engine/fsdp/transformer_impl.py": "79d8779fb2a0b8a1ac7b3ec85fba2521ac8cae079925a497c4366fd77f8abfbe"
+   },
+   "python": "/workspace/verl-pin/.venv/bin/python",
+   "ray_node_ip": "10.4.29.9",
+   "seconds": 10.9,
+   "verl_head": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "verl_root": "/workspace/verl-pin"
+  },
+  {
+   "actions": [
+    {
+     "action": "pinned_packages_already_satisfied"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/models/transformers/monkey_patch.py",
+     "sha256_before": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+     "sha256_expected": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/workers/engine/fsdp/transformer_impl.py",
+     "sha256_before": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263",
+     "sha256_expected": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+    }
+   ],
+   "errors": [],
+   "hostname": "verl-bench-xiaotongyang-gpu-workers-worker-bzdjp",
+   "image_verl_pin": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "import": {
+    "apply_monkey_patch_wrapped": true,
+    "engine_uses_wrapped_apply_monkey_patch": true,
+    "has_flex_patch": true,
+    "has_init_checkpoint": true,
+    "hook_in_build_model_optimizer": true,
+    "monkey_patch_file": "/workspace/verl-pin/verl/models/transformers/monkey_patch.py",
+    "packages": {
+     "antlr4-python3-runtime": "4.9.3",
+     "flash-attn": "2.8.3",
+     "latex2sympy2_extended": "1.11.0",
+     "math-verify": "0.9.0",
+     "ray": "2.55.1",
+     "torch": "2.13.0+cu130",
+     "transformers": "5.12.1",
+     "vllm": "0.29.0"
+    },
+    "python": "/workspace/verl-pin/.venv/bin/python",
+    "python_version": "3.12.3",
+    "rope_block_sha256": "2d750b2b0c718b581831c6aa9130717e5dcf47e5938715de58caa2d42ae0b8f4",
+    "rope_blocks": 1,
+    "rope_patch_version": "2",
+    "transformer_impl_file": "/workspace/verl-pin/verl/workers/engine/fsdp/transformer_impl.py",
+    "verl_file": "/workspace/verl-pin/verl/__init__.py"
+   },
+   "managed_sha256": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "modified_files": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "node_id": "83659e8611f7177e0480d6c0fdbbd0fb12320565a9e4f2469d5f6362",
+   "node_ip": "10.4.33.13",
+   "ok": true,
+   "patcher_output": [
+    [
+     "[patch_verl_gemma4_flex_attn] patched: /tmp/g4prep_lwt56bmh/verl/models/transformers/monkey_patch.py"
+    ],
+    [
+     "GEMMA4-ROPE PATCH: verl/models/transformers/monkey_patch.py APPLIED (version 2, sha256 9be46b096f096ab1)",
+     "GEMMA4-ROPE PATCH: verl/workers/engine/fsdp/transformer_impl.py APPLIED (version 2, sha256 9a43adb81f9e8d39)"
+    ]
+   ],
+   "pid": 18319,
+   "pinned_before": {
+    "antlr4-python3-runtime": "4.9.3",
+    "latex2sympy2_extended": "1.11.0",
+    "math-verify": "0.9.0"
+   },
+   "pristine_sha256": {
+    "verl/models/transformers/monkey_patch.py": "13e502a0a7b1470fe37bc98a24f221719e312b3146c6fc9bac91a738f80d2783",
+    "verl/workers/engine/fsdp/transformer_impl.py": "79d8779fb2a0b8a1ac7b3ec85fba2521ac8cae079925a497c4366fd77f8abfbe"
+   },
+   "python": "/workspace/verl-pin/.venv/bin/python",
+   "ray_node_ip": "10.4.33.13",
+   "seconds": 8.3,
+   "verl_head": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "verl_root": "/workspace/verl-pin"
+  },
+  {
+   "actions": [
+    {
+     "action": "pinned_packages_already_satisfied"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/models/transformers/monkey_patch.py",
+     "sha256_before": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+     "sha256_expected": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/workers/engine/fsdp/transformer_impl.py",
+     "sha256_before": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263",
+     "sha256_expected": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+    }
+   ],
+   "errors": [],
+   "hostname": "verl-bench-xiaotongyang-head-g7ddm",
+   "image_verl_pin": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "import": {
+    "apply_monkey_patch_wrapped": true,
+    "engine_uses_wrapped_apply_monkey_patch": true,
+    "has_flex_patch": true,
+    "has_init_checkpoint": true,
+    "hook_in_build_model_optimizer": true,
+    "monkey_patch_file": "/workspace/verl-pin/verl/models/transformers/monkey_patch.py",
+    "packages": {
+     "antlr4-python3-runtime": "4.9.3",
+     "flash-attn": "2.8.3",
+     "latex2sympy2_extended": "1.11.0",
+     "math-verify": "0.9.0",
+     "ray": "2.55.1",
+     "torch": "2.13.0+cu130",
+     "transformers": "5.12.1",
+     "vllm": "0.29.0"
+    },
+    "python": "/workspace/verl-pin/.venv/bin/python",
+    "python_version": "3.12.3",
+    "rope_block_sha256": "2d750b2b0c718b581831c6aa9130717e5dcf47e5938715de58caa2d42ae0b8f4",
+    "rope_blocks": 1,
+    "rope_patch_version": "2",
+    "transformer_impl_file": "/workspace/verl-pin/verl/workers/engine/fsdp/transformer_impl.py",
+    "verl_file": "/workspace/verl-pin/verl/__init__.py"
+   },
+   "managed_sha256": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "modified_files": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "node_id": "9f7131222e52364f7fb02e5baa6369b2146b0a6578b0e636b19c7e56",
+   "node_ip": "10.4.35.8",
+   "ok": true,
+   "patcher_output": [
+    [
+     "[patch_verl_gemma4_flex_attn] patched: /tmp/g4prep_ce181nud/verl/models/transformers/monkey_patch.py"
+    ],
+    [
+     "GEMMA4-ROPE PATCH: verl/models/transformers/monkey_patch.py APPLIED (version 2, sha256 9be46b096f096ab1)",
+     "GEMMA4-ROPE PATCH: verl/workers/engine/fsdp/transformer_impl.py APPLIED (version 2, sha256 9a43adb81f9e8d39)"
+    ]
+   ],
+   "pid": 2203,
+   "pinned_before": {
+    "antlr4-python3-runtime": "4.9.3",
+    "latex2sympy2_extended": "1.11.0",
+    "math-verify": "0.9.0"
+   },
+   "pristine_sha256": {
+    "verl/models/transformers/monkey_patch.py": "13e502a0a7b1470fe37bc98a24f221719e312b3146c6fc9bac91a738f80d2783",
+    "verl/workers/engine/fsdp/transformer_impl.py": "79d8779fb2a0b8a1ac7b3ec85fba2521ac8cae079925a497c4366fd77f8abfbe"
+   },
+   "python": "/workspace/verl-pin/.venv/bin/python",
+   "ray_node_ip": "10.4.35.8",
+   "seconds": 8.3,
+   "verl_head": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "verl_root": "/workspace/verl-pin"
+  },
+  {
+   "actions": [
+    {
+     "action": "pinned_packages_already_satisfied"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/models/transformers/monkey_patch.py",
+     "sha256_before": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+     "sha256_expected": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/workers/engine/fsdp/transformer_impl.py",
+     "sha256_before": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263",
+     "sha256_expected": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+    }
+   ],
+   "errors": [],
+   "hostname": "verl-bench-xiaotongyang-gpu-workers-worker-49pf9",
+   "image_verl_pin": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "import": {
+    "apply_monkey_patch_wrapped": true,
+    "engine_uses_wrapped_apply_monkey_patch": true,
+    "has_flex_patch": true,
+    "has_init_checkpoint": true,
+    "hook_in_build_model_optimizer": true,
+    "monkey_patch_file": "/workspace/verl-pin/verl/models/transformers/monkey_patch.py",
+    "packages": {
+     "antlr4-python3-runtime": "4.9.3",
+     "flash-attn": "2.8.3",
+     "latex2sympy2_extended": "1.11.0",
+     "math-verify": "0.9.0",
+     "ray": "2.55.1",
+     "torch": "2.13.0+cu130",
+     "transformers": "5.12.1",
+     "vllm": "0.29.0"
+    },
+    "python": "/workspace/verl-pin/.venv/bin/python",
+    "python_version": "3.12.3",
+    "rope_block_sha256": "2d750b2b0c718b581831c6aa9130717e5dcf47e5938715de58caa2d42ae0b8f4",
+    "rope_blocks": 1,
+    "rope_patch_version": "2",
+    "transformer_impl_file": "/workspace/verl-pin/verl/workers/engine/fsdp/transformer_impl.py",
+    "verl_file": "/workspace/verl-pin/verl/__init__.py"
+   },
+   "managed_sha256": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "modified_files": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "node_id": "ba3feec1d89f269a8332228109e9743da234f93900f268a1e2966a77",
+   "node_ip": "10.4.39.10",
+   "ok": true,
+   "patcher_output": [
+    [
+     "[patch_verl_gemma4_flex_attn] patched: /tmp/g4prep_ycl0d6az/verl/models/transformers/monkey_patch.py"
+    ],
+    [
+     "GEMMA4-ROPE PATCH: verl/models/transformers/monkey_patch.py APPLIED (version 2, sha256 9be46b096f096ab1)",
+     "GEMMA4-ROPE PATCH: verl/workers/engine/fsdp/transformer_impl.py APPLIED (version 2, sha256 9a43adb81f9e8d39)"
+    ]
+   ],
+   "pid": 33106,
+   "pinned_before": {
+    "antlr4-python3-runtime": "4.9.3",
+    "latex2sympy2_extended": "1.11.0",
+    "math-verify": "0.9.0"
+   },
+   "pristine_sha256": {
+    "verl/models/transformers/monkey_patch.py": "13e502a0a7b1470fe37bc98a24f221719e312b3146c6fc9bac91a738f80d2783",
+    "verl/workers/engine/fsdp/transformer_impl.py": "79d8779fb2a0b8a1ac7b3ec85fba2521ac8cae079925a497c4366fd77f8abfbe"
+   },
+   "python": "/workspace/verl-pin/.venv/bin/python",
+   "ray_node_ip": "10.4.39.10",
+   "seconds": 8.1,
+   "verl_head": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "verl_root": "/workspace/verl-pin"
+  },
+  {
+   "actions": [
+    {
+     "action": "pinned_packages_already_satisfied"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/models/transformers/monkey_patch.py",
+     "sha256_before": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+     "sha256_expected": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/workers/engine/fsdp/transformer_impl.py",
+     "sha256_before": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263",
+     "sha256_expected": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+    }
+   ],
+   "errors": [],
+   "hostname": "verl-bench-xiaotongyang-gpu-workers-worker-ggntg",
+   "image_verl_pin": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "import": {
+    "apply_monkey_patch_wrapped": true,
+    "engine_uses_wrapped_apply_monkey_patch": true,
+    "has_flex_patch": true,
+    "has_init_checkpoint": true,
+    "hook_in_build_model_optimizer": true,
+    "monkey_patch_file": "/workspace/verl-pin/verl/models/transformers/monkey_patch.py",
+    "packages": {
+     "antlr4-python3-runtime": "4.9.3",
+     "flash-attn": "2.8.3",
+     "latex2sympy2_extended": "1.11.0",
+     "math-verify": "0.9.0",
+     "ray": "2.55.1",
+     "torch": "2.13.0+cu130",
+     "transformers": "5.12.1",
+     "vllm": "0.29.0"
+    },
+    "python": "/workspace/verl-pin/.venv/bin/python",
+    "python_version": "3.12.3",
+    "rope_block_sha256": "2d750b2b0c718b581831c6aa9130717e5dcf47e5938715de58caa2d42ae0b8f4",
+    "rope_blocks": 1,
+    "rope_patch_version": "2",
+    "transformer_impl_file": "/workspace/verl-pin/verl/workers/engine/fsdp/transformer_impl.py",
+    "verl_file": "/workspace/verl-pin/verl/__init__.py"
+   },
+   "managed_sha256": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "modified_files": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "node_id": "de35fd8cecf16a3f333e0aed079852f33e1d727341cd3fa3749ba258",
+   "node_ip": "10.4.40.7",
+   "ok": true,
+   "patcher_output": [
+    [
+     "[patch_verl_gemma4_flex_attn] patched: /tmp/g4prep_4q8hdt5b/verl/models/transformers/monkey_patch.py"
+    ],
+    [
+     "GEMMA4-ROPE PATCH: verl/models/transformers/monkey_patch.py APPLIED (version 2, sha256 9be46b096f096ab1)",
+     "GEMMA4-ROPE PATCH: verl/workers/engine/fsdp/transformer_impl.py APPLIED (version 2, sha256 9a43adb81f9e8d39)"
+    ]
+   ],
+   "pid": 19946,
+   "pinned_before": {
+    "antlr4-python3-runtime": "4.9.3",
+    "latex2sympy2_extended": "1.11.0",
+    "math-verify": "0.9.0"
+   },
+   "pristine_sha256": {
+    "verl/models/transformers/monkey_patch.py": "13e502a0a7b1470fe37bc98a24f221719e312b3146c6fc9bac91a738f80d2783",
+    "verl/workers/engine/fsdp/transformer_impl.py": "79d8779fb2a0b8a1ac7b3ec85fba2521ac8cae079925a497c4366fd77f8abfbe"
+   },
+   "python": "/workspace/verl-pin/.venv/bin/python",
+   "ray_node_ip": "10.4.40.7",
+   "seconds": 8.3,
+   "verl_head": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "verl_root": "/workspace/verl-pin"
+  },
+  {
+   "actions": [
+    {
+     "action": "pinned_packages_already_satisfied"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/models/transformers/monkey_patch.py",
+     "sha256_before": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+     "sha256_expected": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/workers/engine/fsdp/transformer_impl.py",
+     "sha256_before": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263",
+     "sha256_expected": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+    }
+   ],
+   "errors": [],
+   "hostname": "verl-bench-xiaotongyang-gpu-workers-worker-cnhbf",
+   "image_verl_pin": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "import": {
+    "apply_monkey_patch_wrapped": true,
+    "engine_uses_wrapped_apply_monkey_patch": true,
+    "has_flex_patch": true,
+    "has_init_checkpoint": true,
+    "hook_in_build_model_optimizer": true,
+    "monkey_patch_file": "/workspace/verl-pin/verl/models/transformers/monkey_patch.py",
+    "packages": {
+     "antlr4-python3-runtime": "4.9.3",
+     "flash-attn": "2.8.3",
+     "latex2sympy2_extended": "1.11.0",
+     "math-verify": "0.9.0",
+     "ray": "2.55.1",
+     "torch": "2.13.0+cu130",
+     "transformers": "5.12.1",
+     "vllm": "0.29.0"
+    },
+    "python": "/workspace/verl-pin/.venv/bin/python",
+    "python_version": "3.12.3",
+    "rope_block_sha256": "2d750b2b0c718b581831c6aa9130717e5dcf47e5938715de58caa2d42ae0b8f4",
+    "rope_blocks": 1,
+    "rope_patch_version": "2",
+    "transformer_impl_file": "/workspace/verl-pin/verl/workers/engine/fsdp/transformer_impl.py",
+    "verl_file": "/workspace/verl-pin/verl/__init__.py"
+   },
+   "managed_sha256": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "modified_files": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "node_id": "c7c79dd4c000bc6cbfb9f82c925028b7d302756d2da8d9647aa94532",
+   "node_ip": "10.4.43.10",
+   "ok": true,
+   "patcher_output": [
+    [
+     "[patch_verl_gemma4_flex_attn] patched: /tmp/g4prep_u36x6f3x/verl/models/transformers/monkey_patch.py"
+    ],
+    [
+     "GEMMA4-ROPE PATCH: verl/models/transformers/monkey_patch.py APPLIED (version 2, sha256 9be46b096f096ab1)",
+     "GEMMA4-ROPE PATCH: verl/workers/engine/fsdp/transformer_impl.py APPLIED (version 2, sha256 9a43adb81f9e8d39)"
+    ]
+   ],
+   "pid": 21318,
+   "pinned_before": {
+    "antlr4-python3-runtime": "4.9.3",
+    "latex2sympy2_extended": "1.11.0",
+    "math-verify": "0.9.0"
+   },
+   "pristine_sha256": {
+    "verl/models/transformers/monkey_patch.py": "13e502a0a7b1470fe37bc98a24f221719e312b3146c6fc9bac91a738f80d2783",
+    "verl/workers/engine/fsdp/transformer_impl.py": "79d8779fb2a0b8a1ac7b3ec85fba2521ac8cae079925a497c4366fd77f8abfbe"
+   },
+   "python": "/workspace/verl-pin/.venv/bin/python",
+   "ray_node_ip": "10.4.43.10",
+   "seconds": 10.0,
+   "verl_head": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "verl_root": "/workspace/verl-pin"
+  },
+  {
+   "actions": [
+    {
+     "action": "pinned_packages_already_satisfied"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/models/transformers/monkey_patch.py",
+     "sha256_before": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+     "sha256_expected": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/workers/engine/fsdp/transformer_impl.py",
+     "sha256_before": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263",
+     "sha256_expected": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+    }
+   ],
+   "errors": [],
+   "hostname": "verl-bench-xiaotongyang-gpu-workers-worker-lxr22",
+   "image_verl_pin": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "import": {
+    "apply_monkey_patch_wrapped": true,
+    "engine_uses_wrapped_apply_monkey_patch": true,
+    "has_flex_patch": true,
+    "has_init_checkpoint": true,
+    "hook_in_build_model_optimizer": true,
+    "monkey_patch_file": "/workspace/verl-pin/verl/models/transformers/monkey_patch.py",
+    "packages": {
+     "antlr4-python3-runtime": "4.9.3",
+     "flash-attn": "2.8.3",
+     "latex2sympy2_extended": "1.11.0",
+     "math-verify": "0.9.0",
+     "ray": "2.55.1",
+     "torch": "2.13.0+cu130",
+     "transformers": "5.12.1",
+     "vllm": "0.29.0"
+    },
+    "python": "/workspace/verl-pin/.venv/bin/python",
+    "python_version": "3.12.3",
+    "rope_block_sha256": "2d750b2b0c718b581831c6aa9130717e5dcf47e5938715de58caa2d42ae0b8f4",
+    "rope_blocks": 1,
+    "rope_patch_version": "2",
+    "transformer_impl_file": "/workspace/verl-pin/verl/workers/engine/fsdp/transformer_impl.py",
+    "verl_file": "/workspace/verl-pin/verl/__init__.py"
+   },
+   "managed_sha256": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "modified_files": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "node_id": "28fe0d94eb989ea6398ea7c4f22f856a65adfc41b75ce8d3fc436ded",
+   "node_ip": "10.4.45.7",
+   "ok": true,
+   "patcher_output": [
+    [
+     "[patch_verl_gemma4_flex_attn] patched: /tmp/g4prep_27j94sg9/verl/models/transformers/monkey_patch.py"
+    ],
+    [
+     "GEMMA4-ROPE PATCH: verl/models/transformers/monkey_patch.py APPLIED (version 2, sha256 9be46b096f096ab1)",
+     "GEMMA4-ROPE PATCH: verl/workers/engine/fsdp/transformer_impl.py APPLIED (version 2, sha256 9a43adb81f9e8d39)"
+    ]
+   ],
+   "pid": 36080,
+   "pinned_before": {
+    "antlr4-python3-runtime": "4.9.3",
+    "latex2sympy2_extended": "1.11.0",
+    "math-verify": "0.9.0"
+   },
+   "pristine_sha256": {
+    "verl/models/transformers/monkey_patch.py": "13e502a0a7b1470fe37bc98a24f221719e312b3146c6fc9bac91a738f80d2783",
+    "verl/workers/engine/fsdp/transformer_impl.py": "79d8779fb2a0b8a1ac7b3ec85fba2521ac8cae079925a497c4366fd77f8abfbe"
+   },
+   "python": "/workspace/verl-pin/.venv/bin/python",
+   "ray_node_ip": "10.4.45.7",
+   "seconds": 8.6,
+   "verl_head": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "verl_root": "/workspace/verl-pin"
+  },
+  {
+   "actions": [
+    {
+     "action": "pinned_packages_already_satisfied"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/models/transformers/monkey_patch.py",
+     "sha256_before": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+     "sha256_expected": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/workers/engine/fsdp/transformer_impl.py",
+     "sha256_before": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263",
+     "sha256_expected": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+    }
+   ],
+   "errors": [],
+   "hostname": "verl-bench-xiaotongyang-gpu-workers-worker-bvgn6",
+   "image_verl_pin": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "import": {
+    "apply_monkey_patch_wrapped": true,
+    "engine_uses_wrapped_apply_monkey_patch": true,
+    "has_flex_patch": true,
+    "has_init_checkpoint": true,
+    "hook_in_build_model_optimizer": true,
+    "monkey_patch_file": "/workspace/verl-pin/verl/models/transformers/monkey_patch.py",
+    "packages": {
+     "antlr4-python3-runtime": "4.9.3",
+     "flash-attn": "2.8.3",
+     "latex2sympy2_extended": "1.11.0",
+     "math-verify": "0.9.0",
+     "ray": "2.55.1",
+     "torch": "2.13.0+cu130",
+     "transformers": "5.12.1",
+     "vllm": "0.29.0"
+    },
+    "python": "/workspace/verl-pin/.venv/bin/python",
+    "python_version": "3.12.3",
+    "rope_block_sha256": "2d750b2b0c718b581831c6aa9130717e5dcf47e5938715de58caa2d42ae0b8f4",
+    "rope_blocks": 1,
+    "rope_patch_version": "2",
+    "transformer_impl_file": "/workspace/verl-pin/verl/workers/engine/fsdp/transformer_impl.py",
+    "verl_file": "/workspace/verl-pin/verl/__init__.py"
+   },
+   "managed_sha256": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "modified_files": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "node_id": "e0d5778c28606cbc2cf777433b228ffb9eb9aa9781e6b24fae1e9948",
+   "node_ip": "10.4.46.7",
+   "ok": true,
+   "patcher_output": [
+    [
+     "[patch_verl_gemma4_flex_attn] patched: /tmp/g4prep_5j8lxevh/verl/models/transformers/monkey_patch.py"
+    ],
+    [
+     "GEMMA4-ROPE PATCH: verl/models/transformers/monkey_patch.py APPLIED (version 2, sha256 9be46b096f096ab1)",
+     "GEMMA4-ROPE PATCH: verl/workers/engine/fsdp/transformer_impl.py APPLIED (version 2, sha256 9a43adb81f9e8d39)"
+    ]
+   ],
+   "pid": 26667,
+   "pinned_before": {
+    "antlr4-python3-runtime": "4.9.3",
+    "latex2sympy2_extended": "1.11.0",
+    "math-verify": "0.9.0"
+   },
+   "pristine_sha256": {
+    "verl/models/transformers/monkey_patch.py": "13e502a0a7b1470fe37bc98a24f221719e312b3146c6fc9bac91a738f80d2783",
+    "verl/workers/engine/fsdp/transformer_impl.py": "79d8779fb2a0b8a1ac7b3ec85fba2521ac8cae079925a497c4366fd77f8abfbe"
+   },
+   "python": "/workspace/verl-pin/.venv/bin/python",
+   "ray_node_ip": "10.4.46.7",
+   "seconds": 7.9,
+   "verl_head": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "verl_root": "/workspace/verl-pin"
+  },
+  {
+   "actions": [
+    {
+     "action": "pinned_packages_already_satisfied"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/models/transformers/monkey_patch.py",
+     "sha256_before": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+     "sha256_expected": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/workers/engine/fsdp/transformer_impl.py",
+     "sha256_before": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263",
+     "sha256_expected": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+    }
+   ],
+   "errors": [],
+   "hostname": "verl-bench-xiaotongyang-gpu-workers-worker-n4ll9",
+   "image_verl_pin": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "import": {
+    "apply_monkey_patch_wrapped": true,
+    "engine_uses_wrapped_apply_monkey_patch": true,
+    "has_flex_patch": true,
+    "has_init_checkpoint": true,
+    "hook_in_build_model_optimizer": true,
+    "monkey_patch_file": "/workspace/verl-pin/verl/models/transformers/monkey_patch.py",
+    "packages": {
+     "antlr4-python3-runtime": "4.9.3",
+     "flash-attn": "2.8.3",
+     "latex2sympy2_extended": "1.11.0",
+     "math-verify": "0.9.0",
+     "ray": "2.55.1",
+     "torch": "2.13.0+cu130",
+     "transformers": "5.12.1",
+     "vllm": "0.29.0"
+    },
+    "python": "/workspace/verl-pin/.venv/bin/python",
+    "python_version": "3.12.3",
+    "rope_block_sha256": "2d750b2b0c718b581831c6aa9130717e5dcf47e5938715de58caa2d42ae0b8f4",
+    "rope_blocks": 1,
+    "rope_patch_version": "2",
+    "transformer_impl_file": "/workspace/verl-pin/verl/workers/engine/fsdp/transformer_impl.py",
+    "verl_file": "/workspace/verl-pin/verl/__init__.py"
+   },
+   "managed_sha256": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "modified_files": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "node_id": "77b3cdcc2c3dcec09e45df2274477d91eefd6fb08d8cebe06f0ec690",
+   "node_ip": "10.4.48.7",
+   "ok": true,
+   "patcher_output": [
+    [
+     "[patch_verl_gemma4_flex_attn] patched: /tmp/g4prep_ffa3j88e/verl/models/transformers/monkey_patch.py"
+    ],
+    [
+     "GEMMA4-ROPE PATCH: verl/models/transformers/monkey_patch.py APPLIED (version 2, sha256 9be46b096f096ab1)",
+     "GEMMA4-ROPE PATCH: verl/workers/engine/fsdp/transformer_impl.py APPLIED (version 2, sha256 9a43adb81f9e8d39)"
+    ]
+   ],
+   "pid": 20976,
+   "pinned_before": {
+    "antlr4-python3-runtime": "4.9.3",
+    "latex2sympy2_extended": "1.11.0",
+    "math-verify": "0.9.0"
+   },
+   "pristine_sha256": {
+    "verl/models/transformers/monkey_patch.py": "13e502a0a7b1470fe37bc98a24f221719e312b3146c6fc9bac91a738f80d2783",
+    "verl/workers/engine/fsdp/transformer_impl.py": "79d8779fb2a0b8a1ac7b3ec85fba2521ac8cae079925a497c4366fd77f8abfbe"
+   },
+   "python": "/workspace/verl-pin/.venv/bin/python",
+   "ray_node_ip": "10.4.48.7",
+   "seconds": 8.4,
+   "verl_head": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "verl_root": "/workspace/verl-pin"
+  },
+  {
+   "actions": [
+    {
+     "action": "pinned_packages_already_satisfied"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/models/transformers/monkey_patch.py",
+     "sha256_before": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+     "sha256_expected": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/workers/engine/fsdp/transformer_impl.py",
+     "sha256_before": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263",
+     "sha256_expected": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+    }
+   ],
+   "errors": [],
+   "hostname": "verl-bench-xiaotongyang-gpu-workers-worker-9qz2k",
+   "image_verl_pin": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "import": {
+    "apply_monkey_patch_wrapped": true,
+    "engine_uses_wrapped_apply_monkey_patch": true,
+    "has_flex_patch": true,
+    "has_init_checkpoint": true,
+    "hook_in_build_model_optimizer": true,
+    "monkey_patch_file": "/workspace/verl-pin/verl/models/transformers/monkey_patch.py",
+    "packages": {
+     "antlr4-python3-runtime": "4.9.3",
+     "flash-attn": "2.8.3",
+     "latex2sympy2_extended": "1.11.0",
+     "math-verify": "0.9.0",
+     "ray": "2.55.1",
+     "torch": "2.13.0+cu130",
+     "transformers": "5.12.1",
+     "vllm": "0.29.0"
+    },
+    "python": "/workspace/verl-pin/.venv/bin/python",
+    "python_version": "3.12.3",
+    "rope_block_sha256": "2d750b2b0c718b581831c6aa9130717e5dcf47e5938715de58caa2d42ae0b8f4",
+    "rope_blocks": 1,
+    "rope_patch_version": "2",
+    "transformer_impl_file": "/workspace/verl-pin/verl/workers/engine/fsdp/transformer_impl.py",
+    "verl_file": "/workspace/verl-pin/verl/__init__.py"
+   },
+   "managed_sha256": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "modified_files": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "node_id": "14c94524b546e56859407cc2f2759c34f1f7d618ca89bdc7b5505191",
+   "node_ip": "10.4.50.7",
+   "ok": true,
+   "patcher_output": [
+    [
+     "[patch_verl_gemma4_flex_attn] patched: /tmp/g4prep_3qrhnad8/verl/models/transformers/monkey_patch.py"
+    ],
+    [
+     "GEMMA4-ROPE PATCH: verl/models/transformers/monkey_patch.py APPLIED (version 2, sha256 9be46b096f096ab1)",
+     "GEMMA4-ROPE PATCH: verl/workers/engine/fsdp/transformer_impl.py APPLIED (version 2, sha256 9a43adb81f9e8d39)"
+    ]
+   ],
+   "pid": 20334,
+   "pinned_before": {
+    "antlr4-python3-runtime": "4.9.3",
+    "latex2sympy2_extended": "1.11.0",
+    "math-verify": "0.9.0"
+   },
+   "pristine_sha256": {
+    "verl/models/transformers/monkey_patch.py": "13e502a0a7b1470fe37bc98a24f221719e312b3146c6fc9bac91a738f80d2783",
+    "verl/workers/engine/fsdp/transformer_impl.py": "79d8779fb2a0b8a1ac7b3ec85fba2521ac8cae079925a497c4366fd77f8abfbe"
+   },
+   "python": "/workspace/verl-pin/.venv/bin/python",
+   "ray_node_ip": "10.4.50.7",
+   "seconds": 9.0,
+   "verl_head": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "verl_root": "/workspace/verl-pin"
+  },
+  {
+   "actions": [
+    {
+     "action": "pinned_packages_already_satisfied"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/models/transformers/monkey_patch.py",
+     "sha256_before": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+     "sha256_expected": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/workers/engine/fsdp/transformer_impl.py",
+     "sha256_before": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263",
+     "sha256_expected": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+    }
+   ],
+   "errors": [],
+   "hostname": "verl-bench-xiaotongyang-gpu-workers-worker-ztls2",
+   "image_verl_pin": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "import": {
+    "apply_monkey_patch_wrapped": true,
+    "engine_uses_wrapped_apply_monkey_patch": true,
+    "has_flex_patch": true,
+    "has_init_checkpoint": true,
+    "hook_in_build_model_optimizer": true,
+    "monkey_patch_file": "/workspace/verl-pin/verl/models/transformers/monkey_patch.py",
+    "packages": {
+     "antlr4-python3-runtime": "4.9.3",
+     "flash-attn": "2.8.3",
+     "latex2sympy2_extended": "1.11.0",
+     "math-verify": "0.9.0",
+     "ray": "2.55.1",
+     "torch": "2.13.0+cu130",
+     "transformers": "5.12.1",
+     "vllm": "0.29.0"
+    },
+    "python": "/workspace/verl-pin/.venv/bin/python",
+    "python_version": "3.12.3",
+    "rope_block_sha256": "2d750b2b0c718b581831c6aa9130717e5dcf47e5938715de58caa2d42ae0b8f4",
+    "rope_blocks": 1,
+    "rope_patch_version": "2",
+    "transformer_impl_file": "/workspace/verl-pin/verl/workers/engine/fsdp/transformer_impl.py",
+    "verl_file": "/workspace/verl-pin/verl/__init__.py"
+   },
+   "managed_sha256": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "modified_files": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "node_id": "da0d5ce348f0b4c98a20a844e0a85c817e44548b08828d9a4db65a92",
+   "node_ip": "10.4.52.10",
+   "ok": true,
+   "patcher_output": [
+    [
+     "[patch_verl_gemma4_flex_attn] patched: /tmp/g4prep_6xayoybd/verl/models/transformers/monkey_patch.py"
+    ],
+    [
+     "GEMMA4-ROPE PATCH: verl/models/transformers/monkey_patch.py APPLIED (version 2, sha256 9be46b096f096ab1)",
+     "GEMMA4-ROPE PATCH: verl/workers/engine/fsdp/transformer_impl.py APPLIED (version 2, sha256 9a43adb81f9e8d39)"
+    ]
+   ],
+   "pid": 13721,
+   "pinned_before": {
+    "antlr4-python3-runtime": "4.9.3",
+    "latex2sympy2_extended": "1.11.0",
+    "math-verify": "0.9.0"
+   },
+   "pristine_sha256": {
+    "verl/models/transformers/monkey_patch.py": "13e502a0a7b1470fe37bc98a24f221719e312b3146c6fc9bac91a738f80d2783",
+    "verl/workers/engine/fsdp/transformer_impl.py": "79d8779fb2a0b8a1ac7b3ec85fba2521ac8cae079925a497c4366fd77f8abfbe"
+   },
+   "python": "/workspace/verl-pin/.venv/bin/python",
+   "ray_node_ip": "10.4.52.10",
+   "seconds": 9.2,
+   "verl_head": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "verl_root": "/workspace/verl-pin"
+  },
+  {
+   "actions": [
+    {
+     "action": "pinned_packages_already_satisfied"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/models/transformers/monkey_patch.py",
+     "sha256_before": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+     "sha256_expected": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/workers/engine/fsdp/transformer_impl.py",
+     "sha256_before": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263",
+     "sha256_expected": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+    }
+   ],
+   "errors": [],
+   "hostname": "verl-bench-xiaotongyang-gpu-workers-worker-dhzn2",
+   "image_verl_pin": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "import": {
+    "apply_monkey_patch_wrapped": true,
+    "engine_uses_wrapped_apply_monkey_patch": true,
+    "has_flex_patch": true,
+    "has_init_checkpoint": true,
+    "hook_in_build_model_optimizer": true,
+    "monkey_patch_file": "/workspace/verl-pin/verl/models/transformers/monkey_patch.py",
+    "packages": {
+     "antlr4-python3-runtime": "4.9.3",
+     "flash-attn": "2.8.3",
+     "latex2sympy2_extended": "1.11.0",
+     "math-verify": "0.9.0",
+     "ray": "2.55.1",
+     "torch": "2.13.0+cu130",
+     "transformers": "5.12.1",
+     "vllm": "0.29.0"
+    },
+    "python": "/workspace/verl-pin/.venv/bin/python",
+    "python_version": "3.12.3",
+    "rope_block_sha256": "2d750b2b0c718b581831c6aa9130717e5dcf47e5938715de58caa2d42ae0b8f4",
+    "rope_blocks": 1,
+    "rope_patch_version": "2",
+    "transformer_impl_file": "/workspace/verl-pin/verl/workers/engine/fsdp/transformer_impl.py",
+    "verl_file": "/workspace/verl-pin/verl/__init__.py"
+   },
+   "managed_sha256": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "modified_files": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "node_id": "d5f273eb22329a163a8bc8a178e904a91c26d2e3b7cd5a38ab29aa08",
+   "node_ip": "10.4.56.10",
+   "ok": true,
+   "patcher_output": [
+    [
+     "[patch_verl_gemma4_flex_attn] patched: /tmp/g4prep_n2ayaxn1/verl/models/transformers/monkey_patch.py"
+    ],
+    [
+     "GEMMA4-ROPE PATCH: verl/models/transformers/monkey_patch.py APPLIED (version 2, sha256 9be46b096f096ab1)",
+     "GEMMA4-ROPE PATCH: verl/workers/engine/fsdp/transformer_impl.py APPLIED (version 2, sha256 9a43adb81f9e8d39)"
+    ]
+   ],
+   "pid": 26581,
+   "pinned_before": {
+    "antlr4-python3-runtime": "4.9.3",
+    "latex2sympy2_extended": "1.11.0",
+    "math-verify": "0.9.0"
+   },
+   "pristine_sha256": {
+    "verl/models/transformers/monkey_patch.py": "13e502a0a7b1470fe37bc98a24f221719e312b3146c6fc9bac91a738f80d2783",
+    "verl/workers/engine/fsdp/transformer_impl.py": "79d8779fb2a0b8a1ac7b3ec85fba2521ac8cae079925a497c4366fd77f8abfbe"
+   },
+   "python": "/workspace/verl-pin/.venv/bin/python",
+   "ray_node_ip": "10.4.56.10",
+   "seconds": 8.4,
+   "verl_head": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "verl_root": "/workspace/verl-pin"
+  },
+  {
+   "actions": [
+    {
+     "action": "pinned_packages_already_satisfied"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/models/transformers/monkey_patch.py",
+     "sha256_before": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+     "sha256_expected": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/workers/engine/fsdp/transformer_impl.py",
+     "sha256_before": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263",
+     "sha256_expected": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+    }
+   ],
+   "errors": [],
+   "hostname": "verl-bench-xiaotongyang-gpu-workers-worker-wjhk5",
+   "image_verl_pin": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "import": {
+    "apply_monkey_patch_wrapped": true,
+    "engine_uses_wrapped_apply_monkey_patch": true,
+    "has_flex_patch": true,
+    "has_init_checkpoint": true,
+    "hook_in_build_model_optimizer": true,
+    "monkey_patch_file": "/workspace/verl-pin/verl/models/transformers/monkey_patch.py",
+    "packages": {
+     "antlr4-python3-runtime": "4.9.3",
+     "flash-attn": "2.8.3",
+     "latex2sympy2_extended": "1.11.0",
+     "math-verify": "0.9.0",
+     "ray": "2.55.1",
+     "torch": "2.13.0+cu130",
+     "transformers": "5.12.1",
+     "vllm": "0.29.0"
+    },
+    "python": "/workspace/verl-pin/.venv/bin/python",
+    "python_version": "3.12.3",
+    "rope_block_sha256": "2d750b2b0c718b581831c6aa9130717e5dcf47e5938715de58caa2d42ae0b8f4",
+    "rope_blocks": 1,
+    "rope_patch_version": "2",
+    "transformer_impl_file": "/workspace/verl-pin/verl/workers/engine/fsdp/transformer_impl.py",
+    "verl_file": "/workspace/verl-pin/verl/__init__.py"
+   },
+   "managed_sha256": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "modified_files": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "node_id": "6f475ea1d366eb961d7a318e5e1085a1732c77fa56f61e7b84c78c09",
+   "node_ip": "10.4.61.7",
+   "ok": true,
+   "patcher_output": [
+    [
+     "[patch_verl_gemma4_flex_attn] patched: /tmp/g4prep_2ct71q_d/verl/models/transformers/monkey_patch.py"
+    ],
+    [
+     "GEMMA4-ROPE PATCH: verl/models/transformers/monkey_patch.py APPLIED (version 2, sha256 9be46b096f096ab1)",
+     "GEMMA4-ROPE PATCH: verl/workers/engine/fsdp/transformer_impl.py APPLIED (version 2, sha256 9a43adb81f9e8d39)"
+    ]
+   ],
+   "pid": 20981,
+   "pinned_before": {
+    "antlr4-python3-runtime": "4.9.3",
+    "latex2sympy2_extended": "1.11.0",
+    "math-verify": "0.9.0"
+   },
+   "pristine_sha256": {
+    "verl/models/transformers/monkey_patch.py": "13e502a0a7b1470fe37bc98a24f221719e312b3146c6fc9bac91a738f80d2783",
+    "verl/workers/engine/fsdp/transformer_impl.py": "79d8779fb2a0b8a1ac7b3ec85fba2521ac8cae079925a497c4366fd77f8abfbe"
+   },
+   "python": "/workspace/verl-pin/.venv/bin/python",
+   "ray_node_ip": "10.4.61.7",
+   "seconds": 8.1,
+   "verl_head": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "verl_root": "/workspace/verl-pin"
+  },
+  {
+   "actions": [
+    {
+     "action": "pinned_packages_already_satisfied"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/models/transformers/monkey_patch.py",
+     "sha256_before": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+     "sha256_expected": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7"
+    },
+    {
+     "action": "unchanged",
+     "file": "verl/workers/engine/fsdp/transformer_impl.py",
+     "sha256_before": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263",
+     "sha256_expected": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+    }
+   ],
+   "errors": [],
+   "hostname": "verl-bench-xiaotongyang-gpu-workers-worker-qpdvc",
+   "image_verl_pin": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "import": {
+    "apply_monkey_patch_wrapped": true,
+    "engine_uses_wrapped_apply_monkey_patch": true,
+    "has_flex_patch": true,
+    "has_init_checkpoint": true,
+    "hook_in_build_model_optimizer": true,
+    "monkey_patch_file": "/workspace/verl-pin/verl/models/transformers/monkey_patch.py",
+    "packages": {
+     "antlr4-python3-runtime": "4.9.3",
+     "flash-attn": "2.8.3",
+     "latex2sympy2_extended": "1.11.0",
+     "math-verify": "0.9.0",
+     "ray": "2.55.1",
+     "torch": "2.13.0+cu130",
+     "transformers": "5.12.1",
+     "vllm": "0.29.0"
+    },
+    "python": "/workspace/verl-pin/.venv/bin/python",
+    "python_version": "3.12.3",
+    "rope_block_sha256": "2d750b2b0c718b581831c6aa9130717e5dcf47e5938715de58caa2d42ae0b8f4",
+    "rope_blocks": 1,
+    "rope_patch_version": "2",
+    "transformer_impl_file": "/workspace/verl-pin/verl/workers/engine/fsdp/transformer_impl.py",
+    "verl_file": "/workspace/verl-pin/verl/__init__.py"
+   },
+   "managed_sha256": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "modified_files": {
+    "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+    "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+   },
+   "node_id": "149a63f88538a45464d2cb6d4536a7358e0f57000cd838efab36e8cb",
+   "node_ip": "10.4.81.10",
+   "ok": true,
+   "patcher_output": [
+    [
+     "[patch_verl_gemma4_flex_attn] patched: /tmp/g4prep_445e1r6g/verl/models/transformers/monkey_patch.py"
+    ],
+    [
+     "GEMMA4-ROPE PATCH: verl/models/transformers/monkey_patch.py APPLIED (version 2, sha256 9be46b096f096ab1)",
+     "GEMMA4-ROPE PATCH: verl/workers/engine/fsdp/transformer_impl.py APPLIED (version 2, sha256 9a43adb81f9e8d39)"
+    ]
+   ],
+   "pid": 13903,
+   "pinned_before": {
+    "antlr4-python3-runtime": "4.9.3",
+    "latex2sympy2_extended": "1.11.0",
+    "math-verify": "0.9.0"
+   },
+   "pristine_sha256": {
+    "verl/models/transformers/monkey_patch.py": "13e502a0a7b1470fe37bc98a24f221719e312b3146c6fc9bac91a738f80d2783",
+    "verl/workers/engine/fsdp/transformer_impl.py": "79d8779fb2a0b8a1ac7b3ec85fba2521ac8cae079925a497c4366fd77f8abfbe"
+   },
+   "python": "/workspace/verl-pin/.venv/bin/python",
+   "ray_node_ip": "10.4.81.10",
+   "seconds": 8.5,
+   "verl_head": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+   "verl_root": "/workspace/verl-pin"
+  }
+ ],
+ "patch_dir": "/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gemma4",
+ "patcher_sha256": {
+  "patch_verl_gemma4_flex_attn.py": "5f03d3e5e5719f4f13ed8b138c1c39c898208cf9196fad75f349eae58d8d220d",
+  "patch_verl_gemma4_rope_buffers.py": "6d22ce33a767c1029bf94264ffeb9bb07bf13843e1f80939f6f1ef985ffaf5e2"
+ },
+ "pinned_packages": {
+  "antlr4-python3-runtime": "4.9.3",
+  "latex2sympy2_extended": "1.11.0",
+  "math-verify": "0.9.0"
+ },
+ "rope_patch": {
+  "block_sha256": "2d750b2b0c718b581831c6aa9130717e5dcf47e5938715de58caa2d42ae0b8f4",
+  "version": "2"
+ },
+ "seconds": 14.5,
+ "time_utc": "2026-10-21T19:27:26Z",
+ "verdict": "PASS"
+}

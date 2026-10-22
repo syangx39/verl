@@ -1,0 +1,65 @@
+{
+ "created_utc": "2026-10-21T19:27:59Z",
+ "fixture_check": {
+  "fixture": "/workspace/meta-RL/logprob_parity/fixture_fixed_1021_0813/fixture_step1.npz",
+  "fixture_sha256": "284db69dddfb0cc864fb8c3c99b06e54c357e16d861f78765a1c5cde42f88b89",
+  "mismatches": [],
+  "n_exact": 256,
+  "n_mismatch": 0,
+  "n_prompts_compared": 256
+ },
+ "inputs": {
+  "train": {
+   "path": "/workspace/meta-RL/data/openmathinstruct2/train.parquet",
+   "rows": 950000,
+   "sha256": "5404981a07c78a5c02d4f493293fc30bd1ddb42908376566fa9a1020abbdf01b",
+   "unique_keys": 591477
+  },
+  "val": {
+   "path": "/workspace/meta-RL/data/openmathinstruct2/val.parquet",
+   "rows": 50000,
+   "rows_overlapping_train": 37372,
+   "sha256": "ded5dc67f4c70401c749155cd2a1392e85631ed24b098e1c7686f735619161f5",
+   "unique_non_overlapping_keys": 11652
+  }
+ },
+ "kind": "gemma4_eval_set",
+ "outputs": {
+  "eval": {
+   "path": "/workspace/meta-RL/data/openmathinstruct2/gemma4_eval_5k/eval_5000.parquet",
+   "rows": 5000,
+   "sha256": "d092a9c5e80aa2b3cf8e4e12d8367769e770f69ee6627ff1285fd5693efc662d"
+  },
+  "prompt_tokens": {
+   "path": "/workspace/meta-RL/data/openmathinstruct2/gemma4_eval_5k/eval_5000_prompt_tokens.parquet",
+   "sha256": "a54fbb327d9c60545c49edfc26107b21a1e55f3ef9e673d80024c79e821b5ca4"
+  }
+ },
+ "prompt_tokens": {
+  "builder": "verl.utils.tokenizer.continuous_token.Gemma4VLContinuousTokenBuilder",
+  "hf_model_type": "gemma4",
+  "len_max": 2268,
+  "len_mean": 166.9936,
+  "len_min": 91,
+  "len_p50": 148.0,
+  "model_path": "/workspace/meta-RL/models/gemma-4-E2B-it",
+  "processor": "Gemma4Processor",
+  "rendering": "current input kept: the parquet's user content already carries a <start_of_turn> template and verl applies the Gemma-4 chat template on top",
+  "tokenizer": "GemmaTokenizer",
+  "tokenizer_files_sha256": {
+   "chat_template.jinja": "0a2c8073c878ab1da004bee933a998606537bbb62016310352c7285c3f01c5b5",
+   "processor_config.json": "32bdf45d2ad4cc29a0822ddd157a182de76644f0419a6228d151495256e9813c",
+   "tokenizer.json": "cc8d3a0ce36466ccc1278bf987df5f71db1719b9ca6b4118264f45cb627bfe0f",
+   "tokenizer_config.json": "9f4fec4b1dc6ecddf8f4a92e9caea5971c0e67d81309f3f9066a2bee8c362633"
+  },
+  "verl_head": "ace775e87d8765bcdd114aac734ab71da5367a0f"
+ },
+ "rule": {
+  "dedup": "by key, lowest val index kept",
+  "exclude": "val rows whose key equals the key of ANY train row",
+  "key": "lowercase question, every non-alphanumeric character removed ([\\W_]+ -> '')",
+  "n": 5000,
+  "order": "sha256(key) ascending"
+ },
+ "seconds": 47.9
+}
