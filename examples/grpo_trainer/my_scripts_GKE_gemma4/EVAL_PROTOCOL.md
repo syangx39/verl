@@ -1,7 +1,9 @@
 # Gemma-4 E2B (`rl-05`) Frozen Evaluation & 200-Step GPU Baseline Protocol (PR #9, step 1)
 
 > [!IMPORTANT]
-> **Status:** Evaluation dataset (`eval_5000.parquet`), prompt-token ID fixture (`eval_5000_prompt_tokens.parquet`), and 200-step GPU baseline launcher (`run_gemma4_e2b_rl05_accuracy_baseline.sh`) are frozen prior to launching the 200-step GPU baseline runs.
+> **Status:**
+> - Evaluation dataset (`eval_5000.parquet`), prompt-token ID fixture (`eval_5000_prompt_tokens.parquet`), and 200-step GPU baseline launcher (`run_gemma4_e2b_rl05_accuracy_baseline.sh`) are frozen.
+> - **Seed 1 (`gemma4_e2b_rl05_16n64g_s200_seed1_1021_1955`, `16n64g`) is complete (`exit_code=0`, 200/200 steps, 64/64 ranks guard PASS, §5)**; **Seed 2 (`SEED=2`) and Seed 3 (`SEED=3`) are next** to complete the 3-seed Step 200 gate reference.
 > - **Customer gate (Meta):** $\overline{\text{Acc}}_{\text{TPU}}(200) \ge \overline{\text{Acc}}_{\text{GPU}}(200) - 1.0\text{ pp}$, where $\overline{\text{Acc}}(200) = \frac{1}{3}\sum_{s=1}^{3} \text{Acc}_s(200)$ is the **3-seed arithmetic mean** held-out greedy accuracy on `eval_5000.parquet` at the pre-declared **final checkpoint (step 200)** under identical recipe, training budget, prompt token IDs, and grading (§3.1).
 
 ---
@@ -99,3 +101,39 @@ python3 "$SCRIPT_DIR/gemma4_eval_report.py" \
   --run seed1=/workspace/meta-RL/logs/gemma4_eval/<EXPERIMENT_NAME> \
   --log seed1=/workspace/meta-RL/logs/gemma4_e2b_rl05_16n64g_s200_seed1.log
 ```
+
+---
+
+## 5. 200-Step GPU Baseline Results (`16n64g`, 64 GB200 GPUs)
+
+### 5.1 Run Provenance & Guard Verification
+
+| Seed | Experiment Name | Driver Log | Guard Check | Node Prep | All-Rank Init Guard | First-Forward Guard | `k3_kl` (steps 1–200 min / med / max) | `grad_norm` (steps 1–200 min / med / max) | Step Time (steps 2–200 med / mean / p90) |
+|---:|---|---|---|---|---|---|---|---|---|
+| **1** | `gemma4_e2b_rl05_16n64g_s200_seed1_1021_1955` | [`logs/gemma4_e2b_rl05_16n64g_s200_seed1_1021_1955.log`](logs/gemma4_e2b_rl05_16n64g_s200_seed1_1021_1955.log) (`exit_code=0`) | [`eval_5k/seed1_16n64g/guard_check.txt`](eval_5k/seed1_16n64g/guard_check.txt) (**16/16 PASS**) | [`eval_5k/seed1_16n64g/node_prep.json`](eval_5k/seed1_16n64g/node_prep.json) (`16/16` alive nodes PASS) | [`eval_5k/seed1_16n64g/init_actor_aggregate.json`](eval_5k/seed1_16n64g/init_actor_aggregate.json) (`64/64` unique ranks PASS, `256/256` buffers bit-exact FP32) | `64/64` unique ranks PASS (`restored=[]`) | `0.000640 / 0.000684 / 0.000739` | `0.1289 / 0.2588 / 3.3281` | `70.14s / 73.85s / 83.96s` |
+| **2** | *in progress* | — | — | — | — | — | — | — | — |
+| **3** | *pending* | — | — | — | — | — | — | — | — |
+
+### 5.2 Seed 1 Held-Out Accuracy Trajectory (`eval_5000`, Greedy Decoding)
+
+Exact output of [`gemma4_eval_report.py`](gemma4_eval_report.py) ([`eval_5k/seed1_16n64g/seed1_report.md`](eval_5k/seed1_16n64g/seed1_report.md), [`eval_5k/seed1_16n64g/seed1_report.json`](eval_5k/seed1_16n64g/seed1_report.json)):
+
+| Step | N (`eval_5000`) | Acc (%) | Binomial SE (pp) | $\Delta$ vs step 0 (pp) | Paired SE (pp) | +Gained / -Lost | Format (%) | Mean reward |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| **0** | 5000 | **36.26** | 0.68 | +0.00 | 0.00 | +0 / -0 | 93.94 | 0.4565 |
+| **20** | 5000 | **36.34** | 0.68 | +0.08 | 0.48 | +290 / -286 | 95.26 | 0.4587 |
+| **40** | 5000 | **36.56** | 0.68 | +0.30 | 0.49 | +303 / -288 | 95.94 | 0.4615 |
+| **60** | 5000 | **37.32** | 0.68 | +1.06 | 0.48 | +317 / -264 | 95.88 | 0.4691 |
+| **80** | 5000 | **37.16** | 0.68 | +0.90 | 0.48 | +309 / -264 | 95.64 | 0.4672 |
+| **100** | 5000 | **36.92** | 0.68 | +0.66 | 0.48 | +304 / -271 | 96.10 | 0.4653 |
+| **120** | 5000 | **37.50** | 0.68 | +1.24 | 0.49 | +333 / -271 | 96.38 | 0.4714 |
+| **140** | 5000 | **36.68** | 0.68 | +0.42 | 0.49 | +308 / -287 | 96.48 | 0.4633 |
+| **160** | 5000 | **37.22** | 0.68 | +0.96 | 0.48 | +318 / -270 | 96.30 | 0.4685 |
+| **180** | 5000 | **37.34** | 0.68 | +1.08 | 0.48 | +315 / -261 | 96.64 | 0.4700 |
+| **200** | 5000 | **36.80** | 0.68 | **+0.54** | 0.49 | +309 / -282 | **96.70** | **0.4647** |
+
+- **Step 0 → Step 200 summary (Seed 1):**
+  - Base held-out accuracy (`step 0`): **36.26% ± 0.68 pp** (`1,813 / 5,000`), format compliance **93.94%**, mean reward **0.4565**.
+  - Final checkpoint held-out accuracy (`step 200`): **36.80% ± 0.68 pp** (`1,840 / 5,000`, $\Delta = +0.54\text{ pp}$, paired SE `0.49 pp`, `+309 / -282`), format compliance **96.70%** ($\Delta = +2.76\text{ pp}$), mean reward **0.4647**.
+  - Plateau across steps 60–200 (8 checkpoints): mean accuracy **37.12%** ($\Delta = +0.86\text{ pp}$ vs step 0), range **36.68% – 37.50%** (peak at step 120: **37.50%**, $\Delta = +1.24\text{ pp}$).
+  - Online training reward (`critic/score/mean`, $T=0.8$, 2,048 completions/step): rose from **0.6906** (steps 1–20 mean) to **0.7124** (steps 181–200 mean).

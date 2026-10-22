@@ -118,12 +118,16 @@ The 09-02 runs used an older verl checkout that did not log these metrics, so th
 
 ---
 
-## 4. Accuracy gate — protocol frozen ([EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)); 200-step baseline in progress
+## 4. Accuracy gate — protocol frozen ([EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)); Seed 1 complete (200/200 steps), Seeds 2 & 3 next
 
 - **Gate (customer, Meta)**: $\overline{\text{Acc}}_{\text{TPU}}(200) \ge \overline{\text{Acc}}_{\text{GPU}}(200) - 1.0\text{ pp}$, where $\overline{\text{Acc}}(200) = \frac{1}{3}\sum_{s=1}^{3} \text{Acc}_s(200)$ is the **3-seed arithmetic mean** held-out greedy accuracy on `eval_5000.parquet` at the pre-declared **final checkpoint (step 200)** ([EVAL_PROTOCOL.md](EVAL_PROTOCOL.md) §3.1). Full 11-point learning curves (`steps 0, 20, ..., 200`), across-seed standard deviation / min–max spread, and within-seed paired SEs vs step 0 are reported alongside the step-200 gate to prevent post-hoc checkpoint cherry-picking.
 - **Frozen held-out set (`eval_5000.parquet`)**: built deterministically by [`build_gemma4_eval_set.py`](build_gemma4_eval_set.py) ([`eval_5k/manifest.json`](eval_5k/manifest.json)). In raw `val.parquet` (50,000 rows), **37,372 rows (74.7%) overlap `train.parquet`** after alphanumeric normalization. Excluding all train-overlapping questions and deduplicating by question leaves 11,652 unique problems, from which 5,000 are selected by ascending `sha256(key)` (`eval_5000.parquet`, sha256 `d092a9c5e80aa2b3cf8e4e12d8367769e770f69ee6627ff1285fd5693efc662d`, binomial SE $\approx 0.70\text{ pp}$ at 55%).
 - **Frozen prompt-token ID fixture**: [`eval_5k/eval_5000_prompt_tokens.parquet`](eval_5k/eval_5000_prompt_tokens.parquet) (sha256 `a54fbb327d9c60545c49edfc26107b21a1e55f3ef9e673d80024c79e821b5ca4`), rendered through `verl`'s `Gemma4VLContinuousTokenBuilder` (`Gemma4Processor` + `GemmaTokenizer`) and verified 256/256 token-exact against online rollout prompts.
-- **Frozen 200-step baseline protocol ([`run_gemma4_e2b_rl05_accuracy_baseline.sh`](run_gemma4_e2b_rl05_accuracy_baseline.sh))**: `TOTAL_STEPS=200`, `trainer.val_before_train=True`, `trainer.test_freq=20` (11 checkpoints: steps `0, 20, ..., 200`), greedy decoding (`do_sample=False, temperature=0, top_k=-1, top_p=1.0, n=1`), explicit `SEED=1` (then `2`, `3`).
+- **Frozen 200-step baseline protocol ([`run_gemma4_e2b_rl05_accuracy_baseline.sh`](run_gemma4_e2b_rl05_accuracy_baseline.sh))**: `TOTAL_STEPS=200`, `trainer.val_before_train=True`, `trainer.test_freq=20` (11 checkpoints: steps `0, 20, ..., 200`), greedy decoding (`do_sample=False, temperature=0, top_k=-1, top_p=1.0, n=1`), explicit `SEED=1, 2, 3`.
+- **Seed 1 (`gemma4_e2b_rl05_16n64g_s200_seed1_1021_1955`, `16n64g`) — complete ([EVAL_PROTOCOL.md](EVAL_PROTOCOL.md) §5, [`eval_5k/seed1_16n64g/seed1_report.md`](eval_5k/seed1_16n64g/seed1_report.md))**:
+  - Guard check: [`eval_5k/seed1_16n64g/guard_check.txt`](eval_5k/seed1_16n64g/guard_check.txt) (**16/16 PASS**, `16/16` nodes, `64/64` unique ranks, `exit_code=0`, `steps=0..200`).
+  - Numerical stability across all 200 steps: `rollout_corr/k3_kl = 0.000640 – 0.000739` (median `0.000684`), `actor/grad_norm = 0.1289 – 3.3281` (median `0.2588`).
+  - Held-out `eval_5000` greedy accuracy curve: step 0 **36.26% ± 0.68 pp** (format **93.94%**) $\to$ step 60 **37.32%** (+1.06 pp) $\to$ step 120 **37.50%** (+1.24 pp) $\to$ step 180 **37.34%** (+1.08 pp) $\to$ step 200 **36.80% ± 0.68 pp** (+0.54 pp vs step 0, paired SE `0.49 pp`, format **96.70%** [+2.76 pp]; mean across steps 60–200 = **37.12%** [+0.86 pp]).
 - **Trainer log-prob parity (§3.4) and persistence/guard ([ROPE_GUARD.md](ROPE_GUARD.md)) are resolved and enforced on every launch.**
 
 ---
