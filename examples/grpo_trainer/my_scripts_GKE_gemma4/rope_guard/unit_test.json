@@ -1,0 +1,199 @@
+{
+ "verdict": "PASS",
+ "patch_version": "2",
+ "monkey_patch_file": "/workspace/verl-pin/verl/models/transformers/monkey_patch.py",
+ "torch": "2.13.0+cu130",
+ "transformers": "5.12.1",
+ "tolerances": {
+  "atol": 1e-10,
+  "rtol_fp32": 4e-06,
+  "rtol_bf16": 0.0078125
+ },
+ "cases": [
+  {
+   "case": "fresh fp32 buffers -> fp32",
+   "ok": true,
+   "detail": {
+    "full_attention_inv_freq": [
+     "fp32",
+     192
+    ],
+    "full_attention_original_inv_freq": [
+     "fp32",
+     192
+    ],
+    "sliding_attention_inv_freq": [
+     "fp32",
+     0
+    ],
+    "sliding_attention_original_inv_freq": [
+     "fp32",
+     0
+    ]
+   }
+  },
+  {
+   "case": "module.to(bf16) -> bf16",
+   "ok": true,
+   "detail": {
+    "full_attention_inv_freq": 0.003368,
+    "full_attention_original_inv_freq": 0.003368,
+    "sliding_attention_inv_freq": 0.003653,
+    "sliding_attention_original_inv_freq": 0.003653
+   }
+  },
+  {
+   "case": "bf16 then fp32 (FSDP buffer_dtype cast) -> bf16",
+   "ok": true,
+   "detail": {
+    "full_attention_inv_freq": "float32",
+    "full_attention_original_inv_freq": "float32",
+    "sliding_attention_inv_freq": "float32",
+    "sliding_attention_original_inv_freq": "float32"
+   }
+  },
+  {
+   "case": "0.2% error on fp32 values -> mismatch (no single 0.4% threshold)",
+   "ok": true,
+   "detail": {
+    "full_attention_inv_freq": [
+     "mismatch",
+     0.001953178564945391,
+     false
+    ]
+   }
+  },
+  {
+   "case": "5% error -> mismatch; NaN -> nonfinite; inf -> nonfinite",
+   "ok": true,
+   "detail": {
+    "x1.05": "mismatch",
+    "nan": "nonfinite",
+    "inf": "nonfinite"
+   }
+  },
+  {
+   "case": "zero handling (proportional RoPE zero padding)",
+   "ok": true,
+   "detail": {
+    "zero_entries": {
+     "full_attention_inv_freq": 192,
+     "full_attention_original_inv_freq": 192
+    },
+    "zero->1e-9": "mismatch",
+    "nonzero->0": [
+     "mismatch",
+     1
+    ],
+    "bf16 cast keeps zeros": "bf16"
+   }
+  },
+  {
+   "case": "FSDP1 coalesced broadcast: same order OK, reversed order scrambles",
+   "ok": true,
+   "detail": {
+    "same_order": {
+     "full_attention_inv_freq": "fp32",
+     "full_attention_original_inv_freq": "fp32",
+     "sliding_attention_inv_freq": "fp32",
+     "sliding_attention_original_inv_freq": "fp32"
+    },
+    "reversed_order": {
+     "full_attention_inv_freq": "mismatch",
+     "full_attention_original_inv_freq": "fp32",
+     "sliding_attention_inv_freq": "mismatch",
+     "sliding_attention_original_inv_freq": "mismatch"
+    }
+   }
+  },
+  {
+   "case": "rebuild after bf16 cast -> fp32 bit-exact, CPU oracle agrees",
+   "ok": true,
+   "detail": {
+    "pre": {
+     "full_attention_inv_freq": "bf16",
+     "full_attention_original_inv_freq": "bf16",
+     "sliding_attention_inv_freq": "bf16",
+     "sliding_attention_original_inv_freq": "bf16"
+    },
+    "post": {
+     "full_attention_inv_freq": {
+      "state": "fp32",
+      "dtype": "float32",
+      "bit_exact": true
+     },
+     "full_attention_original_inv_freq": {
+      "state": "fp32",
+      "dtype": "float32",
+      "bit_exact": true
+     },
+     "sliding_attention_inv_freq": {
+      "state": "fp32",
+      "dtype": "float32",
+      "bit_exact": true
+     },
+     "sliding_attention_original_inv_freq": {
+      "state": "fp32",
+      "dtype": "float32",
+      "bit_exact": true
+     }
+    }
+   }
+  },
+  {
+   "case": "registration: Gemma-4 model without rotary module raises",
+   "ok": true,
+   "detail": "[GEMMA4-ROPE] Gemma-4 model without a Gemma4TextRotaryEmbedding exposing rope_init_fns: the RoPE fix and guard cannot at"
+  },
+  {
+   "case": "registration: rotary module -> 1 hook, expected count recorded; non-Gemma model untouched",
+   "ok": true,
+   "detail": {
+    "guarded": 1
+   }
+  },
+  {
+   "case": "init checkpoint (world 1): bf16 buffers -> PASS, rebuilt fp32; first forward PASS",
+   "ok": true,
+   "detail": {
+    "pre_states": {
+     "bf16": 4
+    },
+    "max_rel_err_vs_fp32_accepted_pre": 0.0036525134959225084
+   }
+  },
+  {
+   "case": "first forward restores buffers changed after the checkpoint",
+   "ok": true,
+   "detail": {
+    "restored": "full_attention_inv_freq"
+   }
+  },
+  {
+   "case": "init checkpoint fault injection (scale, nan) -> RuntimeError naming the rank",
+   "ok": true,
+   "detail": {
+    "scale": "[GEMMA4-ROPE] guard FAILED on 1/1 rank(s) (role=actor, phase=init_checkpoint, before the optimizer is built): rank 0 (verl-bench-xiaotongyang-head-g7ddm): rotar",
+    "nan": "[GEMMA4-ROPE] guard FAILED on 1/1 rank(s) (role=actor, phase=init_checkpoint, before the optimizer is built): rank 0 (verl-bench-xiaotongyang-head-g7ddm): rotar"
+   }
+  },
+  {
+   "case": "reverse_order fault reverses the buffer order at registration",
+   "ok": true,
+   "detail": {
+    "before": [
+     "full_attention_inv_freq",
+     "full_attention_original_inv_freq",
+     "sliding_attention_inv_freq",
+     "sliding_attention_original_inv_freq"
+    ],
+    "after": [
+     "sliding_attention_original_inv_freq",
+     "sliding_attention_inv_freq",
+     "full_attention_original_inv_freq",
+     "full_attention_inv_freq"
+    ]
+   }
+  }
+ ]
+}

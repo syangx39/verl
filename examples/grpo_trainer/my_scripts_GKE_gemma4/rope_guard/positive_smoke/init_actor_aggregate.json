@@ -1,0 +1,713 @@
+{
+ "failed_ranks": [],
+ "fault": null,
+ "fp32_rope": true,
+ "kind": "gemma4_rope_guard",
+ "max_rel_err_vs_fp32_accepted_pre": 0.0036525134959225084,
+ "n_fail": 0,
+ "n_pass": 16,
+ "per_rank": [
+  {
+   "buffers": {
+    "0:full_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:full_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ]
+   },
+   "cuda_visible_devices": "0",
+   "errors": [],
+   "fault_applied": null,
+   "host": "verl-bench-xiaotongyang-gpu-workers-worker-7h2nr",
+   "local_rank": 0,
+   "n_rotary": 1,
+   "pid": 36518,
+   "rank": 0,
+   "role": "actor",
+   "status": "PASS"
+  },
+  {
+   "buffers": {
+    "0:full_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:full_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ]
+   },
+   "cuda_visible_devices": "1",
+   "errors": [],
+   "fault_applied": null,
+   "host": "verl-bench-xiaotongyang-gpu-workers-worker-7h2nr",
+   "local_rank": 0,
+   "n_rotary": 1,
+   "pid": 36519,
+   "rank": 1,
+   "role": "actor",
+   "status": "PASS"
+  },
+  {
+   "buffers": {
+    "0:full_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:full_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ]
+   },
+   "cuda_visible_devices": "2",
+   "errors": [],
+   "fault_applied": null,
+   "host": "verl-bench-xiaotongyang-gpu-workers-worker-7h2nr",
+   "local_rank": 0,
+   "n_rotary": 1,
+   "pid": 36520,
+   "rank": 2,
+   "role": "actor",
+   "status": "PASS"
+  },
+  {
+   "buffers": {
+    "0:full_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:full_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ]
+   },
+   "cuda_visible_devices": "3",
+   "errors": [],
+   "fault_applied": null,
+   "host": "verl-bench-xiaotongyang-gpu-workers-worker-7h2nr",
+   "local_rank": 0,
+   "n_rotary": 1,
+   "pid": 36521,
+   "rank": 3,
+   "role": "actor",
+   "status": "PASS"
+  },
+  {
+   "buffers": {
+    "0:full_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:full_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ]
+   },
+   "cuda_visible_devices": "0",
+   "errors": [],
+   "fault_applied": null,
+   "host": "verl-bench-xiaotongyang-gpu-workers-worker-49pf9",
+   "local_rank": 0,
+   "n_rotary": 1,
+   "pid": 33248,
+   "rank": 4,
+   "role": "actor",
+   "status": "PASS"
+  },
+  {
+   "buffers": {
+    "0:full_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:full_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ]
+   },
+   "cuda_visible_devices": "1",
+   "errors": [],
+   "fault_applied": null,
+   "host": "verl-bench-xiaotongyang-gpu-workers-worker-49pf9",
+   "local_rank": 0,
+   "n_rotary": 1,
+   "pid": 33249,
+   "rank": 5,
+   "role": "actor",
+   "status": "PASS"
+  },
+  {
+   "buffers": {
+    "0:full_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:full_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ]
+   },
+   "cuda_visible_devices": "2",
+   "errors": [],
+   "fault_applied": null,
+   "host": "verl-bench-xiaotongyang-gpu-workers-worker-49pf9",
+   "local_rank": 0,
+   "n_rotary": 1,
+   "pid": 33250,
+   "rank": 6,
+   "role": "actor",
+   "status": "PASS"
+  },
+  {
+   "buffers": {
+    "0:full_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:full_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ]
+   },
+   "cuda_visible_devices": "3",
+   "errors": [],
+   "fault_applied": null,
+   "host": "verl-bench-xiaotongyang-gpu-workers-worker-49pf9",
+   "local_rank": 0,
+   "n_rotary": 1,
+   "pid": 33251,
+   "rank": 7,
+   "role": "actor",
+   "status": "PASS"
+  },
+  {
+   "buffers": {
+    "0:full_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:full_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ]
+   },
+   "cuda_visible_devices": "0",
+   "errors": [],
+   "fault_applied": null,
+   "host": "verl-bench-xiaotongyang-gpu-workers-worker-lxr22",
+   "local_rank": 0,
+   "n_rotary": 1,
+   "pid": 36223,
+   "rank": 8,
+   "role": "actor",
+   "status": "PASS"
+  },
+  {
+   "buffers": {
+    "0:full_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:full_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ]
+   },
+   "cuda_visible_devices": "1",
+   "errors": [],
+   "fault_applied": null,
+   "host": "verl-bench-xiaotongyang-gpu-workers-worker-lxr22",
+   "local_rank": 0,
+   "n_rotary": 1,
+   "pid": 36224,
+   "rank": 9,
+   "role": "actor",
+   "status": "PASS"
+  },
+  {
+   "buffers": {
+    "0:full_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:full_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ]
+   },
+   "cuda_visible_devices": "2",
+   "errors": [],
+   "fault_applied": null,
+   "host": "verl-bench-xiaotongyang-gpu-workers-worker-lxr22",
+   "local_rank": 0,
+   "n_rotary": 1,
+   "pid": 36225,
+   "rank": 10,
+   "role": "actor",
+   "status": "PASS"
+  },
+  {
+   "buffers": {
+    "0:full_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:full_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ]
+   },
+   "cuda_visible_devices": "3",
+   "errors": [],
+   "fault_applied": null,
+   "host": "verl-bench-xiaotongyang-gpu-workers-worker-lxr22",
+   "local_rank": 0,
+   "n_rotary": 1,
+   "pid": 36226,
+   "rank": 11,
+   "role": "actor",
+   "status": "PASS"
+  },
+  {
+   "buffers": {
+    "0:full_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:full_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ]
+   },
+   "cuda_visible_devices": "0",
+   "errors": [],
+   "fault_applied": null,
+   "host": "verl-bench-xiaotongyang-gpu-workers-worker-9qz2k",
+   "local_rank": 0,
+   "n_rotary": 1,
+   "pid": 20476,
+   "rank": 12,
+   "role": "actor",
+   "status": "PASS"
+  },
+  {
+   "buffers": {
+    "0:full_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:full_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ]
+   },
+   "cuda_visible_devices": "1",
+   "errors": [],
+   "fault_applied": null,
+   "host": "verl-bench-xiaotongyang-gpu-workers-worker-9qz2k",
+   "local_rank": 0,
+   "n_rotary": 1,
+   "pid": 20477,
+   "rank": 13,
+   "role": "actor",
+   "status": "PASS"
+  },
+  {
+   "buffers": {
+    "0:full_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:full_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ]
+   },
+   "cuda_visible_devices": "2",
+   "errors": [],
+   "fault_applied": null,
+   "host": "verl-bench-xiaotongyang-gpu-workers-worker-9qz2k",
+   "local_rank": 0,
+   "n_rotary": 1,
+   "pid": 20478,
+   "rank": 14,
+   "role": "actor",
+   "status": "PASS"
+  },
+  {
+   "buffers": {
+    "0:full_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:full_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0033683457711116715,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ],
+    "0:sliding_attention_original_inv_freq": [
+     "bf16",
+     "bfloat16",
+     0.0036525134959225084,
+     "fp32",
+     true
+    ]
+   },
+   "cuda_visible_devices": "3",
+   "errors": [],
+   "fault_applied": null,
+   "host": "verl-bench-xiaotongyang-gpu-workers-worker-9qz2k",
+   "local_rank": 0,
+   "n_rotary": 1,
+   "pid": 20479,
+   "rank": 15,
+   "role": "actor",
+   "status": "PASS"
+  }
+ ],
+ "phase": "init_checkpoint",
+ "pre_states": {
+  "bf16": 64
+ },
+ "ranks": [
+  0,
+  1,
+  2,
+  3,
+  4,
+  5,
+  6,
+  7,
+  8,
+  9,
+  10,
+  11,
+  12,
+  13,
+  14,
+  15
+ ],
+ "role": "actor",
+ "tolerances": {
+  "atol": 1e-10,
+  "rtol_bf16": 0.0078125,
+  "rtol_fp32": 4e-06
+ },
+ "version": "2",
+ "world_size": 16
+}

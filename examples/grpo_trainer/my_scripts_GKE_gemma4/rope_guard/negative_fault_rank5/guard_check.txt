@@ -1,0 +1,16 @@
+[PASS] node_prep verdict PASS  (PASS)
+[PASS] node_prep one ok record per alive node  (16 records / 16 alive nodes)
+[PASS] node_prep managed files identical on every node  ({"verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7", "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"})
+[PASS] exactly one guard report for role=actor  (found 1)
+[PASS] guard report covers ranks 0..W-1  (world_size=16 ranks=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
+[PASS] guard report: exactly rank 5 FAIL  (failed=[5])
+[PASS] fault configured for that rank  ({"mode": "reverse_order", "rank": 5})
+[PASS] per-rank init records for ranks 0..W-1  (have [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
+[PASS] per-rank init records: exactly rank 5 FAIL  (failed=[5])
+[PASS] fault applied on that rank only  (fault_applied on [5])
+[PASS] failing rank errors recorded  (rotary[0] full_attention_inv_freq: mismatch (max_rel_err vs fp32 0.6781487265619629, vs bf16 0.6788321167883211) | rotary[0] sliding_attention_inv_freq: mismatch (max_rel_err vs fp32 1.0, vs bf16 1.0) | rotary[0] sliding_attention_original_inv_freq: mismatch (max_rel_err vs fp32 2.112508941792678, vs bf16 2.1136363636363638))
+[PASS] no first-forward record (stopped before any forward)  (have [])
+[PASS] driver exit code non-zero  (exit_code=1)
+[PASS] guard failure in the driver log
+[PASS] no training step logged  (steps=[])
+GEMMA4-GUARD-CHECK: PASS mode=negative world=16 exit_code=1 steps=[]
