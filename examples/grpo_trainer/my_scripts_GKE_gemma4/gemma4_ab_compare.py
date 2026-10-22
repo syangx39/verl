@@ -161,7 +161,7 @@ def main() -> int:
     sa = [s for s in _steps(da, "train") if s <= args.max_step]
     sb = [s for s in _steps(db, "train") if s <= args.max_step]
     tsteps = sorted(set(sa) & set(sb))
-    expected = list(range(1, (min(args.max_step, max(sa[-1], sb[-1])) if sa and sb else 0) + 1))
+    expected = list(range(1, (min(args.max_step, sa[-1], sb[-1]) if sa and sb else 0) + 1))
     if args.expect_steps:
         expected = list(range(1, args.expect_steps + 1))
     missing = {"a": sorted(set(expected) - set(sa)), "b": sorted(set(expected) - set(sb))}

@@ -223,6 +223,7 @@ Review of `ab70122` approved freezing the FP32 configuration as the current cand
 
 1. **FP32 seed 1, full 200 steps — running.** Launcher frozen in commit `203b40f`: `run_gemma4_e2b_rl05_parity.sh` sha256 `7d511735c00a1c883645ba4fd02fc802bbc535f51a7f36229768f24d29969c2a`. The only change from the PR #9 recipe is `actor.fsdp_config.model_dtype=fp32`; the accuracy wrapper (sha256 `2a37aad5…`) and eval protocol are unchanged. Run `gemma4_e2b_rl05fp32_16n64g_s200_seed1_1022_2019`, started 2026-10-22T20:19Z, `16n64g`, eval at steps 0, 20, …, 200. This is a new cohort. The 60-step A/B run is not reused as seed 1 because it ran on the pre-freeze launcher with an override.
 2. **Single-variable optimization from that curve.** Compare one change at a time against the FP32 seed-1 curve under the fixed eval, on accuracy vs steps and accuracy vs wall time. Seed 1 is used for screening. The levers are chosen after step 1. Each must be reproducible on the TPU side, because the customer gate compares identical recipes. Candidates suggested by the evidence so far:
+   - prompt format: the current prompt is double-wrapped (MaxText's Gemma-3-style `TEMPLATE` inside the user turn, then the Gemma-4 chat template; [EVAL_PROTOCOL.md §2](EVAL_PROTOCOL.md)). A single-wrapped prompt needs a new eval prompt fixture and the same change on TPU;
    - learning rate;
    - updates per rollout (`ppo_mini_batch_size`);
    - group size / batch shape, given that ~70% of groups have zero advantage;
