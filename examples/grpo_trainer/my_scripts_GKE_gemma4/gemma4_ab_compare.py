@@ -8,8 +8,12 @@ the same 256 prompts in both. The script checks that, then reports:
      ground-truth hashes): accuracy of each run, B - A difference, paired SE, question-paired bootstrap 95% interval,
      gained / lost, and each run's own change vs its step 0. Step 0 scores identical weights in both runs, so the
      step-0 difference is the eval noise floor.
-  2. Training accuracy (T = 0.8 rollouts) per step on identical prompts: B - A per step, and its mean and SE over
-     step windows (the steps are independent prompt batches, so the window mean's SE is sd / sqrt(n)).
+  2. Training accuracy (T = 0.8 rollouts) per step on identical prompts: B - A per step, and its mean, standard
+     deviation and number of steps with B ahead over step windows. These are descriptive: consecutive steps of the same
+     two runs are not independent replicates (each run's state carries over), so no standard error is reported.
+     Before comparing, every training dump is validated: complete step coverage, exactly rows_per_step rows,
+     rows_per_step / group_size prompt groups of exactly group_size rows, one input and one ground truth per group,
+     and the same qid -> (input, ground truth) mapping in both runs.
   3. Per-step diagnostics from the driver logs: rollout_corr/k3_kl, actor/grad_norm, actor/entropy,
      response_length/mean, critic/score/mean, timing_s/step (medians over windows).
 
@@ -76,6 +80,28 @@ def _paired(a, b, B=2000, seed=0):
 
 
 STEP_RE = re.compile(r"\bstep:(\d+)\s+-\s+(.*)")
+
+
+def _check_batch(rows, where, rows_per_step, group_size):
+    """Validate one training dump; return {qid: (input_hash, ground_truth_hash)}. Exits on any violation."""
+    if len(rows) != rows_per_step:
+        raise SystemExit(f"[train] {where}: {len(rows)} rows, expected {rows_per_step}")
+    groups = {}
+    for r in rows:
+        groups.setdefault(str(r["qid"]), []).append(r)
+    n_groups = rows_per_step // group_size
+    if len(groups) != n_groups:
+        raise SystemExit(f"[train] {where}: {len(groups)} prompt groups, expected {n_groups}")
+    out = {}
+    for q, g in groups.items():
+        if len(g) != group_size:
+            raise SystemExit(f"[train] {where}: qid {q} has {len(g)} rows, expected {group_size}")
+        ins = {_h(r.get("input")) for r in g}
+        gts = {_h(r.get("gts")) for r in g}
+        if len(ins) != 1 or len(gts) != 1:
+            raise SystemExit(f"[train] {where}: qid {q} mixes inputs or ground truths inside its group")
+        out[q] = (ins.pop(), gts.pop())
+    return out
 KEYS = ("rollout_corr/k3_kl", "actor/grad_norm", "actor/entropy", "response_length/mean", "critic/score/mean",
         "timing_s/step", "response_length/clip_ratio")
 
@@ -108,6 +134,10 @@ def main() -> int:
     ap.add_argument("--a-log", default="")
     ap.add_argument("--b-log", default="")
     ap.add_argument("--max-step", type=int, default=10**9)
+    ap.add_argument("--expect-steps", type=int, default=0,
+                    help="require training dumps for steps 1..N in both runs (default: 1..last step present)")
+    ap.add_argument("--rows-per-step", type=int, default=2048, help="train_batch_size x rollout.n")
+    ap.add_argument("--group-size", type=int, default=8, help="rollout.n")
     ap.add_argument("--out-json", default="")
     ap.add_argument("--out-md", default="")
     ap.add_argument("--plot", default="", help="write a 2x2 PNG summary here (needs matplotlib)")
@@ -128,34 +158,54 @@ def main() -> int:
             res["eval"][s]["a_vs_step0"] = _paired(va[0], va[s], seed=100 + s)
             res["eval"][s]["b_vs_step0"] = _paired(vb[0], vb[s], seed=200 + s)
 
-    tsteps = sorted(set(_steps(da, "train")) & set(_steps(db, "train")))
-    tsteps = [s for s in tsteps if s <= args.max_step]
+    sa = [s for s in _steps(da, "train") if s <= args.max_step]
+    sb = [s for s in _steps(db, "train") if s <= args.max_step]
+    tsteps = sorted(set(sa) & set(sb))
+    expected = list(range(1, (min(args.max_step, max(sa[-1], sb[-1])) if sa and sb else 0) + 1))
+    if args.expect_steps:
+        expected = list(range(1, args.expect_steps + 1))
+    missing = {"a": sorted(set(expected) - set(sa)), "b": sorted(set(expected) - set(sb))}
+    if missing["a"] or missing["b"]:
+        raise SystemExit(f"[train] incomplete step coverage: missing in A {missing['a'][:10]}, in B {missing['b'][:10]}")
     per = {}
     for s in tsteps:
         ra = list(_rows(os.path.join(da, "train", f"{s}.jsonl")))
         rb = list(_rows(os.path.join(db, "train", f"{s}.jsonl")))
-        same = sorted({str(r["qid"]) for r in ra}) == sorted({str(r["qid"]) for r in rb})
+        ga_ = _check_batch(ra, f"A step {s}", args.rows_per_step, args.group_size)
+        gb_ = _check_batch(rb, f"B step {s}", args.rows_per_step, args.group_size)
+        if set(ga_) != set(gb_):
+            raise SystemExit(f"[train] step {s}: prompt qid sets differ between A and B")
+        bad = [q for q in ga_ if ga_[q] != gb_[q]]
+        if bad:
+            raise SystemExit(f"[train] step {s}: {len(bad)} qids with different input/ground truth between A and B")
         acc = lambda rr: 100 * sum(float(r["acc"]) for r in rr) / len(rr)  # noqa: E731
         fmt = lambda rr: 100 * sum(float(r["fmt"]) for r in rr) / len(rr)  # noqa: E731
-        per[s] = {"same_prompts": same, "acc_a": acc(ra), "acc_b": acc(rb), "fmt_a": fmt(ra), "fmt_b": fmt(rb)}
+        per[s] = {"same_prompts": True, "acc_a": acc(ra), "acc_b": acc(rb), "fmt_a": fmt(ra), "fmt_b": fmt(rb)}
     res["train"]["per_step"] = per
+    res["train"]["batch_checks"] = {
+        "steps": [tsteps[0], tsteps[-1]] if tsteps else None, "n_steps": len(tsteps),
+        "rows_per_step": args.rows_per_step, "groups_per_step": args.rows_per_step // args.group_size,
+        "group_size": args.group_size,
+        "checks": "complete step coverage; exact rows per step; groups of exactly group_size per qid; one input and one "
+                  "ground truth per group; identical qid -> (input, ground truth) between A and B",
+    }
 
     def window(lo, hi):
         sel = [per[s] for s in tsteps if lo <= s <= hi]
         if len(sel) < 2:
             return None
         d = [x["acc_b"] - x["acc_a"] for x in sel]
+        # Descriptive spread only: consecutive steps of the same two runs are not independent replicates.
         return {"steps": [lo, hi], "n": len(sel), "acc_a": statistics.mean(x["acc_a"] for x in sel),
                 "acc_b": statistics.mean(x["acc_b"] for x in sel), "diff_mean": statistics.mean(d),
-                "diff_se": statistics.stdev(d) / math.sqrt(len(d)), "fmt_a": statistics.mean(x["fmt_a"] for x in sel),
-                "fmt_b": statistics.mean(x["fmt_b"] for x in sel)}
+                "diff_sd": statistics.stdev(d), "n_positive": sum(1 for x in d if x > 0),
+                "fmt_a": statistics.mean(x["fmt_a"] for x in sel), "fmt_b": statistics.mean(x["fmt_b"] for x in sel)}
 
     if tsteps:
         last = tsteps[-1]
         wins = [(1, min(10, last)), (11, min(20, last)), (21, min(40, last)), (41, min(60, last)), (1, last)]
         wins = list(dict.fromkeys((lo, hi) for lo, hi in wins if hi >= lo))
         res["train"]["windows"] = [w for w in (window(lo, hi) for lo, hi in wins) if w]
-        res["train"]["all_same_prompts"] = all(x["same_prompts"] for x in per.values())
 
     ga, gb = _log_steps(args.a_log), _log_steps(args.b_log)
     for lo, hi in ((1, 20), (21, 40), (41, 60)):
@@ -170,8 +220,9 @@ def main() -> int:
 
     L = [f"### Paired A/B: `{lb}` (B) vs `{la}` (A)", ""]
     L.append(f"- A: `{da}`  B: `{db}`; eval checkpoints in common: {common}; training steps in common: "
-             f"{tsteps[0] if tsteps else '-'}–{tsteps[-1] if tsteps else '-'}; identical prompts at every common step: "
-             f"{res['train'].get('all_same_prompts')}.")
+             f"{tsteps[0] if tsteps else '-'}–{tsteps[-1] if tsteps else '-'}; training dumps validated at every step "
+             f"({args.rows_per_step} rows = {args.rows_per_step // args.group_size} x {args.group_size}, one input / ground "
+             f"truth per group, identical qid -> input / ground truth in A and B).")
     L.append("")
     L.append("| Eval step | A acc (%) | B acc (%) | B − A (pp) | paired SE | bootstrap 95% | +gained / −lost (B vs A) | "
              "A vs own step 0 (pp) | B vs own step 0 (pp, 95%) | identical outputs |")
@@ -187,12 +238,12 @@ def main() -> int:
                  f"{x['identical_outputs']} / {x['n']} |")
     L.append("")
     if res["train"].get("windows"):
-        L.append("| Training steps (identical prompts) | n | A train acc (%) | B train acc (%) | B − A mean (pp) | SE (pp) | "
+        L.append("| Training steps (identical prompts) | n | A train acc (%) | B train acc (%) | B − A mean (pp) | SD of per-step B − A (pp) | steps with B ahead | "
                  "A format (%) | B format (%) |")
-        L.append("|---|---:|---:|---:|---:|---:|---:|---:|")
+        L.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|")
         for w in res["train"]["windows"]:
             L.append(f"| {w['steps'][0]}–{w['steps'][1]} | {w['n']} | {w['acc_a']:.2f} | {w['acc_b']:.2f} | "
-                     f"**{w['diff_mean']:+.2f}** | {w['diff_se']:.2f} | {w['fmt_a']:.2f} | {w['fmt_b']:.2f} |")
+                     f"**{w['diff_mean']:+.2f}** | {w['diff_sd']:.2f} | {w['n_positive']} / {w['n']} | {w['fmt_a']:.2f} | {w['fmt_b']:.2f} |")
         L.append("")
     if res["diag"]:
         L.append("| Steps | metric | A median | B median |")
@@ -279,9 +330,9 @@ def _plot(res, la, lb, ga, gb, rep, path):
         if (lo, hi) == (1, ts[-1]):
             continue
         ax.hlines(w["diff_mean"], lo, hi, color="#2ca02c", lw=2.5)
-        ax.annotate(f"{w['diff_mean']:+.2f} ± {2 * w['diff_se']:.2f}", ((lo + hi) / 2, w["diff_mean"]),
+        ax.annotate(f"{w['diff_mean']:+.2f} ({w['n_positive']}/{w['n']} > 0)", ((lo + hi) / 2, w["diff_mean"]),
                     textcoords="offset points", xytext=(0, 8), ha="center", fontsize=8.5, color="#2ca02c")
-    ax.set_title(f"C. Train-acc difference {lb} − {la}, identical prompts (window mean ± 2 SE)")
+    ax.set_title(f"C. Train-acc difference {lb} − {la}, identical prompts (window means; descriptive)")
     ax.set_xlabel("Training step")
     ax.set_ylabel("pp")
     ax.legend(loc="upper left", fontsize=8.5)

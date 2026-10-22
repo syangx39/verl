@@ -312,7 +312,17 @@
   }
  },
  "train": {
-  "all_same_prompts": true,
+  "batch_checks": {
+   "checks": "complete step coverage; exact rows per step; groups of exactly group_size per qid; one input and one ground truth per group; identical qid -> (input, ground truth) between A and B",
+   "group_size": 8,
+   "groups_per_step": 256,
+   "n_steps": 60,
+   "rows_per_step": 2048,
+   "steps": [
+    1,
+    60
+   ]
+  },
   "per_step": {
    "1": {
     "acc_a": 54.6875,
@@ -740,10 +750,11 @@
     "acc_a": 59.5556640625,
     "acc_b": 59.7998046875,
     "diff_mean": 0.244140625,
-    "diff_se": 0.240423085321506,
+    "diff_sd": 0.7602845517009547,
     "fmt_a": 97.724609375,
     "fmt_b": 98.3935546875,
     "n": 10,
+    "n_positive": 8,
     "steps": [
      1,
      10
@@ -753,10 +764,11 @@
     "acc_a": 58.9794921875,
     "acc_b": 59.384765625,
     "diff_mean": 0.4052734375,
-    "diff_se": 0.28078412689865506,
+    "diff_sd": 0.8879173718215002,
     "fmt_a": 98.1884765625,
     "fmt_b": 99.3115234375,
     "n": 10,
+    "n_positive": 6,
     "steps": [
      11,
      20
@@ -766,10 +778,11 @@
     "acc_a": 59.921875,
     "acc_b": 61.40380859375,
     "diff_mean": 1.48193359375,
-    "diff_se": 0.20158123923777602,
+    "diff_sd": 0.9014987078486302,
     "fmt_a": 98.66455078125,
     "fmt_b": 99.7607421875,
     "n": 20,
+    "n_positive": 19,
     "steps": [
      21,
      40
@@ -779,10 +792,11 @@
     "acc_a": 59.2626953125,
     "acc_b": 61.13037109375,
     "diff_mean": 1.86767578125,
-    "diff_se": 0.23271676766313304,
+    "diff_sd": 1.0407410239975807,
     "fmt_a": 98.98193359375,
     "fmt_b": 99.7802734375,
     "n": 20,
+    "n_positive": 19,
     "steps": [
      41,
      60
@@ -792,10 +806,11 @@
     "acc_a": 59.484049479166664,
     "acc_b": 60.708821614583336,
     "diff_mean": 1.2247721354166667,
-    "diff_se": 0.14481643156731083,
+    "diff_sd": 1.121743255434762,
     "fmt_a": 98.53434244791667,
     "fmt_b": 99.46451822916667,
     "n": 60,
+    "n_positive": 52,
     "steps": [
      1,
      60

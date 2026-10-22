@@ -17,7 +17,8 @@ probed call, and prints / writes per-call totals over all ranks:
 
 Usage:
     python3 gemma4_optim_probe_report.py --probe-dir <dir> --world 64 [--label bf16] [--out-json s.json] [--out-md s.md]
-Exit code 0 if coverage is complete and no probe errors were recorded, 1 otherwise.
+Exit code 0 only if every rank 0..W-1 reported its optimizer construction and every expected probed step
+(calls 0..--expect-calls-1, default 2), and no probe errors were recorded; 1 otherwise.
 """
 
 from __future__ import annotations
@@ -258,6 +259,8 @@ def main() -> int:
     ap.add_argument("--probe-dir", required=True)
     ap.add_argument("--world", type=int, required=True)
     ap.add_argument("--label", default="probe")
+    ap.add_argument("--expect-calls", type=int, default=2,
+                    help="number of probed optimizer steps that must be present (calls 0..N-1) on every rank")
     ap.add_argument("--out-json", default="")
     ap.add_argument("--out-md", default="")
     args = ap.parse_args()
@@ -268,9 +271,13 @@ def main() -> int:
         json.dump(s, open(args.out_json, "w"), indent=1, sort_keys=True)
     if args.out_md:
         open(args.out_md, "w").write(md)
-    ok = s["init"]["complete"] and s["calls"] and all(c["complete"] for c in s["calls"].values()) and not s["errors"]
+    calls = sorted(int(k) for k in s["calls"])
+    calls_ok = calls == list(range(args.expect_calls))
+    if not calls_ok:
+        print(f"[report] expected probed calls {list(range(args.expect_calls))}, found {calls}")
+    ok = (s["init"]["complete"] and calls_ok and all(c["complete"] for c in s["calls"].values()) and not s["errors"])
     print(f"GEMMA4-OPTIM-PROBE-REPORT: {'COMPLETE' if ok else 'INCOMPLETE'} label={args.label} "
-          f"calls={sorted(s['calls'])} errors={len(s['errors'])}")
+          f"calls={calls} expected_calls={args.expect_calls} errors={len(s['errors'])}")
     return 0 if ok else 1
 
 

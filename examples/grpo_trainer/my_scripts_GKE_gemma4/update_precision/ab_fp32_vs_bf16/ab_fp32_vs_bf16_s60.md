@@ -1,6 +1,6 @@
 ### Paired A/B: `fp32` (B) vs `bf16` (A)
 
-- A: `/workspace/meta-RL/logs/gemma4_eval/gemma4_e2b_rl05_16n64g_s200_seed1_1021_1955`  B: `/workspace/meta-RL/logs/gemma4_eval/gemma4_e2b_rl05_16n64g_s60_fp32ab_seed1_1022_1744`; eval checkpoints in common: [0, 20, 40, 60]; training steps in common: 1–60; identical prompts at every common step: True.
+- A: `/workspace/meta-RL/logs/gemma4_eval/gemma4_e2b_rl05_16n64g_s200_seed1_1021_1955`  B: `/workspace/meta-RL/logs/gemma4_eval/gemma4_e2b_rl05_16n64g_s60_fp32ab_seed1_1022_1744`; eval checkpoints in common: [0, 20, 40, 60]; training steps in common: 1–60; training dumps validated at every step (2048 rows = 256 x 8, one input / ground truth per group, identical qid -> input / ground truth in A and B).
 
 | Eval step | A acc (%) | B acc (%) | B − A (pp) | paired SE | bootstrap 95% | +gained / −lost (B vs A) | A vs own step 0 (pp) | B vs own step 0 (pp, 95%) | identical outputs |
 |---:|---:|---:|---:|---:|---|---|---:|---|---:|
@@ -9,13 +9,13 @@
 | 40 | 36.56 | 37.86 | **+1.30** | 0.51 | [+0.26, +2.30] | +353 / −288 | +0.30 | +2.02 [+1.04, +3.02] | 36 / 5000 |
 | 60 | 37.32 | 38.04 | **+0.72** | 0.51 | [-0.24, +1.72] | +344 / −308 | +1.06 | +2.20 [+1.22, +3.20] | 29 / 5000 |
 
-| Training steps (identical prompts) | n | A train acc (%) | B train acc (%) | B − A mean (pp) | SE (pp) | A format (%) | B format (%) |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| 1–10 | 10 | 59.56 | 59.80 | **+0.24** | 0.24 | 97.72 | 98.39 |
-| 11–20 | 10 | 58.98 | 59.38 | **+0.41** | 0.28 | 98.19 | 99.31 |
-| 21–40 | 20 | 59.92 | 61.40 | **+1.48** | 0.20 | 98.66 | 99.76 |
-| 41–60 | 20 | 59.26 | 61.13 | **+1.87** | 0.23 | 98.98 | 99.78 |
-| 1–60 | 60 | 59.48 | 60.71 | **+1.22** | 0.14 | 98.53 | 99.46 |
+| Training steps (identical prompts) | n | A train acc (%) | B train acc (%) | B − A mean (pp) | SD of per-step B − A (pp) | steps with B ahead | A format (%) | B format (%) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1–10 | 10 | 59.56 | 59.80 | **+0.24** | 0.76 | 8 / 10 | 97.72 | 98.39 |
+| 11–20 | 10 | 58.98 | 59.38 | **+0.41** | 0.89 | 6 / 10 | 98.19 | 99.31 |
+| 21–40 | 20 | 59.92 | 61.40 | **+1.48** | 0.90 | 19 / 20 | 98.66 | 99.76 |
+| 41–60 | 20 | 59.26 | 61.13 | **+1.87** | 1.04 | 19 / 20 | 98.98 | 99.78 |
+| 1–60 | 60 | 59.48 | 60.71 | **+1.22** | 1.12 | 52 / 60 | 98.53 | 99.46 |
 
 | Steps | metric | A median | B median |
 |---|---|---:|---:|
