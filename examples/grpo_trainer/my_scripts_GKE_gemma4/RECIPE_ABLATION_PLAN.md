@@ -6,7 +6,7 @@ Optimize the already-learning Gemma-4 E2B FP32 recipe by isolating the effects o
 
 PR #10 established learning, not a plateau: held-out accuracy rose **35.76% → 39.62% (+3.86 pp)** at step 100, with question-paired bootstrap 95% **[+2.82, +4.96] pp**. Its run was deliberately stopped at step 107; only steps 0–100 are the comparison reference. Qwen results motivate optimization but are not a Gemma acceptance threshold.
 
-**Status:** A1 (reward) is prepared, checked and running; see the [execution record](#execution-record). A2 and A3 have not started. The initial commit was plan only.
+**Status:** A1 (reward) is prepared, checked and running; A2 (prompt) is prepared and checked but not launched; A3 has not started. See the [execution record](#execution-record). The initial commit was plan only.
 
 ## Plan
 
@@ -47,12 +47,12 @@ Removing format credit mechanically lowers total reward. Compare accuracy and fo
 
 **A2 — prompt**
 
-- [ ] Build a separate training-data artifact; preserve the reference parquet. Remove only the known inner template markers and fake model header, retaining the original instructions, question and requested response format.
-- [ ] Preserve row IDs/order and ground truths. Save before/after rendered samples and token counts; check no unexpected truncation, row filtering or question-content changes.
-- [ ] Extend [`gemma4_ab_compare.py`](gemma4_ab_compare.py) with an explicit training-template-change comparison mode. Its current strict `qid -> (rendered input, ground truth)` check correctly rejects this arm.
-- [ ] In that mode, validate original row/question identity and raw question/answer hashes against a provenance mapping; validate complete steps, 2,048 rows, 256 groups × 8 completions and within-group consistency. Allow only the declared rendered training-template change; do not merely disable input checks or trust `qid` alone.
-- [ ] Keep strict rendered-input equality for eval and for reward/LR comparisons. Include a positive expected-template-change check and negative mismatched-question/answer checks.
-- [ ] Label training plots “same raw questions, different training templates,” not “identical prompts.”
+- [x] Build a separate training-data artifact; preserve the reference parquet. Remove only the known inner template markers and fake model header, retaining the original instructions, question and requested response format. — `train_single_wrap.parquet` (sha256 `053185b1…`), built by [`gemma4_build_single_wrap_train.py`](gemma4_build_single_wrap_train.py); `train.parquet` unchanged.
+- [x] Preserve row IDs/order and ground truths. Save before/after rendered samples and token counts; check no unexpected truncation, row filtering or question-content changes. — [manifest](recipe_ablation/a2_prompt/train_single_wrap_manifest.json); details in the [A2 record](#a2-record-training-template-applied-once).
+- [x] Extend [`gemma4_ab_compare.py`](gemma4_ab_compare.py) with an explicit training-template-change comparison mode. Its current strict `qid -> (rendered input, ground truth)` check correctly rejects this arm. — `--train-template-change strip_inner_gemma3`.
+- [x] In that mode, validate original row/question identity and raw question/answer hashes against a provenance mapping; validate complete steps, 2,048 rows, 256 groups × 8 completions and within-group consistency. Allow only the declared rendered training-template change; do not merely disable input checks or trust `qid` alone. — A's dumped input is mapped to its expected single-wrapped form and must then equal B's input exactly, with identical ground truth; all batch checks are unchanged (see [A2 record](#a2-record-training-template-applied-once)).
+- [x] Keep strict rendered-input equality for eval and for reward/LR comparisons. Include a positive expected-template-change check and negative mismatched-question/answer checks. — [`test_gemma4_ab_compare_template.py`](test_gemma4_ab_compare_template.py) PASS (7 cases). Strict mode reproduces PR #10's `fp32_vs_bf16_s100.md` byte for byte.
+- [x] Label training plots “same raw questions, different training templates,” not “identical prompts.” — table headers and plot titles use that label in template-change mode.
 
 Eval prompt tokens remain frozen for this screen. This measures the effect of changing training prompts under the existing eval condition. A future experiment that also changes eval prompts requires a separately versioned protocol and a re-evaluated reference; it must not be mixed into this comparison.
 
@@ -130,6 +130,44 @@ A row whose `extra_info["question"]` hashes into that set keeps the canonical 0.
 
 - Node prep PASS on 16 / 16 nodes; RoPE guard PASS on 64 / 64 ranks; no tracebacks.
 - Step-0 held-out accuracy is 36.18% (format 94.36%). This is inside the 35.76–36.74% range of the earlier step-0 evals of the same initial weights.
+
+### A2 record: training template applied once
+
+Prepared while A1 runs; not launched. A2 starts only after A1 is complete and recorded.
+
+**Training data** ([`gemma4_build_single_wrap_train.py`](gemma4_build_single_wrap_train.py), [manifest](recipe_ablation/a2_prompt/train_single_wrap_manifest.json))
+- Source `train.parquet` (sha256 `5404981a…`, unchanged) → `train_single_wrap.parquet` (sha256 `053185b1…`).
+- The user message changes from `<start_of_turn>user\n{system_prompt}\n\n{question}<end_of_turn>\n<start_of_turn>model` to `{system_prompt}\n\n{question}`. verl still applies the Gemma-4 chat template on top, now only once.
+
+| Check | Result |
+|---|---|
+| Rows in the exact reference form before the change | 950,000 / 950,000 |
+| Rows written, row order | 950,000, same order (`data.filter_overlong_prompts=False`, so the seed-1 sampler draws the same rows at every step) |
+| `data_source`, `reward_model` (ground truth), `extra_info` (question, index) | identical to the source, row by row |
+| New prompt equals `{system_prompt}\n\n{question}` for the row's own question | all rows; no inner marker left |
+| Rendered length (2,000-row sample, Gemma-4 chat template) | 154.3 → 130.0 tokens on average (24–26 tokens removed per prompt); maximum 2,269 tokens, far below the 8,192 cap |
+| Decoded form verl writes to the rollout dumps | matches the expected single-wrapped form for 2,000 / 2,000 sampled rows |
+
+One side effect is inherent to applying the template once. The Gemma-4 chat template trims each message (`message['content'] | trim`). With the inner markers gone, whitespace at the end of a question is now at the end of the message and is trimmed. This affects 916 of 950,000 questions (0.096%), which end in a newline or space. No other text changes. The eval prompts are not touched.
+
+**Comparison tooling** ([`gemma4_ab_compare.py`](gemma4_ab_compare.py) `--train-template-change strip_inner_gemma3`)
+- Each A0 training input, as dumped (`user\n<start_of_turn>user\n{core}<end_of_turn>\n<start_of_turn>model\nmodel\n`), is mapped to its expected A2 form (`user\n{core.strip()}\nmodel\n`).
+- The mapped input must then equal the A2 input exactly, and the ground truths must be identical. The batch checks are the same as in strict mode: complete steps, 2,048 rows, 256 groups × 8, one input and one ground truth per group.
+- The provenance is therefore A0's own dump: a changed question, instruction or answer fails. Eval prompts are always compared strictly.
+- [`test_gemma4_ab_compare_template.py`](test_gemma4_ab_compare_template.py) passes 7 cases:
+  - positive: the declared change, including a question that ends in a newline;
+  - positive: strict mode on identical prompts;
+  - negative: the same arm in strict mode;
+  - negative: a changed question;
+  - negative: a changed ground truth;
+  - negative: A not double-wrapped;
+  - negative: changed eval prompts.
+- Strict mode still reproduces PR #10's `fp32_vs_bf16_s100.md` byte for byte.
+
+**Launch plan:**
+- Frozen launcher and wrapper, `SEED=1`, `NNODES=16`, `TOTAL_STEPS=100`.
+- The only change is `GEMMA_TRAIN_FILE=…/train_single_wrap.parquet`.
+- Format coefficient 0.1 everywhere: no A1 variables, which the launch script unsets explicitly. LR 1e-6. Eval unchanged.
 
 ## Initial validation and scope
 

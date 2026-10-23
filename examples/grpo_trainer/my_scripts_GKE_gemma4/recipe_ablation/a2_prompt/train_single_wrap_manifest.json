@@ -1,0 +1,64 @@
+{
+ "source": "/workspace/meta-RL/data/openmathinstruct2/train.parquet",
+ "source_sha256": "5404981a07c78a5c02d4f493293fc30bd1ddb42908376566fa9a1020abbdf01b",
+ "output": "/workspace/meta-RL/data/openmathinstruct2/train_single_wrap.parquet",
+ "output_sha256": "053185b109827eae0110155dee7f15c67cee42c2b5aafd1d428c1688fc37c23a",
+ "transform": {
+  "reference_content": "<start_of_turn>user\\n{system_prompt}\\n\\n{question}<end_of_turn>\\n<start_of_turn>model",
+  "single_wrap_content": "{system_prompt}\\n\\n{question}",
+  "system_prompt": "You are given a problem. Think about the problem and provide your reasoning. Place it between <reasoning> and </reasoning>. Then, provide the final answer (i.e., just one numerical value) between <answer> and </answer>."
+ },
+ "checks": {
+  "rows_src": 950000,
+  "rows_out": 950000,
+  "rows_exact_reference_form": 950000,
+  "data_source_identical": true,
+  "reward_model_identical": true,
+  "extra_info_identical": true,
+  "prompt_is_single_wrap_of_question": true,
+  "no_inner_markers_left": true,
+  "questions_with_trailing_whitespace": 916
+ },
+ "token_counts": {
+  "sample_rows": 2000,
+  "stride": 475,
+  "reference": {
+   "mean": 154.3015,
+   "max": 2295
+  },
+  "single_wrap": {
+   "mean": 129.9825,
+   "max": 2269
+  },
+  "removed_tokens": {
+   "min": 24,
+   "max": 26,
+   "mean": 24.319
+  },
+  "decoded_form_matches_transform": "2000/2000",
+  "decoded_form_mismatches": []
+ },
+ "samples": [
+  {
+   "row": 0,
+   "reference_rendered": "<bos><|turn>user\n<start_of_turn>user\nYou are given a problem. Think about the problem and provide your reasoning. Place it between <reasoning> and </reasoning>. Then, provide the final answer (i.e., just one numerical value) between <answer> and </answer>.\n\nAn octahedron has eight equilateral triangular faces, each with side length 1. Let $P$ be a point inside the octahedron, and let $d_1, d_2, \\ldots, d_8$ be the distances from $P$ to the centroids of the eight faces of the octahedron. Find the largest possible value of the sum $d_1 + d_2 + \\cdots + d_8$.<end_of_turn>\n<start_of_turn>model<turn|>\n<|turn>model\n",
+   "single_wrap_rendered": "<bos><|turn>user\nYou are given a problem. Think about the problem and provide your reasoning. Place it between <reasoning> and </reasoning>. Then, provide the final answer (i.e., just one numerical value) between <answer> and </answer>.\n\nAn octahedron has eight equilateral triangular faces, each with side length 1. Let $P$ be a point inside the octahedron, and let $d_1, d_2, \\ldots, d_8$ be the distances from $P$ to the centroids of the eight faces of the octahedron. Find the largest possible value of the sum $d_1 + d_2 + \\cdots + d_8$.<turn|>\n<|turn>model\n",
+   "reference_tokens": 175,
+   "single_wrap_tokens": 150
+  },
+  {
+   "row": 475,
+   "reference_rendered": "<bos><|turn>user\n<start_of_turn>user\nYou are given a problem. Think about the problem and provide your reasoning. Place it between <reasoning> and </reasoning>. Then, provide the final answer (i.e., just one numerical value) between <answer> and </answer>.\n\nFind the largest positive integer $n$ such that $4n^3 + 13n^2 + 16n + 3$ is divisible by 19.<end_of_turn>\n<start_of_turn>model<turn|>\n<|turn>model\n",
+   "single_wrap_rendered": "<bos><|turn>user\nYou are given a problem. Think about the problem and provide your reasoning. Place it between <reasoning> and </reasoning>. Then, provide the final answer (i.e., just one numerical value) between <answer> and </answer>.\n\nFind the largest positive integer $n$ such that $4n^3 + 13n^2 + 16n + 3$ is divisible by 19.<turn|>\n<|turn>model\n",
+   "reference_tokens": 123,
+   "single_wrap_tokens": 99
+  },
+  {
+   "row": 950,
+   "reference_rendered": "<bos><|turn>user\n<start_of_turn>user\nYou are given a problem. Think about the problem and provide your reasoning. Place it between <reasoning> and </reasoning>. Then, provide the final answer (i.e., just one numerical value) between <answer> and </answer>.\n\nAlex has $1.20. Her father gave her $0.75 as a gift. At the park, Alex found $0.35. She bought an ice cream that cost $2.10. How much money in cents does Alex have left?<end_of_turn>\n<start_of_turn>model<turn|>\n<|turn>model\n",
+   "single_wrap_rendered": "<bos><|turn>user\nYou are given a problem. Think about the problem and provide your reasoning. Place it between <reasoning> and </reasoning>. Then, provide the final answer (i.e., just one numerical value) between <answer> and </answer>.\n\nAlex has $1.20. Her father gave her $0.75 as a gift. At the park, Alex found $0.35. She bought an ice cream that cost $2.10. How much money in cents does Alex have left?<turn|>\n<|turn>model\n",
+   "reference_tokens": 141,
+   "single_wrap_tokens": 117
+  }
+ ]
+}

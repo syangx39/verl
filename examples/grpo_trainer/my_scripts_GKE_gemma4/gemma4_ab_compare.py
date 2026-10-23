@@ -17,9 +17,14 @@ the same 256 prompts in both. The script checks that, then reports:
   3. Per-step diagnostics from the driver logs: rollout_corr/k3_kl, actor/grad_norm, actor/entropy,
      response_length/mean, critic/score/mean, timing_s/step (medians over windows).
 
+With --train-template-change strip_inner_gemma3 (PR #11 A2), B's training prompts are allowed to differ from A's by
+exactly that declared template change: A's input is mapped to its expected B form before the same exact equality check,
+so a different question or instruction still fails. Eval prompts are always compared strictly.
+
 Usage:
     python3 gemma4_ab_compare.py --a bf16=<eval_dump_dir_A> --a-log <driver_log_A> \\
-        --b fp32=<eval_dump_dir_B> --b-log <driver_log_B> [--max-step 60] [--out-json x.json] [--out-md x.md]
+        --b fp32=<eval_dump_dir_B> --b-log <driver_log_B> [--max-step 60] [--out-json x.json] [--out-md x.md] \\
+        [--train-template-change strip_inner_gemma3]
 """
 
 from __future__ import annotations
@@ -81,9 +86,35 @@ def _paired(a, b, B=2000, seed=0):
 
 STEP_RE = re.compile(r"\bstep:(\d+)\s+-\s+(.*)")
 
+# --train-template-change strip_inner_gemma3 (PR #11 A2). verl's rollout dump stores the prompt decoded with
+# skip_special_tokens=True, so the reference (double-wrapped) and A2 (single-wrapped) training prompts read
+#   A: "user\n<start_of_turn>user\n" + core + "<end_of_turn>\n<start_of_turn>model\nmodel\n"
+#   B: "user\n" + core.strip() + "\nmodel\n"
+# with the same core (instructions + question). .strip() is the Gemma-4 chat template's own `message['content'] | trim`:
+# with the inner markers gone, whitespace at the end of a question (~0.15% of rows) is no longer shielded by them.
+# The mode maps every A input to its expected B form and then applies the same exact-equality check as the strict
+# mode; any other difference (question, instructions) still fails.
+_TEMPLATE_CHANGES = {
+    "strip_inner_gemma3": ("user\n<start_of_turn>user\n", "<end_of_turn>\n<start_of_turn>model\nmodel\n", "user\n", "\nmodel\n"),
+}
 
-def _check_batch(rows, where, rows_per_step, group_size):
-    """Validate one training dump; return {qid: (input_hash, ground_truth_hash)}. Exits on any violation."""
+
+def _template_transform(name):
+    if not name or name == "none":
+        return None
+    pre_a, suf_a, pre_b, suf_b = _TEMPLATE_CHANGES[name]
+
+    def f(s):
+        s = "" if s is None else str(s)
+        if not (s.startswith(pre_a) and s.endswith(suf_a) and len(s) >= len(pre_a) + len(suf_a)):
+            raise SystemExit(f"[train] A input is not in the form expected by --train-template-change {name}: {s[:80]!r}")
+        return pre_b + s[len(pre_a):len(s) - len(suf_a)].strip() + suf_b
+    return f
+
+
+def _check_batch(rows, where, rows_per_step, group_size, transform=None):
+    """Validate one training dump; return {qid: (input_hash, ground_truth_hash)}. Exits on any violation.
+    With `transform`, the input hash is taken of transform(input) (A side of a declared template change)."""
     if len(rows) != rows_per_step:
         raise SystemExit(f"[train] {where}: {len(rows)} rows, expected {rows_per_step}")
     groups = {}
@@ -96,7 +127,7 @@ def _check_batch(rows, where, rows_per_step, group_size):
     for q, g in groups.items():
         if len(g) != group_size:
             raise SystemExit(f"[train] {where}: qid {q} has {len(g)} rows, expected {group_size}")
-        ins = {_h(r.get("input")) for r in g}
+        ins = {_h(transform(r.get("input")) if transform else r.get("input")) for r in g}
         gts = {_h(r.get("gts")) for r in g}
         if len(ins) != 1 or len(gts) != 1:
             raise SystemExit(f"[train] {where}: qid {q} mixes inputs or ground truths inside its group")
@@ -144,11 +175,17 @@ def main() -> int:
     ap.add_argument("--replicate", action="append", default=[],
                     help="label=eval_dump_dir of another run on the same eval set; its step-0 accuracy joins the "
                          "identical-weights band in the plot")
+    ap.add_argument("--train-template-change", default="none", choices=["none", *_TEMPLATE_CHANGES],
+                    help="declared training-prompt template change between A and B (eval prompts stay strict): "
+                         "strip_inner_gemma3 = B's training prompts are A's with the inner Gemma-3 turn template removed")
     args = ap.parse_args()
     la, da = args.a.split("=", 1)
     lb, db = args.b.split("=", 1)
+    tmpl = _template_transform(args.train_template_change)
+    same_prompts = tmpl is None
 
-    res = {"a": {"label": la, "dir": da}, "b": {"label": lb, "dir": db}, "eval": {}, "train": {}, "diag": {}}
+    res = {"a": {"label": la, "dir": da}, "b": {"label": lb, "dir": db}, "eval": {}, "train": {}, "diag": {},
+           "train_template_change": args.train_template_change}
     va = {s: _load_val(os.path.join(da, "val", f"{s}.jsonl")) for s in _steps(da, "val") if s <= args.max_step}
     vb = {s: _load_val(os.path.join(db, "val", f"{s}.jsonl")) for s in _steps(db, "val") if s <= args.max_step}
     common = sorted(set(va) & set(vb))
@@ -171,23 +208,26 @@ def main() -> int:
     for s in tsteps:
         ra = list(_rows(os.path.join(da, "train", f"{s}.jsonl")))
         rb = list(_rows(os.path.join(db, "train", f"{s}.jsonl")))
-        ga_ = _check_batch(ra, f"A step {s}", args.rows_per_step, args.group_size)
+        ga_ = _check_batch(ra, f"A step {s}", args.rows_per_step, args.group_size, transform=tmpl)
         gb_ = _check_batch(rb, f"B step {s}", args.rows_per_step, args.group_size)
         if set(ga_) != set(gb_):
             raise SystemExit(f"[train] step {s}: prompt qid sets differ between A and B")
         bad = [q for q in ga_ if ga_[q] != gb_[q]]
         if bad:
-            raise SystemExit(f"[train] step {s}: {len(bad)} qids with different input/ground truth between A and B")
+            what = "input/ground truth" if same_prompts else f"input (after {args.train_template_change}) / ground truth"
+            raise SystemExit(f"[train] step {s}: {len(bad)} qids with different {what} between A and B")
         acc = lambda rr: 100 * sum(float(r["acc"]) for r in rr) / len(rr)  # noqa: E731
         fmt = lambda rr: 100 * sum(float(r["fmt"]) for r in rr) / len(rr)  # noqa: E731
-        per[s] = {"same_prompts": True, "acc_a": acc(ra), "acc_b": acc(rb), "fmt_a": fmt(ra), "fmt_b": fmt(rb)}
+        per[s] = {"same_prompts": same_prompts, "acc_a": acc(ra), "acc_b": acc(rb), "fmt_a": fmt(ra), "fmt_b": fmt(rb)}
     res["train"]["per_step"] = per
     res["train"]["batch_checks"] = {
         "steps": [tsteps[0], tsteps[-1]] if tsteps else None, "n_steps": len(tsteps),
         "rows_per_step": args.rows_per_step, "groups_per_step": args.rows_per_step // args.group_size,
         "group_size": args.group_size,
         "checks": "complete step coverage; exact rows per step; groups of exactly group_size per qid; one input and one "
-                  "ground truth per group; identical qid -> (input, ground truth) between A and B",
+                  "ground truth per group; identical qid -> (input, ground truth) between A and B"
+                  + ("" if same_prompts else f", where A's input is first mapped by the declared template change "
+                                              f"{args.train_template_change}"),
     }
 
     def window(lo, hi):
@@ -223,11 +263,14 @@ def main() -> int:
         if row:
             res["diag"][f"{lo}-{hi}"] = row
 
+    prompt_label = "identical prompts" if same_prompts else "same raw questions, different training templates"
     L = [f"### Paired A/B: `{lb}` (B) vs `{la}` (A)", ""]
     L.append(f"- A: `{da}`  B: `{db}`; eval checkpoints in common: {common}; training steps in common: "
              f"{tsteps[0] if tsteps else '-'}–{tsteps[-1] if tsteps else '-'}; training dumps validated at every step "
              f"({args.rows_per_step} rows = {args.rows_per_step // args.group_size} x {args.group_size}, one input / ground "
-             f"truth per group, identical qid -> input / ground truth in A and B).")
+             f"truth per group, identical qid -> input / ground truth in A and B"
+             + ("" if same_prompts else f" after the declared training-template change `{args.train_template_change}`; "
+                                        "eval prompts compared strictly") + ").")
     L.append("")
     L.append("| Eval step | A acc (%) | B acc (%) | B − A (pp) | paired SE | bootstrap 95% | +gained / −lost (B vs A) | "
              "A vs own step 0 (pp) | B vs own step 0 (pp, 95%) | identical outputs |")
@@ -243,7 +286,7 @@ def main() -> int:
                  f"{x['identical_outputs']} / {x['n']} |")
     L.append("")
     if res["train"].get("windows"):
-        L.append("| Training steps (identical prompts) | n | A train acc (%) | B train acc (%) | B − A mean (pp) | SD of per-step B − A (pp) | steps with B ahead | "
+        L.append(f"| Training steps ({prompt_label}) | n | A train acc (%) | B train acc (%) | B − A mean (pp) | SD of per-step B − A (pp) | steps with B ahead | "
                  "A format (%) | B format (%) |")
         L.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|")
         for w in res["train"]["windows"]:
@@ -270,7 +313,7 @@ def main() -> int:
             if os.path.exists(p):
                 rows = list(_rows(p))
                 rep[lab] = 100 * sum(float(r["acc"]) for r in rows) / len(rows)
-        _plot(res, la, lb, ga, gb, rep, args.plot)
+        _plot(res, la, lb, ga, gb, rep, args.plot, prompt_label)
     return 0
 
 
@@ -278,7 +321,7 @@ def _rolling(x, w):
     return [sum(x[max(0, i - w + 1): i + 1]) / (i - max(0, i - w + 1) + 1) for i in range(len(x))]
 
 
-def _plot(res, la, lb, ga, gb, rep, path):
+def _plot(res, la, lb, ga, gb, rep, path, prompt_label="identical prompts"):
     import matplotlib
 
     matplotlib.use("Agg")
@@ -287,7 +330,7 @@ def _plot(res, la, lb, ga, gb, rep, path):
     plt.rcParams.update({"font.size": 10, "axes.grid": True, "grid.alpha": 0.35, "axes.facecolor": "#fafafa"})
     ca, cb = "#7f7f7f", "#1f77b4"
     fig, axes = plt.subplots(2, 2, figsize=(14, 9.5), dpi=150)
-    fig.suptitle(f"Gemma-4 E2B rl-05, seed 1, 16n64g: {lb} vs {la} (identical prompts per step)", fontsize=13,
+    fig.suptitle(f"Gemma-4 E2B rl-05, seed 1, 16n64g: {lb} vs {la} ({prompt_label} per step)", fontsize=13,
                  fontweight="bold")
 
     ax = axes[0, 0]
@@ -320,7 +363,7 @@ def _plot(res, la, lb, ga, gb, rep, path):
     ax.plot(ts, bb, color=cb, alpha=0.25, lw=1)
     ax.plot(ts, _rolling(aa, 10), color=ca, lw=2.2, label=f"{la}: 10-step rolling mean")
     ax.plot(ts, _rolling(bb, 10), color=cb, lw=2.2, label=f"{lb}: 10-step rolling mean")
-    ax.set_title("B. Training accuracy (T=0.8, 2,048 completions/step, same prompts)")
+    ax.set_title(f"B. Training accuracy (T=0.8, 2,048 completions/step, {prompt_label})")
     ax.set_xlabel("Training step")
     ax.set_ylabel("Sampled accuracy (%)")
     ax.legend(loc="lower right", fontsize=8.5)
@@ -337,7 +380,7 @@ def _plot(res, la, lb, ga, gb, rep, path):
         ax.hlines(w["diff_mean"], lo, hi, color="#2ca02c", lw=2.5)
         ax.annotate(f"{w['diff_mean']:+.2f} ({w['n_positive']}/{w['n']} > 0)", ((lo + hi) / 2, w["diff_mean"]),
                     textcoords="offset points", xytext=(0, 8), ha="center", fontsize=8.5, color="#2ca02c")
-    ax.set_title(f"C. Train-acc difference {lb} − {la}, identical prompts (window means; descriptive)")
+    ax.set_title(f"C. Train-acc difference {lb} − {la}, {prompt_label} (window means; descriptive)")
     ax.set_xlabel("Training step")
     ax.set_ylabel("pp")
     ax.legend(loc="upper left", fontsize=8.5)
