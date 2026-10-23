@@ -6,7 +6,7 @@ Optimize the already-learning Gemma-4 E2B FP32 recipe by isolating the effects o
 
 PR #10 established learning, not a plateau: held-out accuracy rose **35.76% → 39.62% (+3.86 pp)** at step 100, with question-paired bootstrap 95% **[+2.82, +4.96] pp**. Its run was deliberately stopped at step 107; only steps 0–100 are the comparison reference. Qwen results motivate optimization but are not a Gemma acceptance threshold.
 
-**Status:** A1 (reward) is complete: not a candidate (see [A1 result](#a1-result-100-steps-complete)). A2 (prompt) is prepared and checked, and launches next. A3a (LR 2e-6) is predeclared. See the [execution record](#execution-record). The initial commit was plan only.
+**Status:** A1 (reward) is complete: not a candidate (see [A1 result](#a1-result-100-steps-complete)). A2 (prompt) is running; its start check passed. A3a (LR 2e-6) is predeclared and follows A2. See the [execution record](#execution-record). The initial commit was plan only.
 
 ## Plan
 
@@ -99,7 +99,7 @@ Question-paired intervals do not measure training-seed uncertainty. Consecutive 
 |---|---|---|---:|---:|---|---|
 | A0 | PR #10 FP32 seed 1, steps 0–100 | Reported window verified; full run stopped at 107 | 35.76% | 39.62% | Reference | See PR #10 |
 | A1 | `gemma4_e2b_rl05fp32_a1fmt0_16n64g_s100_seed1_1023_0058`: `REWARD_FMT_WEIGHT_TRAIN=0` + `REWARD_EVAL_QUESTIONS` (eval keeps 0.1) | Valid: exit 0, guards PASS, 100 / 100 steps, dumps complete | 36.18% | 38.96% | −0.66 [−1.66, +0.30] | 3 h 22 min; not a candidate (format compliance falls, no detectable accuracy change) |
-| A2 | Pending: training template applied once | Not run | — | — | — | — |
+| A2 | `gemma4_e2b_rl05fp32_a2wrap1_16n64g_s100_seed1_1023_0423`: `GEMMA_TRAIN_FILE=train_single_wrap.parquet` (format coefficient 0.1, eval unchanged) | Running (started 2026-10-23T04:23Z); start check passed | 36.18% | — | — | — |
 | A3 | Predeclared: A3a LR `2e-6` (constant, no warmup); A3b LR `4e-6` only if A3a meets the rule above | Not run | — | — | — | — |
 
 Add reproducible launch/config evidence, per-question/per-step summaries and plots alongside each result. Preserve failed or inconclusive observations rather than deleting or pooling them.
@@ -200,7 +200,7 @@ A row whose `extra_info["question"]` hashes into that set keeps the canonical 0.
 
 ### A2 record: training template applied once
 
-Prepared while A1 runs; not launched. A2 starts only after A1 is complete and recorded.
+Prepared while A1 ran. A2 was launched after A1 was complete and recorded.
 
 **Training data** ([`gemma4_build_single_wrap_train.py`](gemma4_build_single_wrap_train.py), [manifest](recipe_ablation/a2_prompt/train_single_wrap_manifest.json))
 - Source `train.parquet` (sha256 `5404981a…`, unchanged) → `train_single_wrap.parquet` (sha256 `053185b1…`).
@@ -235,6 +235,20 @@ One side effect is inherent to applying the template once. The Gemma-4 chat temp
 - Frozen launcher and wrapper, `SEED=1`, `NNODES=16`, `TOTAL_STEPS=100`.
 - The only change is `GEMMA_TRAIN_FILE=…/train_single_wrap.parquet`.
 - Format coefficient 0.1 everywhere: no A1 variables, which the launch script unsets explicitly. LR 1e-6. Eval unchanged.
+
+**Launch.** `gemma4_e2b_rl05fp32_a2wrap1_16n64g_s100_seed1_1023_0423`, started 2026-10-23T04:23Z, after A1 was complete and recorded, on an idle cluster. Provenance line: train sha256 `053185b1…`, reward `d0bde7b8…` (no A1 variables set, so default behavior), launcher `7d511735…`, wrapper `2a37aad5…`.
+
+**Start check** (from the run's own dumps, 2026-10-23T04:43Z):
+
+| Check | Result |
+|---|---|
+| Training rows, steps 1–3 (2,048 each) | `score = acc + 0.1·fmt` on every row; score values {0, 0.1, 1.0, 1.1}; no `fmt_coef` / `eval_scope` keys, so the A1 override is absent; no inner turn markers in any input |
+| Validation, step 0 (5,000 rows) | same `qid`s, identical inputs and ground truths as A0's step 0 (strict); `score = acc + 0.1·fmt`; accuracy 36.18%, inside the 35.76–36.74% range of earlier step-0 evals |
+| `gemma4_ab_compare.py --train-template-change strip_inner_gemma3`, steps 1–7 | passes (2,048 rows, 256 × 8, A0's input mapped to the single-wrapped form equals A2's, same ground truths) |
+| Same comparison in strict mode | fails as expected (`step 1: 256 qids with different input/ground truth`) |
+| Node prep / RoPE guard / tracebacks | PASS 16 / 16; PASS 64 / 64; none |
+
+Early behavior, descriptive only: with the single-wrapped prompt the initial policy formats less. Training format rate is 76.8% at step 1 (A0: 97.2%), recovering to 87.2% by step 3. Training accuracy over steps 1–7 is 58.24% vs 59.09% for A0 on the same raw questions.
 
 ## Initial validation and scope
 
