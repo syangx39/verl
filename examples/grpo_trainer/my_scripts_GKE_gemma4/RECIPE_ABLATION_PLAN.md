@@ -56,11 +56,22 @@ Removing format credit mechanically lowers total reward. Compare accuracy and fo
 
 Eval prompt tokens remain frozen for this screen. This measures the effect of changing training prompts under the existing eval condition. A future experiment that also changes eval prompts requires a separately versioned protocol and a re-evaluated reference; it must not be mixed into this comparison.
 
+**Decision (2026-10-23): A2 adds no single-wrapped diagnostic eval; the main eval stays frozen.** A2 answers one question: does changing only the training prompt improve results under the same evaluation protocol? If the result is hard to interpret, a separate diagnostic will be designed, and A0 and A2 will be compared under the same diagnostic condition.
+
 **A3 — LR**
 
-- [ ] Predeclare LR candidate value(s) in the result ledger; each value is its own fresh run.
+- [x] Predeclare LR candidate value(s) in the result ledger; each value is its own fresh run. — decided 2026-10-23, see below.
 - [ ] Confirm resolved and logged LR match the intended constant value, with no warmup or scheduler change.
 - [ ] Restore A0 reward and prompt settings before launching.
+
+**Predeclared LR plan (2026-10-23):**
+- **A3a:** LR `2e-6`, constant, no warmup, 100 steps, seed 1. Reward 0.1 and the original double-wrapped prompt, as in A0. Fresh start from the initial checkpoint.
+- **A3b:** LR `4e-6`, run only if A3a meets all three conditions:
+  - its fixed step-100 accuracy is higher than A0's;
+  - the question-paired interval vs A0 supports an improvement;
+  - training is stable (trainer–sampler log-prob metrics, entropy, gradient norm and response length show no instability).
+- If A3a's gain is small and its interval spans zero, A3b is not launched automatically.
+- A3b, if run, also starts fresh from the initial checkpoint.
 
 ### 4. Report all arms on the same basis
 
@@ -89,7 +100,7 @@ Question-paired intervals do not measure training-seed uncertainty. Consecutive 
 | A0 | PR #10 FP32 seed 1, steps 0–100 | Reported window verified; full run stopped at 107 | 35.76% | 39.62% | Reference | See PR #10 |
 | A1 | `gemma4_e2b_rl05fp32_a1fmt0_16n64g_s100_seed1_1023_0058`: `REWARD_FMT_WEIGHT_TRAIN=0` + `REWARD_EVAL_QUESTIONS` (eval keeps 0.1) | Running (started 2026-10-23T00:58Z); coefficient confirmed in worker dumps | 36.18% | — | — | — |
 | A2 | Pending: training template applied once | Not run | — | — | — | — |
-| A3 | Pending: predeclared constant LR value(s) | Not run | — | — | — | — |
+| A3 | Predeclared: A3a LR `2e-6` (constant, no warmup); A3b LR `4e-6` only if A3a meets the rule above | Not run | — | — | — | — |
 
 Add reproducible launch/config evidence, per-question/per-step summaries and plots alongside each result. Preserve failed or inconclusive observations rather than deleting or pooling them.
 
@@ -130,6 +141,15 @@ A row whose `extra_info["question"]` hashes into that set keeps the canonical 0.
 
 - Node prep PASS on 16 / 16 nodes; RoPE guard PASS on 64 / 64 ranks; no tracebacks.
 - Step-0 held-out accuracy is 36.18% (format 94.36%). This is inside the 35.76–36.74% range of the earlier step-0 evals of the same initial weights.
+
+**Interim observation (as of step 83; not a result; the arm runs to step 100):**
+- Removing the format reward clearly lowers format compliance. Training format rate is 91.5% in steps 21–40 and 84.6% in steps 41–60, and 71% of completions are formatted at step 83. A0 stays at 99.8%.
+- The unformatted completions still contain `<answer>…</answer>` (426 / 430 at step 40, 258 / 259 at step 53). What disappears is the `<reasoning>…</reasoning>` wrapper.
+- Missing tags do not mean missing reasoning. Every unformatted completion with an answer still has at least 200 characters of text before `<answer>`: 426 / 426 at step 40, 258 / 258 at step 53, 598 / 598 at step 83. The median is 1,291 / 3,452 / 3,349 characters, against 4,117 / 3,826 / 2,761 for formatted completions.
+- No clear accuracy change has been detected so far:
+  - held-out at steps 20 / 40 / 60 is +0.04 / −0.40 / −0.40 pp vs A0, and every paired interval includes 0;
+  - training accuracy on identical prompts differs by −0.03 pp over steps 1–62.
+- This does not show that accuracy is unaffected.
 
 ### A2 record: training template applied once
 
