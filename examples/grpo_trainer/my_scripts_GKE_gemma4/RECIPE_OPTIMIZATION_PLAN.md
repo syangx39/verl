@@ -6,7 +6,7 @@ Find a better **100-step Gemma-4 E2B FP32 recipe** by testing learning-rate deca
 
 PR #11 is merged at `39ca638358c121b83b0f8a1c7646932ca993250a`. Its [result ledger](RECIPE_ABLATION_PLAN.md#result-ledger-update-as-experiments-finish) is the frozen source for A0–A3. A3a improved from **36.06% to 40.96% (+4.90 pp)**; vs A0 at step 100 it gained **+1.34 pp, question-paired 95% CI [+0.32, +2.44]**. LR 4e-6 collapsed, and removing format reward or the inner training wrapper did not produce a detectable accuracy improvement under frozen eval.
 
-**Status: implementation and local validation committed (section 4.2); GPU preflight and launches pending.** No PR #12 GPU job has run yet: the RayCluster's node pool has had no nodes since about 2026-10-23T19:36Z. The plan and PR description will be updated with commands, checks and results as work proceeds.
+**Status: GPU preflight passed (§4.3); A4 running since 2026-10-23T21:05Z.** The RayCluster moved to node pool `a4x-highgpu-4g-a4x-pool-4` (§4.3). The plan and PR description are updated as each arm completes.
 
 ## Plan
 
@@ -88,19 +88,21 @@ Keep **eval every 20 steps** for this screen. A6 step 40 and A3a step 80 each re
 
 ### 4. Implement and validate before the next GPU runs
 
-- [x] Archive the A3a control manifest, exact launch command/resolved config, model/data/code hashes and result paths. — [`a3a_control/manifest.json`](recipe_optimization/a3a_control/manifest.json) and the 922-key runtime config [`resolved_config.json`](recipe_optimization/a3a_control/resolved_config.json), extracted from A3a's driver log. Model file hashes are still to be recorded at the GPU preflight.
-- [ ] Configure A4's native cosine, export all 100 update-used learning rates and verify the zero-based update index/horizon against the formula below. Compare the intended MaxText schedule using its actual resolved config before claiming TPU parity; then verify the GPU trainer path on a short smoke. — Configured in [`g4run_pr12.sh`](recipe_optimization/launch/g4run_pr12.sh). The re-implemented verl lambda gives all 100 values and PASSes the formula checks: [`used_lr_pure.json`](recipe_optimization/a4_cosine/used_lr_pure.json). Still open: verl's own scheduler on the pod (`--use-verl`), the GPU trainer path (section 4.2) and MaxText.
-- [ ] Make each arm's override explicit in the launcher and resolved config; compare against A3a and reject unintended recipe changes. Keep training-only changes out of eval settings. — Overrides are explicit in [`g4run_pr12.sh`](recipe_optimization/launch/g4run_pr12.sh). [`gemma4_config_diff.py`](gemma4_config_diff.py) compares runtime configs and fails on any undeclared key. On PR #11's logs, A3b vs A3a differs only in the declared LR plus 6 run-identity keys. The per-arm check runs at each launch.
-- [ ] Verify A5's probability convention at T=1, including raw/processed sampler log-probs and retained top-k/top-p filters. A training log-prob mismatch must not be mistaken for a useful exploration change. — Code path checked at the pin (section 4.2): sampler log-probs are processed, i.e. temperature + top-k/top-p and renormalized; trainer log-probs are full-vocabulary at temperature T. So T=1 can raise `k3_kl` mechanically. Still pending: the installed vLLM version on the pod and A5's step-1 `k3_kl`.
+- [x] Archive the A3a control manifest, exact launch command/resolved config, model/data/code hashes and result paths. — [`a3a_control/manifest.json`](recipe_optimization/a3a_control/manifest.json), the 922-key runtime config [`resolved_config.json`](recipe_optimization/a3a_control/resolved_config.json) extracted from A3a's driver log, and the model file hashes [`model_manifest.sha256`](recipe_optimization/a3a_control/model_manifest.sha256).
+- [x] Configure A4's native cosine, export all 100 update-used learning rates and verify the zero-based update index/horizon against the formula below. Compare the intended MaxText schedule using its actual resolved config before claiming TPU parity; then verify the GPU trainer path on a short smoke. — Configured in [`g4run_pr12.sh`](recipe_optimization/launch/g4run_pr12.sh). The pure export and verl's own scheduler class give identical values ([`used_lr_pure.json`](recipe_optimization/a4_cosine/used_lr_pure.json), [`used_lr_verl.json`](recipe_optimization/a4_cosine/used_lr_verl.json)).
+  - GPU trainer path, checked on A4's own first updates (§4.2): rank 0 printed `Total steps: 100, num_warmup_steps: 0`. The logged post-step `actor/lr` is 1.9998766e-6 at step 1 and 1.9995066e-6 at step 2, equal to the export. The monitor checks every step.
+  - **MaxText is not verified.** That needs the TPU team's resolved config and update-used LR sequence before any parity claim.
+- [x] Make each arm's override explicit in the launcher and resolved config; compare against A3a and reject unintended recipe changes. Keep training-only changes out of eval settings. — Overrides are explicit in [`g4run_pr12.sh`](recipe_optimization/launch/g4run_pr12.sh). [`gemma4_config_diff.py`](gemma4_config_diff.py) compares runtime configs and fails on any undeclared key. At launch, the A6 smoke and A4 passed with only their declared keys plus run identity ([A4 diff](recipe_optimization/a4_cosine/config_diff.json), [smoke diff](recipe_optimization/a6_smoke/config_diff.json)). A5 and A6 are checked at their own launches.
+- [ ] Verify A5's probability convention at T=1, including raw/processed sampler log-probs and retained top-k/top-p filters. A training log-prob mismatch must not be mistaken for a useful exploration change. — Code path checked at the pin and in the installed vLLM 0.29.0 (§4.2): sampler log-probs are processed (temperature + top-k/top-p, renormalized); trainer log-probs are full-vocabulary at temperature T. So T=1 can raise `k3_kl` mechanically. Remaining: A5's step-1 `k3_kl`.
 - [x] Generalize comparison/signal tools that currently assume 2,048 rows and groups of eight. For A6 require **4,096 rows, exactly 256 groups × 16**, consistent prompt/answer per group and unchanged ordered prompt membership. Add a valid n=16 case and negative incomplete/incorrect-group cases; do not disable identity checks. — Each run is now validated against its own declared shape, with the same identity checks:
-  - [`gemma4_ab_compare.py`](gemma4_ab_compare.py): `--a/--b-rows-per-step`, `--a/--b-group-size`. Tests: 1 valid 8-vs-16 case plus 5 negative cases (shared shape on n=16, ragged 15/17-row groups, a missing row, a different question, a different group count).
+  - [`gemma4_ab_compare.py`](gemma4_ab_compare.py): `--a/--b-rows-per-step`, `--a/--b-group-size`. Tests: 1 valid 8-vs-16 case plus 5 negative cases. The real smoke dumps pass against A3a.
   - [`gemma4_signal_density.py`](gemma4_signal_density.py): `--shape` validation and an n=8-equivalent mixed share.
   - The stop monitor accepts only complete 256 × n dumps.
-- [ ] Confirm global token-mean loss normalization and one optimizer update across A6's full batch. Record gradient-accumulation/microbatch settings; more completions must not silently become multiple optimizer steps. — Confirmed in code (section 4.2): one optimizer update per step for any n. Still to observe in the A6 smoke.
-- [ ] Run an **A6 two-step smoke** before its 100-step run to check memory, the 256 × 16 grouping contract and completion of both updates. Record memory and component timing; two startup-heavy steps do not establish steady-state throughput. The proposed 1.4–1.9× step-time / 4.5–6 h budget is an estimate to replace with measurements, not a performance result. — Arm `A6SMOKE` of [`g4run_pr12.sh`](recipe_optimization/launch/g4run_pr12.sh), with an observe-only monitor.
-- [x] Implement and test the predeclared stop rules in §4.1, including consecutive-step counting, complete-dump validation, metric freshness and experiment-specific termination. Do not run unattended until the monitor can observe each completed step promptly. — [`gemma4_stop_monitor.py`](gemma4_stop_monitor.py), with 38 checks in [`test_gemma4_stop_monitor.py`](test_gemma4_stop_monitor.py). Metric freshness is measured by the monitor; its live latency still has to be confirmed in the smoke before any unattended run (section 4.2).
-- [ ] Run the existing reward-scope/template-identity tests and the changed schedule/batch-contract checks. Keep code and manifests identical across nodes; record probe results. — Done locally: template identity (7/7), new shape tests (7/7 and 8/8), config diff (10/10), LR export (6/6). The reward-scope and RoPE-guard tests need the pod image (`torch`, `math_verify`).
-- [ ] Launch each authorized arm from the initial checkpoint only after its preflight passes.
+- [x] Confirm global token-mean loss normalization and one optimizer update across A6's full batch. Record gradient-accumulation/microbatch settings; more completions must not silently become multiple optimizer steps. — Code at the pin (§4.2): mini-batch = 256 × n = 4,096, which is 64 per GPU, so 1 iteration and one optimizer/scheduler step per training step. Micro-batches (`use_dynamic_bsz`, 16,384 tokens per GPU) only split accumulation. In the smoke both updates completed, `actor/lr` was logged once per step, and peak memory was unchanged.
+- [x] Run an **A6 two-step smoke** before its 100-step run to check memory, the 256 × 16 grouping contract and completion of both updates. Record memory and component timing; two startup-heavy steps do not establish steady-state throughput. The proposed 1.4–1.9× step-time / 4.5–6 h budget is an estimate to replace with measurements, not a performance result. — Passed; see §4.3. At step 2 the smoke's step time was 1.28× A3a's, with 2.0× the tokens and unchanged peak memory. Steady-state cost will come from the A6 run itself.
+- [x] Implement and test the predeclared stop rules in §4.1, including consecutive-step counting, complete-dump validation, metric freshness and experiment-specific termination. Do not run unattended until the monitor can observe each completed step promptly. — [`gemma4_stop_monitor.py`](gemma4_stop_monitor.py), with 38 checks. Replays on the real PR #11 dumps: A3b triggers first at step 57; A0, A1 and A3a never trigger. In the smoke, metric lines arrived about 31 s after their dumps (§4.3).
+- [x] Run the existing reward-scope/template-identity tests and the changed schedule/batch-contract checks. Keep code and manifests identical across nodes; record probe results. — All pass on the pod after node prep (§4.3). Node prep makes every node identical to the A3a patch hashes.
+- [ ] Launch each authorized arm from the initial checkpoint only after its preflight passes. — A4 launched at 2026-10-23T21:05Z after its preflight. A5 and A6 are pending.
 
 No production launch commands are promised in this initial draft: exact overrides will be added with the implementation, rather than presenting unsupported scheduler flags as runnable.
 
@@ -228,6 +230,71 @@ A single small held-out decrease or one unusual training batch does not trigger 
 - [`gemma4_signal_density.py`](gemma4_signal_density.py) validates `--shape label=256x16`. It also reports `mixed_n8eq`, the expected correctness-mixed share had 8 of each group's completions been drawn, because the raw n=16 share rises mechanically with n.
 - [`gemma4_eval_report.py`](gemma4_eval_report.py) labels completions per step from the dumps, and the training temperature via `--train-temp`.
 
+### 4.3 GPU preflight results (2026-10-23)
+
+**Cluster change.**
+
+- PR #11's node pool (`a4x-highgpu-4g-a4x-pool-7`) has had no nodes since about 19:36Z.
+- At the user's request, the RayCluster's `nodeSelector` was patched to **`a4x-highgpu-4g-a4x-pool-4`** at 20:27Z. The previous spec is backed up.
+- Unchanged: the machine type (a4x-highgpu-4g, GB200), 16 nodes × 4 GPUs, the container image digest (`verl-disagg-cu130-arm64@sha256:70e1f1ed…`) and the code. Node prep rebuilds the pin and its managed patches to the same hashes A3a recorded: `monkey_patch` `9be46b09…`, `transformer_impl` `9a43adb8…`.
+- The physical nodes differ from the A3a control's.
+- The ComputeDomain is Ready, with all 16 nodes in one NVLink clique. It still lists one stale node from pool-7, in a different clique.
+- Runtime versions: Python 3.12.3, torch 2.13.0+cu130, vLLM 0.29.0, Ray 2.55.1, transformers 5.12.1 ([`versions.txt`](recipe_optimization/preflight/versions.txt)).
+
+**Preflight checks.** Evidence is in [`recipe_optimization/preflight/`](recipe_optimization/preflight/).
+
+| Check | Result |
+|---|---|
+| Files on the pod vs the branch | 22 files, including frozen launcher, wrapper, reward and patches: all sha256 identical |
+| Node prep, pool-4 | PASS on 16 nodes: managed patch hashes as A3a, pinned `math-verify` installed |
+| Pod tests | All PASS after node prep: reward scope; RoPE guard 14/14; template 7/7; group shapes 7/7; signal-density shapes 8/8; config diff 10/10; stop monitor 38/38 |
+| A4 learning rates from verl's own `get_cosine_schedule_with_warmup` | 6/6 checks; identical to `used_lr_pure.json` (maximum difference 0) — [`used_lr_verl.json`](recipe_optimization/a4_cosine/used_lr_verl.json) |
+| Sampler log-prob convention, installed vLLM | `processed_logprobs` is applied in vLLM's top-k/top-p sampler path; verl default `processed_logprobs` |
+| Model files | [`model_manifest.sha256`](recipe_optimization/a3a_control/model_manifest.sha256): sha256 of all 21 files in the model directory, e.g. `model.safetensors` `2db5482b…` |
+
+Before node prep ran on the fresh pods, the reward-scope and RoPE-guard tests failed. `math-verify` was not yet installed and the patches were not yet applied. Both passed after node prep.
+
+**Stop-monitor replay on the PR #11 dumps** (never acting):
+
+| Run vs reference | Rule set | Triggers (rule, step) | Alerts |
+|---|---|---|---|
+| A3b vs A3a | matched (A4/A6) | **`k3_kl` 57**, `train_acc` 65, `missing_answer` 66, held-out 80 (−24.64 pp) | 0 |
+| A3b vs A3a | A5 offset | identical | 0 |
+| A3a vs A0 | matched | none | 0 |
+| A0 vs A3a | matched | none | 0 |
+| A1 vs A3a | matched | none | 0 |
+
+The held-out values reproduce the recorded curves; for example, A3a vs its own step 0 is +4.90 pp at step 100.
+
+**A6 2-step smoke:** `gemma4_e2b_rl05fp32_a6n16smoke_16n64g_s2_seed1_1023_2039`, launched at 20:39Z. Evidence is in [`recipe_optimization/a6_smoke/`](recipe_optimization/a6_smoke/).
+
+- **Valid run:**
+  - Driver `exit_code=0`, and both updates completed.
+  - Runtime config vs A3a passes, with only the declared keys.
+  - The guard check passes for all 64 ranks.
+  - The only traceback is the known exit-phase `DataLoader worker … killed`.
+- **Batch contract:** both dumps have 4,096 rows = 256 groups × 16. They pass the per-run-shape comparison against A3a's 256 × 8 dumps: identical qid → input / ground truth.
+- **Metric latency:** each step's metric line became visible about **31 s** after the monitor saw the step's dump (30.7 s and 31.0 s). Step 1's line arrived before step 2's dump, versus 13–18 steps late in PR #11. The monitor raised no alert.
+- **Step 1 slowdown on one node:** the 4 ranks of one node (44–47, pod `q74mq`) reached their first collective about 7 minutes after the other 60. They were CPU-busy in `compute_log_prob`, with GPUs idle, apparently compiling on cold caches. NCCL communicator initialization itself took 2.1 s on every rank.
+  - That delay is included in step 1's 585 s.
+  - Caches are now warm on all nodes.
+  - The job's NCCL timeout is 600 s, so a recurrence would be close to it; A4's first step is watched.
+- **Measured step-2 values:**
+
+| Measure (step 2) | A6 smoke | A3a | Ratio |
+|---|---:|---:|---:|
+| `timing_s/step` | 86.4 s | 67.4 s | 1.28× |
+| `timing_s/gen` | 45.3 s | 39.8 s | 1.14× |
+| `timing_s/old_log_prob` | 10.1 s | 6.1 s | 1.67× |
+| `timing_s/update_actor` | 16.0 s | 9.9 s | 1.62× |
+| `perf/total_num_tokens` | 7.86M | 3.90M | 2.01× |
+| actor peak allocated / reserved memory | 32.5 / 60.0 GB | 32.5 / 60.2 GB | unchanged; the per-micro-batch token budget is fixed |
+| Training accuracy, same prompts | 61.26% | 61.23% | — |
+| Correctness-mixed groups, steps 1–2 | 34.6% (n=8-equivalent **27.5%**) | 28.1% | — |
+
+  Two startup-heavy steps do not establish steady-state throughput.
+- **Gradient norm:** `actor/grad_norm` at step 1 was 1.95. Across the PR #11 launches, which have identical step-1 weights and prompts, it ranged 0.14–0.80. At step 2 it was 0.41 vs A3a's 0.30. With n=16, a group with a single correct answer gets advantage 3.75, against 2.475 at n=8, so the larger tail is expected. Gradient clipping at 1.0 bounds the update. A6's grad-norm trajectory will be reported against A3a's.
+
 ### 5. Judge accuracy, signal quality, stability and cost together
 
 **Primary endpoint:** greedy held-out accuracy at **fixed step 100 vs A3a's 40.96%**. Report question-paired gained/lost counts and bootstrap 95% CI, with exact eval identity checks. Also show each arm's gain from its own step 0 and the complete six-point curve. Do not tune eval prompts, question membership or scorers after seeing results.
@@ -253,10 +320,10 @@ After choosing a recipe, freeze it and evaluate the longer horizon and additiona
 | Arm | Exact command/config and experiment ID | Validity / completed steps | Step-0 acc | Step-100 acc | Difference vs A3a, pp (paired 95% CI) | Tokens / GPU-hours / decision |
 |---|---|---|---:|---:|---|---|
 | A3a control | PR #11 run `gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753`; [manifest](recipe_optimization/a3a_control/manifest.json) | Complete: 100 steps, all six evals | 36.06% | 40.96% | Reference | Reuse recorded evidence; stability caveat |
-| A4 native cosine | Not launched; `g4run_pr12.sh A4` | Pending GPU preflight | — | — | — | — |
-| A5 T=1 | Not launched; `g4run_pr12.sh A5` | Pending GPU preflight | — | — | — | — |
-| A6 smoke (2 steps) | Not launched; `g4run_pr12.sh A6SMOKE` | Pending GPU preflight; not an accuracy result | — | — | — | Memory / timing / latency only |
-| A6 n=16 | Not launched; `g4run_pr12.sh A6` | Pending GPU preflight and smoke | — | — | — | — |
+| A4 native cosine | `gemma4_e2b_rl05fp32_a4cos_16n64g_s100_seed1_1023_2105` via `g4run_pr12.sh A4`; [config diff](recipe_optimization/a4_cosine/config_diff.json) | Running since 21:05Z; launch gate passed (config, `Total steps: 100`, logged LR at steps 1–2) | — | — | — | — |
+| A5 T=1 | Not launched; `g4run_pr12.sh A5` | Pending; starts after A4 is recorded and reviewed | — | — | — | — |
+| A6 smoke (2 steps) | `gemma4_e2b_rl05fp32_a6n16smoke_16n64g_s2_seed1_1023_2039` via `g4run_pr12.sh A6SMOKE` | **Passed** (§4.3); not an accuracy result | — | — | — | 2 steps: 1.28× step time and 2.0× tokens at step 2; memory unchanged |
+| A6 n=16 | Not launched; `g4run_pr12.sh A6` | Pending | — | — | — | — |
 
 Keep completed, null, failed and aborted arms in this ledger. Link commands, manifests, logs, per-question results and plots beside each result. Update the PR description around the final experiments as they are completed.
 

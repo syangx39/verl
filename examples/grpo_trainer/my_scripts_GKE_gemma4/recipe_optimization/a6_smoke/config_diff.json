@@ -1,0 +1,116 @@
+{
+ "verdict": "PASS",
+ "ref_log": "/workspace/meta-RL/logs/gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753.log",
+ "log": "/workspace/meta-RL/logs/gemma4_e2b_rl05fp32_a6n16smoke_16n64g_s2_seed1_1023_2039.log",
+ "expect": [
+  "actor_rollout_ref.rollout.n=16",
+  "actor_rollout_ref.actor.rollout_n=16",
+  "actor_rollout_ref.ref.rollout_n=16",
+  "critic.rollout_n=16",
+  "trainer.total_training_steps=2",
+  "trainer.test_freq=-1",
+  "trainer.val_before_train=False"
+ ],
+ "allow": [],
+ "differences": [
+  {
+   "key": "actor_rollout_ref.actor.optim.lr",
+   "ref": 2e-06,
+   "run": 2e-06,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.actor.rollout_n",
+   "ref": 8,
+   "run": 16,
+   "class": "expected",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.ref.rollout_n",
+   "ref": 8,
+   "run": 16,
+   "class": "expected",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.rollout.n",
+   "ref": 8,
+   "run": 16,
+   "class": "expected",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.rollout.trace.experiment_name",
+   "ref": "gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753",
+   "run": "gemma4_e2b_rl05fp32_a6n16smoke_16n64g_s2_seed1_1023_2039",
+   "class": "identity",
+   "ok": true
+  },
+  {
+   "key": "critic.rollout_n",
+   "ref": 8,
+   "run": 16,
+   "class": "expected",
+   "ok": true
+  },
+  {
+   "key": "ray_kwargs.ray_init.runtime_env.env_vars.VERL_GEMMA4_ROPE_REPORT_DIR",
+   "ref": "/workspace/meta-RL/logs/gemma4_guard/gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753",
+   "run": "/workspace/meta-RL/logs/gemma4_guard/gemma4_e2b_rl05fp32_a6n16smoke_16n64g_s2_seed1_1023_2039",
+   "class": "identity",
+   "ok": true
+  },
+  {
+   "key": "trainer.default_local_dir",
+   "ref": "checkpoints/rl05_parity_gemma4/gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753",
+   "run": "checkpoints/rl05_parity_gemma4/gemma4_e2b_rl05fp32_a6n16smoke_16n64g_s2_seed1_1023_2039",
+   "class": "identity",
+   "ok": true
+  },
+  {
+   "key": "trainer.experiment_name",
+   "ref": "gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753",
+   "run": "gemma4_e2b_rl05fp32_a6n16smoke_16n64g_s2_seed1_1023_2039",
+   "class": "identity",
+   "ok": true
+  },
+  {
+   "key": "trainer.rollout_data_dir",
+   "ref": "/workspace/meta-RL/logs/gemma4_eval/gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753/train",
+   "run": "/workspace/meta-RL/logs/gemma4_eval/gemma4_e2b_rl05fp32_a6n16smoke_16n64g_s2_seed1_1023_2039/train",
+   "class": "identity",
+   "ok": true
+  },
+  {
+   "key": "trainer.test_freq",
+   "ref": 20,
+   "run": -1,
+   "class": "expected",
+   "ok": true
+  },
+  {
+   "key": "trainer.total_training_steps",
+   "ref": 100,
+   "run": 2,
+   "class": "expected",
+   "ok": true
+  },
+  {
+   "key": "trainer.val_before_train",
+   "ref": true,
+   "run": false,
+   "class": "expected",
+   "ok": true
+  },
+  {
+   "key": "trainer.validation_data_dir",
+   "ref": "/workspace/meta-RL/logs/gemma4_eval/gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753/val",
+   "run": "/workspace/meta-RL/logs/gemma4_eval/gemma4_e2b_rl05fp32_a6n16smoke_16n64g_s2_seed1_1023_2039/val",
+   "class": "identity",
+   "ok": true
+  }
+ ],
+ "n_keys": 922
+}

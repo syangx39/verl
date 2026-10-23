@@ -1,0 +1,8 @@
+OK   positive: per-run shapes 2x8 vs 2x16: rc=0
+OK   negative: shared shape on an n=16 run: rc=1
+OK   negative: ragged 15/17-row groups: rc=1
+OK   negative: one row missing: rc=1
+OK   negative: different question at step 2: rc=1
+OK   negative: different groups per step: rc=1
+OK   positive: shared shape, two n=8 runs: rc=0
+PASS: 0 failure(s)

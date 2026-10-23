@@ -1,0 +1,40 @@
+{
+ "a3a": {
+  "1-2": {
+   "steps": [
+    1,
+    2
+   ],
+   "groups": 512,
+   "train_acc": 58.5205078125,
+   "group_sizes": [
+    8
+   ],
+   "shape_validated": true,
+   "mixed": 28.125,
+   "all_correct": 43.359375,
+   "all_wrong": 21.6796875,
+   "other_only": 6.8359375,
+   "mixed_n8eq": 28.125
+  }
+ },
+ "a6smoke": {
+  "1-2": {
+   "steps": [
+    1,
+    2
+   ],
+   "groups": 512,
+   "train_acc": 58.45947265625,
+   "group_sizes": [
+    16
+   ],
+   "shape_validated": true,
+   "mixed": 34.5703125,
+   "all_correct": 39.453125,
+   "all_wrong": 17.578125,
+   "other_only": 8.3984375,
+   "mixed_n8eq": 27.548198329448315
+  }
+ }
+}

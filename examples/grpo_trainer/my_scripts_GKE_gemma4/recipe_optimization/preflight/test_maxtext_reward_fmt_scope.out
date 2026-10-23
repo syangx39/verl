@@ -1,0 +1,37 @@
+OK   default correct_formatted_train: score 1.1 = acc + 0.1*fmt, no extra keys
+OK   scoped correct_formatted_train: acc / fmt flags unchanged
+OK   scoped correct_formatted_train: training row score 1.0 = acc, fmt_coef 0
+OK   correct_formatted_train: length penalty off
+OK   default correct_formatted_eval: score 1.1 = acc + 0.1*fmt, no extra keys
+OK   scoped correct_formatted_eval: acc / fmt flags unchanged
+OK   scoped correct_formatted_eval: eval row score 1.1 = acc + 0.1*fmt, fmt_coef 0.1
+OK   correct_formatted_eval: length penalty off
+OK   default correct_unformatted_train: score 1.0 = acc + 0.1*fmt, no extra keys
+OK   scoped correct_unformatted_train: acc / fmt flags unchanged
+OK   scoped correct_unformatted_train: training row score 1.0 = acc, fmt_coef 0
+OK   correct_unformatted_train: length penalty off
+OK   default correct_unformatted_eval: score 1.0 = acc + 0.1*fmt, no extra keys
+OK   scoped correct_unformatted_eval: acc / fmt flags unchanged
+OK   scoped correct_unformatted_eval: eval row score 1.0 = acc + 0.1*fmt, fmt_coef 0.1
+OK   correct_unformatted_eval: length penalty off
+OK   default wrong_formatted_train: score 0.1 = acc + 0.1*fmt, no extra keys
+OK   scoped wrong_formatted_train: acc / fmt flags unchanged
+OK   scoped wrong_formatted_train: training row score 0.0 = acc, fmt_coef 0
+OK   wrong_formatted_train: length penalty off
+OK   default wrong_formatted_eval: score 0.1 = acc + 0.1*fmt, no extra keys
+OK   scoped wrong_formatted_eval: acc / fmt flags unchanged
+OK   scoped wrong_formatted_eval: eval row score 0.1 = acc + 0.1*fmt, fmt_coef 0.1
+OK   wrong_formatted_eval: length penalty off
+OK   default wrong_unformatted_train: score 0.0 = acc + 0.1*fmt, no extra keys
+OK   scoped wrong_unformatted_train: acc / fmt flags unchanged
+OK   scoped wrong_unformatted_train: training row score 0.0 = acc, fmt_coef 0
+OK   wrong_unformatted_train: length penalty off
+OK   default wrong_unformatted_eval: score 0.0 = acc + 0.1*fmt, no extra keys
+OK   scoped wrong_unformatted_eval: acc / fmt flags unchanged
+OK   scoped wrong_unformatted_eval: eval row score 0.0 = acc + 0.1*fmt, fmt_coef 0.1
+OK   wrong_unformatted_eval: length penalty off
+OK   knob without REWARD_EVAL_QUESTIONS fails at import
+OK   manifest count mismatch fails at import
+OK   row without extra_info['question'] fails
+OK   default knobs do not need extra_info['question']
+PASS: 0 failure(s)

@@ -1,0 +1,4 @@
+{"acc_rule": "matched", "act": false, "arm": "A6", "dump_dir": "/workspace/meta-RL/logs/gemma4_eval/gemma4_e2b_rl05fp32_a6n16smoke_16n64g_s2_seed1_1023_2039", "exp": "gemma4_e2b_rl05fp32_a6n16smoke_16n64g_s2_seed1_1023_2039", "group_size": 16, "kind": "start", "log": "/workspace/meta-RL/logs/gemma4_e2b_rl05fp32_a6n16smoke_16n64g_s2_seed1_1023_2039.log", "ref": "/workspace/meta-RL/logs/gemma4_eval/gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753", "utc": "2026-10-23T20:39:22Z"}
+{"acc_pct": 55.664, "kind": "train_step", "missing_answer_pct": 0.977, "ref_acc_pct": 55.811, "step": 1, "utc": "2026-10-23T20:58:04Z"}
+{"acc_pct": 61.255, "kind": "train_step", "missing_answer_pct": 0.317, "ref_acc_pct": 61.23, "step": 2, "utc": "2026-10-23T21:00:07Z"}
+{"kind": "end", "last_complete_eval": null, "last_complete_train_dump": 2, "last_metric_step": 2, "launcher_rc": 0, "triggers": [], "utc": "2026-10-23T21:02:08Z"}

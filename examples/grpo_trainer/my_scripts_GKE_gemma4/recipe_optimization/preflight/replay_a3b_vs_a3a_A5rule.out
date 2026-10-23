@@ -1,0 +1,147 @@
+[stop-monitor] {"acc_pct": 55.469, "kind": "train_step", "missing_answer_pct": 0.83, "ref_acc_pct": 55.811, "step": 1, "utc": "2026-10-23T20:35:44Z"}
+[stop-monitor] {"acc_pct": 61.816, "kind": "train_step", "missing_answer_pct": 0.195, "ref_acc_pct": 61.23, "step": 2, "utc": "2026-10-23T20:35:44Z"}
+[stop-monitor] {"acc_pct": 63.574, "kind": "train_step", "missing_answer_pct": 0.293, "ref_acc_pct": 61.23, "step": 3, "utc": "2026-10-23T20:35:44Z"}
+[stop-monitor] {"acc_pct": 59.668, "kind": "train_step", "missing_answer_pct": 0.488, "ref_acc_pct": 57.764, "step": 4, "utc": "2026-10-23T20:35:44Z"}
+[stop-monitor] {"acc_pct": 61.914, "kind": "train_step", "missing_answer_pct": 0.342, "ref_acc_pct": 60.986, "step": 5, "utc": "2026-10-23T20:35:44Z"}
+[stop-monitor] {"acc_pct": 56.885, "kind": "train_step", "missing_answer_pct": 0.195, "ref_acc_pct": 55.908, "step": 6, "utc": "2026-10-23T20:35:44Z"}
+[stop-monitor] {"acc_pct": 63.037, "kind": "train_step", "missing_answer_pct": 0.342, "ref_acc_pct": 60.84, "step": 7, "utc": "2026-10-23T20:35:44Z"}
+[stop-monitor] {"acc_pct": 60.254, "kind": "train_step", "missing_answer_pct": 0.146, "ref_acc_pct": 60.059, "step": 8, "utc": "2026-10-23T20:35:44Z"}
+[stop-monitor] {"acc_pct": 61.621, "kind": "train_step", "missing_answer_pct": 0.342, "ref_acc_pct": 62.256, "step": 9, "utc": "2026-10-23T20:35:44Z"}
+[stop-monitor] {"acc_pct": 64.453, "kind": "train_step", "missing_answer_pct": 0.439, "ref_acc_pct": 63.232, "step": 10, "utc": "2026-10-23T20:35:45Z"}
+[stop-monitor] {"acc_pct": 61.816, "kind": "train_step", "missing_answer_pct": 0.049, "ref_acc_pct": 59.277, "step": 11, "utc": "2026-10-23T20:35:45Z"}
+[stop-monitor] {"acc_pct": 64.258, "kind": "train_step", "missing_answer_pct": 0.049, "ref_acc_pct": 61.133, "step": 12, "utc": "2026-10-23T20:35:45Z"}
+[stop-monitor] {"acc_pct": 60.4, "kind": "train_step", "missing_answer_pct": 0.049, "ref_acc_pct": 59.375, "step": 13, "utc": "2026-10-23T20:35:45Z"}
+[stop-monitor] {"acc_pct": 59.375, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 58.301, "step": 14, "utc": "2026-10-23T20:35:45Z"}
+[stop-monitor] {"acc_pct": 60.938, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 62.109, "step": 15, "utc": "2026-10-23T20:35:45Z"}
+[stop-monitor] {"acc_pct": 56.885, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 56.641, "step": 16, "utc": "2026-10-23T20:35:45Z"}
+[stop-monitor] {"acc_pct": 62.207, "kind": "train_step", "missing_answer_pct": 0.098, "ref_acc_pct": 60.547, "step": 17, "utc": "2026-10-23T20:35:45Z"}
+[stop-monitor] {"acc_pct": 61.084, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 60.742, "step": 18, "utc": "2026-10-23T20:35:45Z"}
+[stop-monitor] {"acc_pct": 61.768, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 61.084, "step": 19, "utc": "2026-10-23T20:35:45Z"}
+[stop-monitor] {"acc_pct": 62.402, "kind": "train_step", "missing_answer_pct": 0.049, "ref_acc_pct": 63.77, "step": 20, "utc": "2026-10-23T20:35:45Z"}
+[stop-monitor] {"acc_pct": 63.086, "kind": "train_step", "missing_answer_pct": 0.098, "ref_acc_pct": 63.281, "step": 21, "utc": "2026-10-23T20:35:45Z"}
+[stop-monitor] {"acc_pct": 59.326, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 59.863, "step": 22, "utc": "2026-10-23T20:35:45Z"}
+[stop-monitor] {"acc_pct": 59.033, "kind": "train_step", "missing_answer_pct": 0.146, "ref_acc_pct": 58.545, "step": 23, "utc": "2026-10-23T20:35:45Z"}
+[stop-monitor] {"acc_pct": 62.988, "kind": "train_step", "missing_answer_pct": 0.244, "ref_acc_pct": 62.598, "step": 24, "utc": "2026-10-23T20:35:46Z"}
+[stop-monitor] {"acc_pct": 64.404, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 64.648, "step": 25, "utc": "2026-10-23T20:35:46Z"}
+[stop-monitor] {"acc_pct": 60.693, "kind": "train_step", "missing_answer_pct": 0.049, "ref_acc_pct": 60.449, "step": 26, "utc": "2026-10-23T20:35:46Z"}
+[stop-monitor] {"acc_pct": 64.502, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 64.502, "step": 27, "utc": "2026-10-23T20:35:46Z"}
+[stop-monitor] {"acc_pct": 62.012, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 62.012, "step": 28, "utc": "2026-10-23T20:35:46Z"}
+[stop-monitor] {"acc_pct": 58.984, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 58.447, "step": 29, "utc": "2026-10-23T20:35:46Z"}
+[stop-monitor] {"acc_pct": 61.23, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 62.061, "step": 30, "utc": "2026-10-23T20:35:46Z"}
+[stop-monitor] {"acc_pct": 57.666, "kind": "train_step", "missing_answer_pct": 0.098, "ref_acc_pct": 58.936, "step": 31, "utc": "2026-10-23T20:35:46Z"}
+[stop-monitor] {"acc_pct": 59.961, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 60.596, "step": 32, "utc": "2026-10-23T20:35:46Z"}
+[stop-monitor] {"acc_pct": 63.721, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 63.818, "step": 33, "utc": "2026-10-23T20:35:46Z"}
+[stop-monitor] {"acc_pct": 66.113, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 64.941, "step": 34, "utc": "2026-10-23T20:35:46Z"}
+[stop-monitor] {"acc_pct": 63.525, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 64.453, "step": 35, "utc": "2026-10-23T20:35:46Z"}
+[stop-monitor] {"acc_pct": 60.205, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 59.912, "step": 36, "utc": "2026-10-23T20:35:46Z"}
+[stop-monitor] {"acc_pct": 63.672, "kind": "train_step", "missing_answer_pct": 0.195, "ref_acc_pct": 61.328, "step": 37, "utc": "2026-10-23T20:35:46Z"}
+[stop-monitor] {"acc_pct": 65.625, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 65.479, "step": 38, "utc": "2026-10-23T20:35:47Z"}
+[stop-monitor] {"acc_pct": 59.912, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 60.693, "step": 39, "utc": "2026-10-23T20:35:47Z"}
+[stop-monitor] {"acc_pct": 68.75, "kind": "train_step", "missing_answer_pct": 0.244, "ref_acc_pct": 69.922, "step": 40, "utc": "2026-10-23T20:35:47Z"}
+[stop-monitor] {"acc_pct": 61.914, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 60.01, "step": 41, "utc": "2026-10-23T20:35:47Z"}
+[stop-monitor] {"acc_pct": 62.061, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 60.352, "step": 42, "utc": "2026-10-23T20:35:47Z"}
+[stop-monitor] {"acc_pct": 64.893, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 65.771, "step": 43, "utc": "2026-10-23T20:35:47Z"}
+[stop-monitor] {"acc_pct": 64.16, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 64.453, "step": 44, "utc": "2026-10-23T20:35:47Z"}
+[stop-monitor] {"acc_pct": 62.891, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 62.061, "step": 45, "utc": "2026-10-23T20:35:47Z"}
+[stop-monitor] {"acc_pct": 61.523, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 63.428, "step": 46, "utc": "2026-10-23T20:35:47Z"}
+[stop-monitor] {"acc_pct": 58.252, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 57.373, "step": 47, "utc": "2026-10-23T20:35:47Z"}
+[stop-monitor] {"acc_pct": 60.205, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 60.352, "step": 48, "utc": "2026-10-23T20:35:47Z"}
+[stop-monitor] {"acc_pct": 69.58, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 68.945, "step": 49, "utc": "2026-10-23T20:35:47Z"}
+[stop-monitor] {"acc_pct": 62.158, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 64.844, "step": 50, "utc": "2026-10-23T20:35:47Z"}
+[stop-monitor] {"acc_pct": 61.768, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 61.768, "step": 51, "utc": "2026-10-23T20:35:47Z"}
+[stop-monitor] {"acc_pct": 63.623, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 64.209, "step": 52, "utc": "2026-10-23T20:35:47Z"}
+[stop-monitor] {"acc_pct": 62.354, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 63.281, "step": 53, "utc": "2026-10-23T20:35:48Z"}
+[stop-monitor] {"acc_pct": 66.797, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 66.553, "step": 54, "utc": "2026-10-23T20:35:48Z"}
+[stop-monitor] {"acc_pct": 62.842, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 61.719, "step": 55, "utc": "2026-10-23T20:35:48Z"}
+[stop-monitor] {"acc_pct": 60.449, "kind": "train_step", "missing_answer_pct": 0.0, "ref_acc_pct": 62.451, "step": 56, "utc": "2026-10-23T20:35:48Z"}
+[stop-monitor] {"acc_pct": 59.863, "kind": "train_step", "missing_answer_pct": 0.049, "ref_acc_pct": 63.574, "step": 57, "utc": "2026-10-23T20:35:48Z"}
+[stop-monitor] {"acc_pct": 64.6, "kind": "train_step", "missing_answer_pct": 0.098, "ref_acc_pct": 66.26, "step": 58, "utc": "2026-10-23T20:35:48Z"}
+[stop-monitor] {"acc_pct": 51.66, "kind": "train_step", "missing_answer_pct": 2.832, "ref_acc_pct": 56.543, "step": 59, "utc": "2026-10-23T20:35:48Z"}
+[stop-monitor] {"acc_pct": 47.852, "kind": "train_step", "missing_answer_pct": 6.299, "ref_acc_pct": 53.955, "step": 60, "utc": "2026-10-23T20:35:48Z"}
+[stop-monitor] {"acc_pct": 57.178, "kind": "train_step", "missing_answer_pct": 3.418, "ref_acc_pct": 65.137, "step": 61, "utc": "2026-10-23T20:35:48Z"}
+[stop-monitor] {"acc_pct": 53.662, "kind": "train_step", "missing_answer_pct": 2.588, "ref_acc_pct": 62.305, "step": 62, "utc": "2026-10-23T20:35:48Z"}
+[stop-monitor] {"acc_pct": 54.053, "kind": "train_step", "missing_answer_pct": 5.029, "ref_acc_pct": 64.697, "step": 63, "utc": "2026-10-23T20:35:48Z"}
+[stop-monitor] {"acc_pct": 46.191, "kind": "train_step", "missing_answer_pct": 10.498, "ref_acc_pct": 58.643, "step": 64, "utc": "2026-10-23T20:35:48Z"}
+[stop-monitor] {"acc_pct": 43.799, "kind": "train_step", "missing_answer_pct": 15.283, "ref_acc_pct": 57.08, "step": 65, "utc": "2026-10-23T20:35:49Z"}
+[stop-monitor] {"acc_pct": 40.869, "kind": "train_step", "missing_answer_pct": 20.654, "ref_acc_pct": 64.404, "step": 66, "utc": "2026-10-23T20:35:49Z"}
+[stop-monitor] {"acc_pct": 39.941, "kind": "train_step", "missing_answer_pct": 14.844, "ref_acc_pct": 61.133, "step": 67, "utc": "2026-10-23T20:35:49Z"}
+[stop-monitor] {"acc_pct": 31.055, "kind": "train_step", "missing_answer_pct": 30.469, "ref_acc_pct": 60.205, "step": 68, "utc": "2026-10-23T20:35:49Z"}
+[stop-monitor] {"acc_pct": 22.9, "kind": "train_step", "missing_answer_pct": 51.514, "ref_acc_pct": 58.35, "step": 69, "utc": "2026-10-23T20:35:49Z"}
+[stop-monitor] {"acc_pct": 16.357, "kind": "train_step", "missing_answer_pct": 65.576, "ref_acc_pct": 59.57, "step": 70, "utc": "2026-10-23T20:35:49Z"}
+[stop-monitor] {"acc_pct": 13.037, "kind": "train_step", "missing_answer_pct": 80.127, "ref_acc_pct": 60.01, "step": 71, "utc": "2026-10-23T20:35:49Z"}
+[stop-monitor] {"acc_pct": 15.674, "kind": "train_step", "missing_answer_pct": 74.023, "ref_acc_pct": 61.621, "step": 72, "utc": "2026-10-23T20:35:50Z"}
+[stop-monitor] {"acc_pct": 14.258, "kind": "train_step", "missing_answer_pct": 83.057, "ref_acc_pct": 64.99, "step": 73, "utc": "2026-10-23T20:35:50Z"}
+[stop-monitor] {"acc_pct": 17.676, "kind": "train_step", "missing_answer_pct": 75.391, "ref_acc_pct": 60.84, "step": 74, "utc": "2026-10-23T20:35:50Z"}
+[stop-monitor] {"acc_pct": 13.428, "kind": "train_step", "missing_answer_pct": 78.174, "ref_acc_pct": 60.986, "step": 75, "utc": "2026-10-23T20:35:50Z"}
+[stop-monitor] {"acc_pct": 11.865, "kind": "train_step", "missing_answer_pct": 80.713, "ref_acc_pct": 64.6, "step": 76, "utc": "2026-10-23T20:35:50Z"}
+[stop-monitor] {"acc_pct": 8.057, "kind": "train_step", "missing_answer_pct": 90.088, "ref_acc_pct": 62.939, "step": 77, "utc": "2026-10-23T20:35:50Z"}
+[stop-monitor] {"acc_pct": 8.008, "kind": "train_step", "missing_answer_pct": 90.723, "ref_acc_pct": 62.354, "step": 78, "utc": "2026-10-23T20:35:51Z"}
+[stop-monitor] {"acc_pct": 4.834, "kind": "train_step", "missing_answer_pct": 94.727, "ref_acc_pct": 56.592, "step": 79, "utc": "2026-10-23T20:35:51Z"}
+[stop-monitor] {"acc_pct": 8.203, "kind": "train_step", "missing_answer_pct": 91.65, "ref_acc_pct": 66.65, "step": 80, "utc": "2026-10-23T20:35:51Z"}
+[stop-monitor] {"acc_pct": 3.76, "kind": "train_step", "missing_answer_pct": 95.898, "ref_acc_pct": 66.65, "step": 81, "utc": "2026-10-23T20:35:51Z"}
+[stop-monitor] {"acc_pct": 2.93, "kind": "train_step", "missing_answer_pct": 96.68, "ref_acc_pct": 61.23, "step": 82, "utc": "2026-10-23T20:35:51Z"}
+[stop-monitor] {"acc_pct": 3.174, "kind": "train_step", "missing_answer_pct": 96.777, "ref_acc_pct": 67.676, "step": 83, "utc": "2026-10-23T20:35:51Z"}
+[stop-monitor] {"acc_pct": 1.221, "kind": "train_step", "missing_answer_pct": 98.682, "ref_acc_pct": 57.471, "step": 84, "utc": "2026-10-23T20:35:52Z"}
+[stop-monitor] {"acc_pct": 1.025, "kind": "train_step", "missing_answer_pct": 98.779, "ref_acc_pct": 59.424, "step": 85, "utc": "2026-10-23T20:35:52Z"}
+[stop-monitor] {"acc_pct": 0.83, "kind": "train_step", "missing_answer_pct": 98.633, "ref_acc_pct": 63.916, "step": 86, "utc": "2026-10-23T20:35:52Z"}
+[stop-monitor] {"acc_pct": 0.391, "kind": "train_step", "missing_answer_pct": 98.73, "ref_acc_pct": 56.641, "step": 87, "utc": "2026-10-23T20:35:52Z"}
+[stop-monitor] {"acc_pct": 0.439, "kind": "train_step", "missing_answer_pct": 98.242, "ref_acc_pct": 64.746, "step": 88, "utc": "2026-10-23T20:35:52Z"}
+[stop-monitor] {"acc_pct": 0.342, "kind": "train_step", "missing_answer_pct": 98.926, "ref_acc_pct": 63.379, "step": 89, "utc": "2026-10-23T20:35:52Z"}
+[stop-monitor] {"acc_pct": 0.049, "kind": "train_step", "missing_answer_pct": 99.365, "ref_acc_pct": 62.158, "step": 90, "utc": "2026-10-23T20:35:52Z"}
+[stop-monitor] {"acc_pct": 0.0, "kind": "train_step", "missing_answer_pct": 99.463, "ref_acc_pct": 61.328, "step": 91, "utc": "2026-10-23T20:35:52Z"}
+[stop-monitor] {"acc_pct": 0.098, "kind": "train_step", "missing_answer_pct": 99.854, "ref_acc_pct": 61.279, "step": 92, "utc": "2026-10-23T20:35:53Z"}
+[stop-monitor] {"acc_pct": 0.049, "kind": "train_step", "missing_answer_pct": 99.756, "ref_acc_pct": 63.965, "step": 93, "utc": "2026-10-23T20:35:53Z"}
+[stop-monitor] {"acc_pct": 0.049, "kind": "train_step", "missing_answer_pct": 99.805, "ref_acc_pct": 65.723, "step": 94, "utc": "2026-10-23T20:35:53Z"}
+[stop-monitor] {"acc_pct": 0.0, "kind": "train_step", "missing_answer_pct": 99.951, "ref_acc_pct": 67.09, "step": 95, "utc": "2026-10-23T20:35:53Z"}
+[stop-monitor] {"acc_pct": 0.0, "kind": "train_step", "missing_answer_pct": 100.0, "ref_acc_pct": 61.768, "step": 96, "utc": "2026-10-23T20:35:53Z"}
+[stop-monitor] {"acc_pct": 0.049, "kind": "train_step", "missing_answer_pct": 99.951, "ref_acc_pct": 63.77, "step": 97, "utc": "2026-10-23T20:35:53Z"}
+[stop-monitor] {"acc_pct": 0.0, "kind": "train_step", "missing_answer_pct": 100.0, "ref_acc_pct": 60.889, "step": 98, "utc": "2026-10-23T20:35:54Z"}
+[stop-monitor] {"acc_pct": 0.0, "kind": "train_step", "missing_answer_pct": 100.0, "ref_acc_pct": 62.988, "step": 99, "utc": "2026-10-23T20:35:54Z"}
+[stop-monitor] {"acc_pct": 0.0, "kind": "train_step", "missing_answer_pct": 100.0, "ref_acc_pct": 61.523, "step": 100, "utc": "2026-10-23T20:35:54Z"}
+[stop-monitor] {"acc_pct": 35.96, "kind": "eval", "step": 0, "utc": "2026-10-23T20:35:54Z"}
+[stop-monitor] {"acc_pct": 39.92, "kind": "eval", "step": 20, "utc": "2026-10-23T20:35:54Z"}
+[stop-monitor] {"acc_pct": 40.72, "kind": "eval", "step": 40, "utc": "2026-10-23T20:35:54Z"}
+[stop-monitor] {"acc_pct": 36.8, "kind": "eval", "step": 60, "utc": "2026-10-23T20:35:54Z"}
+[stop-monitor] {"acc_pct": 11.32, "kind": "eval", "step": 80, "utc": "2026-10-23T20:35:55Z"}
+[stop-monitor] {"acc_pct": 0.0, "kind": "eval", "step": 100, "utc": "2026-10-23T20:35:55Z"}
+{
+ "exp": "gemma4_e2b_rl05fp32_a3lr4e6_16n64g_s100_seed1_1023_1116",
+ "arm": "A5",
+ "last_step": 100,
+ "first_trigger": {
+  "rule": "k3_kl",
+  "step": 57,
+  "threshold": "> 0.003 on 3 consecutive steps",
+  "values": {
+   "55": 0.0034876810386776924,
+   "56": 0.004847090691328049,
+   "57": 0.006403330247849226
+  }
+ },
+ "triggers": [
+  [
+   "k3_kl",
+   57
+  ],
+  [
+   "train_acc",
+   65
+  ],
+  [
+   "missing_answer",
+   66
+  ],
+  [
+   "heldout",
+   80
+  ]
+ ],
+ "unevaluable": {
+  "k3_kl": [],
+  "missing_answer": [],
+  "train_acc": [],
+  "metrics": []
+ },
+ "a5_baseline_pp": 0.927734375,
+ "alerts": []
+}

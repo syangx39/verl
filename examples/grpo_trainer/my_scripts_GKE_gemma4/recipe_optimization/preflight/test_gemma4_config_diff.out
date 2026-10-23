@@ -1,0 +1,10 @@
+OK   identity keys only: rc=0
+OK   declared n=16 (+ derived actor.rollout_n): rc=0
+OK   undeclared n=16: rc=1
+OK   derived key undeclared: rc=1
+OK   wrong declared value: rc=1
+OK   assert restating the reference: rc=0
+OK   assert on a misspelt key: rc=1
+OK   extra undeclared key: rc=1
+SKIP real logs (not present)
+PASS: 0 failure(s)

@@ -1,0 +1,70 @@
+{
+ "a": {
+  "dir": "/workspace/meta-RL/logs/gemma4_eval/gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753",
+  "label": "a3a"
+ },
+ "b": {
+  "dir": "/workspace/meta-RL/logs/gemma4_eval/gemma4_e2b_rl05fp32_a6n16smoke_16n64g_s2_seed1_1023_2039",
+  "label": "a6smoke"
+ },
+ "diag": {},
+ "eval": {},
+ "train": {
+  "batch_checks": {
+   "a": {
+    "group_size": 8,
+    "rows_per_step": 2048
+   },
+   "b": {
+    "group_size": 16,
+    "rows_per_step": 4096
+   },
+   "checks": "complete step coverage; exact rows per step; groups of exactly group_size per qid (per run); one input and one ground truth per group; identical qid -> (input, ground truth) between A and B",
+   "group_size": null,
+   "groups_per_step": 256,
+   "n_steps": 2,
+   "rows_per_step": null,
+   "steps": [
+    1,
+    2
+   ]
+  },
+  "per_step": {
+   "1": {
+    "acc_a": 55.810546875,
+    "acc_b": 55.6640625,
+    "fmt_a": 97.412109375,
+    "fmt_b": 97.65625,
+    "same_prompts": true
+   },
+   "2": {
+    "acc_a": 61.23046875,
+    "acc_b": 61.2548828125,
+    "fmt_a": 98.53515625,
+    "fmt_b": 98.291015625,
+    "same_prompts": true
+   }
+  },
+  "windows": [
+   {
+    "acc_a": 58.5205078125,
+    "acc_b": 58.45947265625,
+    "diff_mean": -0.06103515625,
+    "diff_sd": 0.12084344405043537,
+    "fmt_a": 97.9736328125,
+    "fmt_b": 97.9736328125,
+    "n": 2,
+    "n_positive": 1,
+    "steps": [
+     1,
+     2
+    ]
+   }
+  ]
+ },
+ "train_template_change": "none",
+ "train_temps": [
+  0.8,
+  0.8
+ ]
+}

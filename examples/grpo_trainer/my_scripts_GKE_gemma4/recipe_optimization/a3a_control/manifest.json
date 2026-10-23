@@ -22,7 +22,14 @@
  "model": {
   "hf_id": "google/gemma-4-E2B-it",
   "path": "/workspace/meta-RL/models/gemma-4-E2B-it",
-  "file_hashes": "recorded at PR #12 GPU preflight (model_manifest.json)"
+  "file_hashes": {
+   "file": "model_manifest.sha256",
+   "recorded": "2026-10-23 PR #12 GPU preflight (pool-4 head pod, shared model dir)",
+   "model.safetensors": "2db5482b20d746879bb3ef79b5203e9075a2e2b98f54ec7c2f281c1477ddc550",
+   "config.json": "1b28f3d2c3100f6c594754b81107428bd7b822a7f48272ca681dae9d2ec38330",
+   "tokenizer.json": "cc8d3a0ce36466ccc1278bf987df5f71db1719b9ca6b4118264f45cb627bfe0f",
+   "chat_template.jinja": "0a2c8073c878ab1da004bee933a998606537bbb62016310352c7285c3f01c5b5"
+  }
  },
  "resolved_config": {
   "file": "resolved_config.json",
