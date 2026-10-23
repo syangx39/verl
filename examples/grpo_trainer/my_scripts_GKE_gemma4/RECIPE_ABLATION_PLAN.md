@@ -6,7 +6,7 @@ Optimize the already-learning Gemma-4 E2B FP32 recipe by isolating the effects o
 
 PR #10 established learning, not a plateau: held-out accuracy rose **35.76% → 39.62% (+3.86 pp)** at step 100, with question-paired bootstrap 95% **[+2.82, +4.96] pp**. Its run was deliberately stopped at step 107; only steps 0–100 are the comparison reference. Qwen results motivate optimization but are not a Gemma acceptance threshold.
 
-**Status:** A1 (reward) is prepared, checked and running; A2 (prompt) is prepared and checked but not launched; A3 has not started. See the [execution record](#execution-record). The initial commit was plan only.
+**Status:** A1 (reward) is complete: not a candidate (see [A1 result](#a1-result-100-steps-complete)). A2 (prompt) is prepared and checked, and launches next. A3a (LR 2e-6) is predeclared. See the [execution record](#execution-record). The initial commit was plan only.
 
 ## Plan
 
@@ -98,7 +98,7 @@ Question-paired intervals do not measure training-seed uncertainty. Consecutive 
 | Arm | Experiment ID / exact override | Run validity | Step-0 acc | Step-100 acc | Δ vs A0 at step 100 (paired 95%) | Time / decision |
 |---|---|---|---:|---:|---|---|
 | A0 | PR #10 FP32 seed 1, steps 0–100 | Reported window verified; full run stopped at 107 | 35.76% | 39.62% | Reference | See PR #10 |
-| A1 | `gemma4_e2b_rl05fp32_a1fmt0_16n64g_s100_seed1_1023_0058`: `REWARD_FMT_WEIGHT_TRAIN=0` + `REWARD_EVAL_QUESTIONS` (eval keeps 0.1) | Running (started 2026-10-23T00:58Z); coefficient confirmed in worker dumps | 36.18% | — | — | — |
+| A1 | `gemma4_e2b_rl05fp32_a1fmt0_16n64g_s100_seed1_1023_0058`: `REWARD_FMT_WEIGHT_TRAIN=0` + `REWARD_EVAL_QUESTIONS` (eval keeps 0.1) | Valid: exit 0, guards PASS, 100 / 100 steps, dumps complete | 36.18% | 38.96% | −0.66 [−1.66, +0.30] | 3 h 22 min; not a candidate (format compliance falls, no detectable accuracy change) |
 | A2 | Pending: training template applied once | Not run | — | — | — | — |
 | A3 | Predeclared: A3a LR `2e-6` (constant, no warmup); A3b LR `4e-6` only if A3a meets the rule above | Not run | — | — | — | — |
 
@@ -150,6 +150,53 @@ A row whose `extra_info["question"]` hashes into that set keeps the canonical 0.
   - held-out at steps 20 / 40 / 60 is +0.04 / −0.40 / −0.40 pp vs A0, and every paired interval includes 0;
   - training accuracy on identical prompts differs by −0.03 pp over steps 1–62.
 - This does not show that accuracy is unaffected.
+
+#### A1 result (100 steps, complete)
+
+**Validity**
+- Driver `exit_code=0` (`LAUNCHER_RC=0`), 100 / 100 steps, all six evals.
+- [Guard check](recipe_ablation/a1_reward/guard_check.txt) PASS: node prep 16 / 16, RoPE guard 64 / 64, exit 0, steps 0–100.
+- Training dumps validated against A0 at every step 1–100: identical prompts, 2,048 rows = 256 × 8.
+- The single traceback in the log is the known exit-phase `DataLoader worker ... killed` after step 100 (README §3.3).
+- Wall time: launched 00:58Z, log closed 04:20Z, so about 3 h 22 min including start-up, six evals and shutdown. The progress bar shows 3 h 15 min for the 100 steps.
+- Evidence: [`recipe_ablation/a1_reward/`](recipe_ablation/a1_reward/), driver log [`logs/gemma4_e2b_rl05fp32_a1fmt0_16n64g_s100_seed1_1023_0058.log`](logs/gemma4_e2b_rl05fp32_a1fmt0_16n64g_s100_seed1_1023_0058.log).
+
+![A1 vs A0](recipe_ablation/a1_reward/a1_vs_a0_s100.png)
+
+| Held-out `eval_5000` (paired by `qid`) | A0 (%) | A1 (%) | A1 − A0 (pp), bootstrap 95% | A1 vs own step 0 (pp, 95%) | format A0 / A1 (%) |
+|---:|---:|---:|---|---|---|
+| 0 (identical weights) | 35.76 | 36.18 | +0.42 [−0.52, +1.34] | — | 94.26 / 94.36 |
+| 20 | 37.40 | 37.44 | +0.04 [−0.88, +1.00] | +1.26 [+0.30, +2.26] | 97.44 / 95.08 |
+| 40 | 38.52 | 38.12 | −0.40 [−1.38, +0.56] | +1.94 [+0.90, +2.90] | 97.98 / 83.58 |
+| 60 | 38.30 | 37.90 | −0.40 [−1.38, +0.58] | +1.72 [+0.68, +2.74] | 97.96 / 80.56 |
+| 80 | 38.76 | 39.28 | +0.52 [−0.46, +1.48] | +3.10 [+1.96, +4.16] | 98.28 / 69.16 |
+| **100 (fixed endpoint)** | **39.62** | **38.96** | **−0.66 [−1.66, +0.30]** | +2.78 [+1.72, +3.84] | 98.62 / 63.06 |
+
+| Training (identical prompts, T=0.8) | A0 train acc (%) | A1 train acc (%) | A1 − A0 mean (pp) | steps with A1 ahead | format A0 / A1 (%) |
+|---|---:|---:|---:|---:|---|
+| 1–20 | 59.53 | 59.62 | +0.09 | 8 / 20 | 98.87 / 97.53 |
+| 21–40 | 61.52 | 61.44 | −0.08 | 8 / 20 | 99.76 / 91.48 |
+| 41–60 | 61.26 | 61.16 | −0.09 | 7 / 20 | 99.78 / 84.60 |
+| 61–80 | 61.05 | 61.01 | −0.04 | 11 / 20 | 99.83 / 78.71 |
+| 81–100 | 61.76 | 61.62 | −0.13 | 9 / 20 | 99.85 / 70.00 |
+| 1–100 | 61.02 | 60.97 | −0.05 | 43 / 100 | 99.62 / 84.46 |
+
+**Format and tags** ([`format_breakdown.json`](recipe_ablation/a1_reward/format_breakdown.json))
+- At step 100, 98.28% of A1's held-out completions still contain `<answer>…</answer>` (A0: 98.76%).
+- 1,847 held-out completions are unformatted. 1,768 of them have an answer, and all 1,768 have at least 200 characters of text before it. Their accuracy is 33.6%.
+- In training at step 100, all 757 unformatted completions have an answer and at least 200 characters of text before it.
+
+**Signal and diagnostics** (window medians; [`signal_density_s100.json`](recipe_ablation/a1_reward/signal_density_s100.json))
+- Correctness-mixed groups: 25.1–27.7% (A0: 25.5–27.1%). The format-only groups (A0: 0.5–3.4%) are gone, by construction.
+- `k3_kl`: 0.00067–0.00071 (A0: 0.00069–0.00073).
+- Entropy: 0.191–0.209 (A0: 0.196–0.216).
+- Responses stay longer: 1,756–1,907 tokens vs A0's 1,576–1,857. The gap is 50–240 tokens by window; the same-recipe repeat differed by about 150 tokens.
+- `timing_s/step` is similar.
+
+**Reading**
+- **Not a candidate.** At the fixed step-100 endpoint A1 is −0.66 pp vs A0, and the paired interval [−1.66, +0.30] includes 0. Across the trajectory the sign alternates (+0.04, −0.40, −0.40, +0.52, −0.66). Training accuracy on identical prompts is unchanged (−0.05 pp over 100 steps). Every held-out difference is within the ~0.7 pp spread of two launches of the same recipe (PR #10 §4.3).
+- **What A1 shows:** removing the training format reward clearly lowers format compliance (held-out 98.62% → 63.06% at step 100) without a detectable accuracy change. It does not show that accuracy is unaffected. The lost tags are the `<reasoning>` wrapper, not the reasoning itself.
+- **Next:** A2 and A3 keep A0's format coefficient 0.1, as planned.
 
 ### A2 record: training template applied once
 

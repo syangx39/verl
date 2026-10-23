@@ -1,0 +1,959 @@
+{
+ "checks": [
+  {
+   "check": "node_prep verdict PASS",
+   "detail": "PASS",
+   "ok": true
+  },
+  {
+   "check": "node_prep one ok record per alive node",
+   "detail": "16 records / 16 alive nodes",
+   "ok": true
+  },
+  {
+   "check": "node_prep managed files identical on every node",
+   "detail": "{\"verl/models/transformers/monkey_patch.py\": \"9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7\", \"verl/workers/engine/fsdp/transformer_impl.py\": \"9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263\"}",
+   "ok": true
+  },
+  {
+   "check": "exactly one guard report for role=actor",
+   "detail": "found 1",
+   "ok": true
+  },
+  {
+   "check": "guard report covers ranks 0..W-1",
+   "detail": "world_size=64 ranks=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63]",
+   "ok": true
+  },
+  {
+   "check": "guard report: all ranks PASS",
+   "detail": "n_fail=0",
+   "ok": true
+  },
+  {
+   "check": "no fault injected",
+   "detail": "null",
+   "ok": true
+  },
+  {
+   "check": "every rank rebuilt fp32 bit-exact",
+   "detail": "",
+   "ok": true
+  },
+  {
+   "check": "per-rank init records for ranks 0..W-1",
+   "detail": "have [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63]",
+   "ok": true
+  },
+  {
+   "check": "per-rank init records: all PASS",
+   "detail": "",
+   "ok": true
+  },
+  {
+   "check": "per-rank init records: all buffers post-rebuild fp32 bit-exact",
+   "detail": "256 buffers",
+   "ok": true
+  },
+  {
+   "check": "no fault applied",
+   "detail": "[]",
+   "ok": true
+  },
+  {
+   "check": "first-forward records for ranks 0..W-1",
+   "detail": "have [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63]",
+   "ok": true
+  },
+  {
+   "check": "first-forward records: all PASS, nothing restored",
+   "detail": "",
+   "ok": true
+  },
+  {
+   "check": "driver exit_code=0",
+   "detail": "exit_code=0",
+   "ok": true
+  },
+  {
+   "check": ">= 100 training steps logged",
+   "detail": "steps=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100]",
+   "ok": true
+  }
+ ],
+ "driver_exit_code": 0,
+ "guard_dir": "/workspace/meta-RL/logs/gemma4_guard/gemma4_e2b_rl05fp32_a1fmt0_16n64g_s100_seed1_1023_0058",
+ "guard_report": {
+  "failed_ranks": [],
+  "fault": null,
+  "fp32_rope": true,
+  "kind": "gemma4_rope_guard",
+  "max_rel_err_vs_fp32_accepted_pre": 1.0311281077685605e-07,
+  "n_fail": 0,
+  "n_pass": 64,
+  "per_rank": [
+   [
+    0,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-lfth2",
+    "0",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    1,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-lfth2",
+    "1",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    2,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-lfth2",
+    "2",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    3,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-lfth2",
+    "3",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    4,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-jzzzj",
+    "0",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    5,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-jzzzj",
+    "1",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    6,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-jzzzj",
+    "2",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    7,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-jzzzj",
+    "3",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    8,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-7h2nr",
+    "0",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    9,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-7h2nr",
+    "1",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    10,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-7h2nr",
+    "2",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    11,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-7h2nr",
+    "3",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    12,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-bzdjp",
+    "0",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    13,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-bzdjp",
+    "1",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    14,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-bzdjp",
+    "2",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    15,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-bzdjp",
+    "3",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    16,
+    "PASS",
+    "verl-bench-xiaotongyang-head-g7ddm",
+    "0",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    17,
+    "PASS",
+    "verl-bench-xiaotongyang-head-g7ddm",
+    "1",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    18,
+    "PASS",
+    "verl-bench-xiaotongyang-head-g7ddm",
+    "2",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    19,
+    "PASS",
+    "verl-bench-xiaotongyang-head-g7ddm",
+    "3",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    20,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-49pf9",
+    "0",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    21,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-49pf9",
+    "1",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    22,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-49pf9",
+    "2",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    23,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-49pf9",
+    "3",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    24,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-ggntg",
+    "0",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    25,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-ggntg",
+    "1",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    26,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-ggntg",
+    "2",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    27,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-ggntg",
+    "3",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    28,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-cnhbf",
+    "0",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    29,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-cnhbf",
+    "1",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    30,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-cnhbf",
+    "2",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    31,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-cnhbf",
+    "3",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    32,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-lxr22",
+    "0",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    33,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-lxr22",
+    "1",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    34,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-lxr22",
+    "2",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    35,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-lxr22",
+    "3",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    36,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-bvgn6",
+    "0",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    37,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-bvgn6",
+    "1",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    38,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-bvgn6",
+    "2",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    39,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-bvgn6",
+    "3",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    40,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-n4ll9",
+    "0",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    41,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-n4ll9",
+    "1",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    42,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-n4ll9",
+    "2",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    43,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-n4ll9",
+    "3",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    44,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-9qz2k",
+    "0",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    45,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-9qz2k",
+    "1",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    46,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-9qz2k",
+    "2",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    47,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-9qz2k",
+    "3",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    48,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-ztls2",
+    "0",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    49,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-ztls2",
+    "1",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    50,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-ztls2",
+    "2",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    51,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-ztls2",
+    "3",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    52,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-dhzn2",
+    "0",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    53,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-dhzn2",
+    "1",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    54,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-dhzn2",
+    "2",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    55,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-dhzn2",
+    "3",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    56,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-wjhk5",
+    "0",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    57,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-wjhk5",
+    "1",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    58,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-wjhk5",
+    "2",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    59,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-wjhk5",
+    "3",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    60,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-qpdvc",
+    "0",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    61,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-qpdvc",
+    "1",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    62,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-qpdvc",
+    "2",
+    [
+     "fp32"
+    ],
+    true
+   ],
+   [
+    63,
+    "PASS",
+    "verl-bench-xiaotongyang-gpu-workers-worker-qpdvc",
+    "3",
+    [
+     "fp32"
+    ],
+    true
+   ]
+  ],
+  "per_rank_fields": [
+   "rank",
+   "status",
+   "host",
+   "cuda_visible_devices",
+   "pre_states",
+   "post_bit_exact"
+  ],
+  "phase": "init_checkpoint",
+  "pre_states": {
+   "fp32": 256
+  },
+  "ranks": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   17,
+   18,
+   19,
+   20,
+   21,
+   22,
+   23,
+   24,
+   25,
+   26,
+   27,
+   28,
+   29,
+   30,
+   31,
+   32,
+   33,
+   34,
+   35,
+   36,
+   37,
+   38,
+   39,
+   40,
+   41,
+   42,
+   43,
+   44,
+   45,
+   46,
+   47,
+   48,
+   49,
+   50,
+   51,
+   52,
+   53,
+   54,
+   55,
+   56,
+   57,
+   58,
+   59,
+   60,
+   61,
+   62,
+   63
+  ],
+  "role": "actor",
+  "tolerances": {
+   "atol": 1e-10,
+   "rtol_bf16": 0.0078125,
+   "rtol_fp32": 4e-06
+  },
+  "version": "2",
+  "world_size": 64
+ },
+ "log": "/workspace/meta-RL/logs/gemma4_e2b_rl05fp32_a1fmt0_16n64g_s100_seed1_1023_0058.log",
+ "mode": "positive",
+ "node_prep": {
+  "actions": [
+   "pinned_packages_already_satisfied:pinned_packages_already_satisfied",
+   "verl/models/transformers/monkey_patch.py:unchanged",
+   "verl/workers/engine/fsdp/transformer_impl.py:unchanged"
+  ],
+  "managed_sha256": {
+   "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+   "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+  },
+  "n_nodes": 16,
+  "packages": {
+   "antlr4-python3-runtime": "4.9.3",
+   "flash-attn": "2.8.3",
+   "latex2sympy2_extended": "1.11.0",
+   "math-verify": "0.9.0",
+   "ray": "2.55.1",
+   "torch": "2.13.0+cu130",
+   "transformers": "5.12.1",
+   "vllm": "0.29.0"
+  },
+  "python": "/workspace/verl-pin/.venv/bin/python",
+  "rope_patch": {
+   "block_sha256": "2d750b2b0c718b581831c6aa9130717e5dcf47e5938715de58caa2d42ae0b8f4",
+   "version": "2"
+  },
+  "verl_head": "ace775e87d8765bcdd114aac734ab71da5367a0f"
+ },
+ "role": "actor",
+ "steps_logged": [
+  0,
+  1,
+  2,
+  3,
+  4,
+  5,
+  6,
+  7,
+  8,
+  9,
+  10,
+  11,
+  12,
+  13,
+  14,
+  15,
+  16,
+  17,
+  18,
+  19,
+  20,
+  21,
+  22,
+  23,
+  24,
+  25,
+  26,
+  27,
+  28,
+  29,
+  30,
+  31,
+  32,
+  33,
+  34,
+  35,
+  36,
+  37,
+  38,
+  39,
+  40,
+  41,
+  42,
+  43,
+  44,
+  45,
+  46,
+  47,
+  48,
+  49,
+  50,
+  51,
+  52,
+  53,
+  54,
+  55,
+  56,
+  57,
+  58,
+  59,
+  60,
+  61,
+  62,
+  63,
+  64,
+  65,
+  66,
+  67,
+  68,
+  69,
+  70,
+  71,
+  72,
+  73,
+  74,
+  75,
+  76,
+  77,
+  78,
+  79,
+  80,
+  81,
+  82,
+  83,
+  84,
+  85,
+  86,
+  87,
+  88,
+  89,
+  90,
+  91,
+  92,
+  93,
+  94,
+  95,
+  96,
+  97,
+  98,
+  99,
+  100
+ ],
+ "verdict": "PASS",
+ "world": 64
+}

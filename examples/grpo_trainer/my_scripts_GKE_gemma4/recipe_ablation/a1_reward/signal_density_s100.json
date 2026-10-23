@@ -1,0 +1,126 @@
+{
+ "a0": {
+  "1-20": {
+   "steps": [
+    1,
+    20
+   ],
+   "groups": 5120,
+   "train_acc": 59.5263671875,
+   "mixed": 27.1484375,
+   "all_correct": 44.90234375,
+   "all_wrong": 24.53125,
+   "other_only": 3.41796875
+  },
+  "21-40": {
+   "steps": [
+    21,
+    40
+   ],
+   "groups": 5120,
+   "train_acc": 61.51611328125,
+   "mixed": 26.09375,
+   "all_correct": 48.125,
+   "all_wrong": 24.9609375,
+   "other_only": 0.8203125
+  },
+  "41-60": {
+   "steps": [
+    41,
+    60
+   ],
+   "groups": 5120,
+   "train_acc": 61.25732421875,
+   "mixed": 26.171875,
+   "all_correct": 48.22265625,
+   "all_wrong": 24.9609375,
+   "other_only": 0.64453125
+  },
+  "61-80": {
+   "steps": [
+    61,
+    80
+   ],
+   "groups": 5120,
+   "train_acc": 61.04736328125,
+   "mixed": 25.48828125,
+   "all_correct": 48.0859375,
+   "all_wrong": 25.87890625,
+   "other_only": 0.546875
+  },
+  "81-100": {
+   "steps": [
+    81,
+    100
+   ],
+   "groups": 5120,
+   "train_acc": 61.7578125,
+   "mixed": 25.9765625,
+   "all_correct": 49.0625,
+   "all_wrong": 24.47265625,
+   "other_only": 0.48828125
+  }
+ },
+ "a1_fmt0": {
+  "1-20": {
+   "steps": [
+    1,
+    20
+   ],
+   "groups": 5120,
+   "train_acc": 59.61669921875,
+   "mixed": 27.734375,
+   "all_correct": 45.72265625,
+   "all_wrong": 26.54296875,
+   "other_only": 0.0
+  },
+  "21-40": {
+   "steps": [
+    21,
+    40
+   ],
+   "groups": 5120,
+   "train_acc": 61.435546875,
+   "mixed": 26.0546875,
+   "all_correct": 48.3984375,
+   "all_wrong": 25.546875,
+   "other_only": 0.0
+  },
+  "41-60": {
+   "steps": [
+    41,
+    60
+   ],
+   "groups": 5120,
+   "train_acc": 61.16455078125,
+   "mixed": 26.328125,
+   "all_correct": 47.83203125,
+   "all_wrong": 25.83984375,
+   "other_only": 0.0
+  },
+  "61-80": {
+   "steps": [
+    61,
+    80
+   ],
+   "groups": 5120,
+   "train_acc": 61.005859375,
+   "mixed": 25.68359375,
+   "all_correct": 48.02734375,
+   "all_wrong": 26.2890625,
+   "other_only": 0.0
+  },
+  "81-100": {
+   "steps": [
+    81,
+    100
+   ],
+   "groups": 5120,
+   "train_acc": 61.62353515625,
+   "mixed": 25.09765625,
+   "all_correct": 49.0234375,
+   "all_wrong": 25.87890625,
+   "other_only": 0.0
+  }
+ }
+}
