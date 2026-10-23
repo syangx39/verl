@@ -6,7 +6,7 @@ Optimize the already-learning Gemma-4 E2B FP32 recipe by isolating the effects o
 
 PR #10 established learning, not a plateau: held-out accuracy rose **35.76% → 39.62% (+3.86 pp)** at step 100, with question-paired bootstrap 95% **[+2.82, +4.96] pp**. Its run was deliberately stopped at step 107; only steps 0–100 are the comparison reference. Qwen results motivate optimization but are not a Gemma acceptance threshold.
 
-**Status:** A1 (reward) is complete: not a candidate (see [A1 result](#a1-result-100-steps-complete)). A2 (prompt) is running; its start check passed. A3a (LR 2e-6) is predeclared and follows A2. See the [execution record](#execution-record). The initial commit was plan only.
+**Status:** A1 (reward) and A2 (prompt) are complete, and neither is a candidate (see [A1 result](#a1-result-100-steps-complete), [A2 result](#a2-result-100-steps-complete)). A3a (LR 2e-6) runs next. See the [execution record](#execution-record). The initial commit was plan only.
 
 ## Plan
 
@@ -99,7 +99,7 @@ Question-paired intervals do not measure training-seed uncertainty. Consecutive 
 |---|---|---|---:|---:|---|---|
 | A0 | PR #10 FP32 seed 1, steps 0–100 | Reported window verified; full run stopped at 107 | 35.76% | 39.62% | Reference | See PR #10 |
 | A1 | `gemma4_e2b_rl05fp32_a1fmt0_16n64g_s100_seed1_1023_0058`: `REWARD_FMT_WEIGHT_TRAIN=0` + `REWARD_EVAL_QUESTIONS` (eval keeps 0.1) | Valid: exit 0, guards PASS, 100 / 100 steps, dumps complete | 36.18% | 38.96% | −0.66 [−1.66, +0.30] | 3 h 22 min; not a candidate (format compliance falls, no detectable accuracy change) |
-| A2 | `gemma4_e2b_rl05fp32_a2wrap1_16n64g_s100_seed1_1023_0423`: `GEMMA_TRAIN_FILE=train_single_wrap.parquet` (format coefficient 0.1, eval unchanged) | Running (started 2026-10-23T04:23Z); start check passed | 36.18% | — | — | — |
+| A2 | `gemma4_e2b_rl05fp32_a2wrap1_16n64g_s100_seed1_1023_0423`: `GEMMA_TRAIN_FILE=train_single_wrap.parquet` (format coefficient 0.1, eval unchanged) | Valid: exit 0, guards PASS, 100 / 100 steps, template-change identity checks pass | 36.18% | 39.20% | −0.42 [−1.40, +0.56] | 3 h 18 min; not a candidate (no detectable accuracy change; slightly lower training accuracy) |
 | A3 | Predeclared: A3a LR `2e-6` (constant, no warmup); A3b LR `4e-6` only if A3a meets the rule above | Not run | — | — | — | — |
 
 Add reproducible launch/config evidence, per-question/per-step summaries and plots alongside each result. Preserve failed or inconclusive observations rather than deleting or pooling them.
@@ -249,6 +249,51 @@ One side effect is inherent to applying the template once. The Gemma-4 chat temp
 | Node prep / RoPE guard / tracebacks | PASS 16 / 16; PASS 64 / 64; none |
 
 Early behavior, descriptive only: with the single-wrapped prompt the initial policy formats less. Training format rate is 76.8% at step 1 (A0: 97.2%), recovering to 87.2% by step 3. Training accuracy over steps 1–7 is 58.24% vs 59.09% for A0 on the same raw questions.
+
+#### A2 result (100 steps, complete)
+
+**Validity**
+- Driver `exit_code=0` (`LAUNCHER_RC=0`), 100 / 100 steps, all six evals.
+- [Guard check](recipe_ablation/a2_prompt/guard_check.txt) PASS: node prep 16 / 16, RoPE guard 64 / 64, exit 0, steps 0–100.
+- `--train-template-change strip_inner_gemma3` validated every step 1–100 against A0: same raw questions and ground truths, and only the declared template change. Eval prompts are identical (strict).
+- The single traceback is the known exit-phase `DataLoader worker ... killed` after step 100.
+- Wall time: launched 04:23Z, log closed 07:41Z, about 3 h 18 min.
+- Evidence: [`recipe_ablation/a2_prompt/`](recipe_ablation/a2_prompt/), driver log [`logs/gemma4_e2b_rl05fp32_a2wrap1_16n64g_s100_seed1_1023_0423.log`](logs/gemma4_e2b_rl05fp32_a2wrap1_16n64g_s100_seed1_1023_0423.log).
+
+![A2 vs A0](recipe_ablation/a2_prompt/a2_vs_a0_s100.png)
+
+| Held-out `eval_5000` (paired by `qid`) | A0 (%) | A2 (%) | A2 − A0 (pp), bootstrap 95% | A2 vs own step 0 (pp, 95%) | format A0 / A2 (%) |
+|---:|---:|---:|---|---|---|
+| 0 (identical weights) | 35.76 | 36.18 | +0.42 [−0.50, +1.32] | — | 94.26 / 94.60 |
+| 20 | 37.40 | 37.26 | −0.14 [−1.08, +0.86] | +1.08 [+0.16, +2.00] | 97.44 / 96.80 |
+| 40 | 38.52 | 37.80 | −0.72 [−1.74, +0.20] | +1.62 [+0.60, +2.66] | 97.98 / 96.74 |
+| 60 | 38.30 | 38.90 | +0.60 [−0.38, +1.56] | +2.72 [+1.72, +3.74] | 97.96 / 97.40 |
+| 80 | 38.76 | 38.64 | −0.12 [−1.12, +0.84] | +2.46 [+1.42, +3.48] | 98.28 / 97.40 |
+| **100 (fixed endpoint)** | **39.62** | **39.20** | **−0.42 [−1.40, +0.56]** | +3.02 [+1.96, +4.04] | 98.62 / 97.78 |
+
+| Training (same raw questions, different training templates; T=0.8) | A0 train acc (%) | A2 train acc (%) | A2 − A0 mean (pp) | steps with A2 ahead | format A0 / A2 (%) |
+|---|---:|---:|---:|---:|---|
+| 1–20 | 59.53 | 59.08 | −0.45 | 7 / 20 | 98.86 / 96.15 |
+| 21–40 | 61.52 | 60.99 | −0.53 | 4 / 20 | 99.76 / 99.70 |
+| 41–60 | 61.26 | 60.99 | −0.27 | 8 / 20 | 99.78 / 99.76 |
+| 61–80 | 61.05 | 60.93 | −0.12 | 8 / 20 | 99.83 / 99.80 |
+| 81–100 | 61.76 | 61.46 | −0.30 | 7 / 20 | 99.85 / 99.82 |
+| 1–100 | 61.02 | 60.69 | −0.33 | 34 / 100 | 99.62 / 99.05 |
+
+**Signal and diagnostics** (window medians; [`signal_density_s100.json`](recipe_ablation/a2_prompt/signal_density_s100.json), [`format_breakdown.json`](recipe_ablation/a2_prompt/format_breakdown.json))
+- Correctness-mixed groups: 28.7% in steps 1–20, then 26.0–27.4% (A0: 25.5–27.1%). Format-only groups are 6.9% in steps 1–20, because of the initial format dip, then 0.6–1.1%.
+- `k3_kl`: 0.00068–0.00073 (A0: 0.00069–0.00073).
+- Entropy: 0.194–0.218 (A0: 0.196–0.216).
+- Responses: 1,677–1,865 tokens (A0: 1,576–1,857). That is 8–103 tokens longer, within the ~150-token same-recipe spread.
+- Clip ratio and `timing_s/step` are similar.
+
+**Reading**
+- **Not a candidate.** At the fixed step-100 endpoint A2 is −0.42 pp vs A0, and the paired interval [−1.40, +0.56] includes 0. Across the trajectory, 4 of 5 trained checkpoints are below A0 (−0.14, −0.72, +0.60, −0.12, −0.42), but every interval includes 0 and every difference is within the ~0.7 pp same-recipe spread.
+- **Training accuracy.** On the same raw questions it is lower in every 20-step window: −0.33 pp over 100 steps, with A2 ahead in 34 / 100 steps. The same-recipe repeat was +0.06 pp, ahead in 32 / 60. This is descriptive, because consecutive steps are not independent.
+- **What A2 shows:** under the frozen evaluation protocol, applying the chat template once to training prompts did not improve accuracy. If anything, the direction is slightly negative, but that is not detectable.
+  - The initial policy formats noticeably less with single-wrapped prompts (76.8% vs 97.2% at step 1); the 0.1 format reward restores at least 99.6% by step 20.
+  - Not tested by design: the effect when eval prompts are also single-wrapped.
+- **Next:** A3a keeps A0's double-wrapped training prompt and format coefficient 0.1. This also preserves TPU parity.
 
 ## Initial validation and scope
 
