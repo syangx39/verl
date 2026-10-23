@@ -3,7 +3,7 @@
 Plan and checklist: [UPDATE_PRECISION_PLAN.md](UPDATE_PRECISION_PLAN.md). This file records measured results per plan item, including negative or inconclusive ones. Evidence lives in [`update_precision/`](update_precision/).
 
 > [!IMPORTANT]
-> **Status:** items 1–3 are complete. Item 4: the frozen FP32 seed 1 was stopped at step 107 by decision, and steps 0–100 are reported in §4. The search for a recipe that clearly learns continues in PR #11, with 100-step single-factor ablations.
+> **Status:** items 1–3 are complete. Item 4: the frozen FP32 seed 1 was stopped at step 107 by decision, and steps 0–100 are reported in §4. FP32 clearly learns; recipe optimization continues in PR #11 with 100-step single-factor ablations.
 >
 > **What is established:**
 > - In the original recipe the optimizer holds BF16 parameters and BF16 Adam moments, and most of each AdamW update is lost when it is written back to the BF16 weights (item 2).
@@ -13,7 +13,7 @@ Plan and checklist: [UPDATE_PRECISION_PLAN.md](UPDATE_PRECISION_PLAN.md). This f
 > **What is not established:**
 > - A 200-step endpoint; the run did not reach it.
 > - The spread across seeds.
-> - A learning speed that is good enough. By step 100 the gain is about a third of what Qwen3-0.6B `stab_kl0` reached on its own held-out set (+12.1 pp, 3-seed mean).
+> - An optimized recipe or a learning plateau. Qwen3-0.6B `stab_kl0` gained +12.1 pp by step 100 on its own held-out set (3-seed mean), but the different model, held-out set and recipe make this context for optimization, not an acceptance threshold for Gemma.
 
 ## Summary
 
@@ -26,7 +26,7 @@ Plan and checklist: [UPDATE_PRECISION_PLAN.md](UPDATE_PRECISION_PLAN.md). This f
 | Which part loses the update? | **Write-back rounding.** On the same gradients, BF16 moments with FP32 write-back reproduce the intended update (cos 1.0000); FP32 moments with BF16 write-back lose as much as the real optimizer (‖·‖/‖ideal‖ 0.166 / 0.116). The changed set matches the round-to-nearest prediction (99.5% / 99.6%). Every parameter category is affected, including norms. | §2.3–2.4 |
 | What does the rollout see? | Per step, about 0.5% of BF16 casts change in both runs; with an FP32 master the visible change accumulates (0.494% → 0.593% after two steps), with BF16 it does not (0.498% → 0.493%). | §2.4 |
 | Does FP32 persistent precision learn faster (60 steps, seed 1, identical prompts)? | **Yes, on the training distribution:** training-accuracy gap FP32 − BF16 grows from +0.24 pp (steps 1–10) to **+1.87 pp (steps 41–60; FP32 ahead in 19 of 20 steps)**; format 99.8% vs 99.0%. **Held-out:** FP32 vs its own step 0 **+1.40 / +2.02 / +2.20 pp** at steps 20 / 40 / 60 (all intervals exclude 0). FP32 − BF16 is +0.90 / +1.30 / +0.72 pp; only step 40's interval excludes 0. | §3 |
-| Does the frozen FP32 recipe learn over 100 steps (seed 1)? | **Yes, but slowly.** Held-out 35.76% → **39.62%** at step 100: +3.86 pp vs its own step 0 (95% [+2.82, +4.96]) and +2.70 pp vs BF16 at the same step ([+1.64, +3.74]). On the same training prompts as BF16, training accuracy is +2.72 pp higher in steps 81–100 (FP32 ahead in 20 of 20 steps). For comparison, Qwen3-0.6B `stab_kl0` gained +12.1 pp by step 100 on its own held-out set. The run was stopped at step 107 by decision. | §4 |
+| Does the frozen FP32 recipe learn over 100 steps (seed 1)? | **Yes; recipe optimization remains open.** Held-out 35.76% → **39.62%** at step 100: +3.86 pp vs its own step 0 (95% [+2.82, +4.96]) and +2.70 pp vs BF16 at the same step ([+1.64, +3.74]). On the same training prompts as BF16, training accuracy is +2.72 pp higher in steps 81–100 (FP32 ahead in 20 of 20 steps). Qwen3-0.6B `stab_kl0` gained +12.1 pp by step 100 on its own held-out set; the differing model, split and recipe prevent a direct learning-speed comparison. The run was stopped at step 107 by decision. | §4 |
 
 ## 1. Audit of existing evidence (plan item 1)
 
@@ -105,7 +105,7 @@ Applied in this PR to [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md) §5 and [README.md](R
 
 The CPU self-test ([`test_gemma4_optim_probe.py`](test_gemma4_optim_probe.py), [output](update_precision/probe/selftest.txt)) checks the probe on a toy model: FP32 parameters change 100% with applied = ideal; BF16 parameters match the round-to-nearest prediction to within ties.
 
-Runs: `NNODES=16 TOTAL_STEPS=2` through `run_gemma4_e2b_rl05_parity.sh` with seed 1 (the same first batches as PR #9 seed 1), once as-is (BF16) and once with the single override `++actor_rollout_ref.actor.fsdp_config.model_dtype=fp32`. Both runs passed the RoPE guard on 64 / 64 ranks ([BF16](update_precision/probe/v1_bf16_guard_check.txt), [FP32](update_precision/probe/v1_fp32_guard_check.txt)); `k3_kl` = 0.00071 / 0.00072 in both; peak reserved memory 57–61 GB in both; step 2 took 61.0 s (BF16) and 64.2 s (FP32).
+Runs: `NNODES=16 TOTAL_STEPS=2` through the then-current BF16 `run_gemma4_e2b_rl05_parity.sh` (sha256 `8646c173…`) with seed 1 (the same first batches as PR #9 seed 1), once as-is (BF16) and once with the single override `++actor_rollout_ref.actor.fsdp_config.model_dtype=fp32`. The current launcher defaults to FP32; reproduction commands below explicitly select BF16 for that arm. Both runs passed the RoPE guard on 64 / 64 ranks ([BF16](update_precision/probe/v1_bf16_guard_check.txt), [FP32](update_precision/probe/v1_fp32_guard_check.txt)); `k3_kl` = 0.00071 / 0.00072 in both; peak reserved memory 57–61 GB in both; step 2 took 61.0 s (BF16) and 64.2 s (FP32).
 
 ### 2.2 Runtime dtypes and settings (all 64 ranks)
 
@@ -318,7 +318,7 @@ Wall time is longer than `timing_s/step`. The training progress bar averaged abo
   - Held-out accuracy is above FP32's own step 0 at every checkpoint, with intervals excluding zero from step 20 on. The gain reaches +3.86 pp at step 100, where FP32 − BF16 is +2.70 pp [+1.64, +3.74].
   - On identical training prompts, the FP32 − BF16 gap grows from +0.08 pp (steps 1–10) to +2.72 pp (steps 81–100).
   - This is one seed: strong directional evidence, not a multi-seed result.
-- **The learning is slow.** Qwen3-0.6B `stab_kl0` (64 GB200, 3 seeds) went from 36.9% to 49.0% by step 100 on its own 1,000-question OMI-2 held-out set, a gain of +12.1 pp. Gemma FP32 gained +3.86 pp. The two numbers are not directly comparable, because the model, the held-out set and the recipe all differ. Still, the gap is large enough that the current recipe does not yet count as effective.
+- **FP32 clearly learns, but recipe optimization remains open.** Qwen3-0.6B `stab_kl0` (64 GB200, 3 seeds) went from 36.9% to 49.0% by step 100 on its own 1,000-question OMI-2 held-out set, a gain of +12.1 pp. Gemma FP32 gained +3.86 pp. The model, held-out set and recipe all differ, so Qwen provides context for further optimization, not an acceptance threshold for Gemma. The stop at step 107 closes this precision investigation; it does not establish a learning plateau.
 - **Observations that may explain the gap (not yet tested):**
   - *Signal density.* In every 20-step window, only 25.5–27.1% of Gemma FP32's GRPO groups have mixed correctness; 45–49% are all-correct and about 25% all-wrong. For Qwen `stab_kl0` (3 seeds) the mixed share is 50–59%. Gemma gets about half as many informative prompts per step.
   - *Training vs held-out difficulty.* Gemma's sampled training accuracy is ~60%, while its greedy held-out accuracy is ~36%. `eval_5000` keeps only questions that do not overlap the training file, and for Gemma these are clearly harder than the training prompts. For Qwen the two numbers are closer: 42–43% sampled vs 36.9% greedy, on a question-level split.
@@ -332,7 +332,7 @@ Wall time is longer than `timing_s/step`. The training progress bar averaged abo
 
 ### 4.6 Handoff to PR #11
 
-- **Setup:** from PR #11 on, every run is 100 steps. The goal is a recipe that clearly learns, found by ablation.
+- **Setup:** PR #11 screens single-factor ablations over 100 steps to improve the already-learning FP32 recipe.
 - **Reference:** this run's steps 0–100 (frozen FP32 recipe, seed 1, eval every 20 steps under the frozen `eval_5000` protocol).
 - **One factor per run.** Each ablation is screened with seed 1 and compared at matched steps: held-out paired by `qid`, and training accuracy on identical prompts. Results are read against the same-recipe reproducibility in §4.3.
 - **Planned order:**
@@ -340,7 +340,7 @@ Wall time is longer than `timing_s/step`. The training progress bar averaged abo
   2. the double-wrapped prompt
   3. LR
 - **TPU reproducibility:** every lever must be reproducible on TPU, because the customer gate compares identical recipes.
-- **Multi-seed validation** comes after a recipe clearly learns.
+- **Multi-seed validation** follows selection and freezing of the optimized candidate recipe.
 - **Open for PR #11:** the endpoint and number of seeds for the final GPU reference. [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md) still specifies the 3-seed step-200 mean.
 
 ## Reproduction
@@ -352,8 +352,10 @@ D=/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gemma4
 # item 1: audit (CPU)
 python3 $D/gemma4_learning_signal.py --run-dir /workspace/meta-RL/logs/gemma4_eval/gemma4_e2b_rl05_16n64g_s200_seed1_1021_1955 \
   --replicate-run /workspace/meta-RL/logs/gemma4_eval/gemma4_e2b_rl05_16n64g_s200_seed2_1022_0301 --out-md audit.md --out-json audit.json
-# item 2: 2-step probe (add ++actor_rollout_ref.actor.fsdp_config.model_dtype=fp32 for the FP32 control)
+# item 2: BF16 2-step probe (current launcher defaults to FP32).
+# For the FP32 control, replace the bfloat16 override below with fp32.
 NNODES=16 TOTAL_STEPS=2 EXPERIMENT_NAME=<exp> bash $D/run_gemma4_e2b_rl05_parity.sh \
+  actor_rollout_ref.actor.fsdp_config.model_dtype=bfloat16 \
   data.seed=1 actor_rollout_ref.rollout.seed=1 actor_rollout_ref.actor.data_loader_seed=1 actor_rollout_ref.actor.fsdp_config.seed=1 \
   "++ray_kwargs.ray_init.runtime_env.py_modules=[\"$D/gemma4_optim_probe\"]" \
   ++ray_kwargs.ray_init.runtime_env.worker_process_setup_hook=gemma4_optim_probe.install \
@@ -382,4 +384,8 @@ python3 $D/gemma4_signal_density.py --run gemma_fp32_s1=$E/<exp4>/train --run ge
   --run qwen_stab_kl0_seed2=$L/qwen3_0p6b_phase0_stab_kl0_seed2_16n64g_20260913_1914/rollout_dump \
   --run qwen_stab_kl0_seed3=$L/qwen3_0p6b_phase0_stab_kl0_seed3_16n64g_20260913_2333/rollout_dump --out-json signal_density_s100.json
 python3 $D/gemma4_guard_check.py --log $L/<exp4>.log --guard-dir $L/gemma4_guard/<exp4> --world 64 --steps 100 --out guard_check.json
+# Regenerate the reported 0–100 figures from the preserved summary (which retains steps 101–107).
+python3 $D/gemma4_eval_report.py \
+  --from-json $D/update_precision/fp32_seed1_100steps/fp32_seed1_eval_report.json \
+  --max-step 100 --plot-dir $D/update_precision/fp32_seed1_100steps
 ```
