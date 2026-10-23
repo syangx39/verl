@@ -53,6 +53,7 @@ Porting notes / deltas:
 """
 
 import datetime as _dt
+import hashlib
 import itertools
 import json
 import os
@@ -118,6 +119,50 @@ def _overlong_reward(extra_info):
   expected = _MAX_RESP_LEN - _OVERLONG_BUFFER
   pen = min(0.0, -(float(n) - expected) / _OVERLONG_BUFFER * _OVERLONG_PENALTY)
   return pen, {"overlong": 1.0 if pen < 0 else 0.0}
+
+
+# --- PR #11 A1: training-only format coefficient ----------------------------
+# Unset (default) = REWARD_FMT_WEIGHT for every row, i.e. exactly the behaviour above.
+#   REWARD_FMT_WEIGHT_TRAIN  format coefficient for TRAINING rows only (A1: 0).
+#   REWARD_EVAL_QUESTIONS    required with it: JSON with the sha256 of every held-out eval question
+#                            (eval_5k/eval_5000_question_sha256.json). Rows whose extra_info["question"]
+#                            hashes into that set keep REWARD_FMT_WEIGHT (canonical eval grading); every
+#                            other row gets REWARD_FMT_WEIGHT_TRAIN.
+# Why membership: verl calls compute_score with the same data_source / extra_info fields for training and
+# validation rows, and its `validate` flag does not reach the scorer. eval_5000 excludes every question that
+# overlaps train.parquet (EVAL_PROTOCOL.md), so the two sets are disjoint (checked before the A1 run).
+# With the knob on, the result also carries "fmt_coef" (coefficient applied) and "eval_scope" (1 = eval row),
+# so the rollout and validation dumps show which coefficient each row received.
+_FMT_WEIGHT_TRAIN_ENV = os.environ.get("REWARD_FMT_WEIGHT_TRAIN", "").strip()
+_FMT_WEIGHT_TRAIN = float(_FMT_WEIGHT_TRAIN_ENV) if _FMT_WEIGHT_TRAIN_ENV else None
+_EVAL_QUESTION_SHA256 = None
+if _FMT_WEIGHT_TRAIN is not None:
+  _eval_questions_path = os.environ.get("REWARD_EVAL_QUESTIONS", "").strip()
+  if not _eval_questions_path:
+    raise ValueError("REWARD_FMT_WEIGHT_TRAIN is set but REWARD_EVAL_QUESTIONS is not: the eval rows cannot be "
+                     "kept on the canonical format coefficient")
+  with open(_eval_questions_path, encoding="utf-8") as _f:
+    _eval_manifest = json.load(_f)
+  _EVAL_QUESTION_SHA256 = frozenset(_eval_manifest["question_sha256"])
+  if len(_EVAL_QUESTION_SHA256) != int(_eval_manifest["n"]):
+    raise ValueError(f"{_eval_questions_path}: {len(_EVAL_QUESTION_SHA256)} unique hashes, manifest says "
+                     f"{_eval_manifest['n']}")
+
+
+def _question_sha256(question: str) -> str:
+  return hashlib.sha256(question.encode("utf-8")).hexdigest()
+
+
+def _format_coefficient(extra_info):
+  """Returns (coefficient, flags). Flags are empty unless REWARD_FMT_WEIGHT_TRAIN is set."""
+  if _FMT_WEIGHT_TRAIN is None:
+    return _FMT_WEIGHT, {}
+  question = extra_info.get("question") if isinstance(extra_info, dict) else None
+  if not isinstance(question, str):
+    raise RuntimeError("REWARD_FMT_WEIGHT_TRAIN is set but extra_info has no 'question' string")
+  is_eval = _question_sha256(question) in _EVAL_QUESTION_SHA256
+  coef = _FMT_WEIGHT if is_eval else _FMT_WEIGHT_TRAIN
+  return coef, {"fmt_coef": coef, "eval_scope": 1.0 if is_eval else 0.0}
 
 # --- regexes (utils_rl.get_match_format_regex / get_answer_fallback_regex) --
 MATCH_FORMAT = re.compile(
@@ -536,7 +581,8 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, **kw
   """verl custom reward entry point.
 
   Returns {"score": fmt_w*fmt + ans + length_penalty, "acc", "fmt", "length_penalty", "overlong",
-           "qid", "mv_used", "mv_timeout", "mv_exc", "mv_lenrej"}.
+           "qid", "mv_used", "mv_timeout", "mv_exc", "mv_lenrej"}, plus "fmt_coef" and "eval_scope" when
+  REWARD_FMT_WEIGHT_TRAIN is set (fmt_w is then per row, see _format_coefficient).
   With default knobs (fmt weight 0.1, overlong off) "score" equals the original
   MaxText-parity scalar reward.
   """
@@ -544,7 +590,8 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, **kw
   completion = solution_str if isinstance(solution_str, str) else str(solution_str)
   fmt_raw = _format_score(completion)                  # 0.1 or 0 (MaxText match_format_exactly)
   fmt_flag = 1.0 if fmt_raw > 0 else 0.0
-  fmt = fmt_flag * _FMT_WEIGHT                          # weight knob (0.1 = parity, 0 = answer-only)
+  fmt_w, fcf = _format_coefficient(extra_info)          # (0.1 = parity, 0 = answer-only); per row if scoped
+  fmt = fmt_flag * fmt_w
   ans, mvf = _answer_score(completion, ground_truth)
   acc_flag = 1.0 if ans >= REWARD_EXACT_ANSWER else 0.0
   ol, olf = _overlong_reward(extra_info)
@@ -571,7 +618,7 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, **kw
   # qid = extra_info["index"] (verl repeats it for the n=8 completions of a prompt)
   # so the rollout dump can be grouped exactly; mv_* are per-call outcome flags.
   return {"score": fmt + ans + ol, "acc": acc_flag, "fmt": fmt_flag, "length_penalty": ol,
-          "qid": qid, **olf, **mvf}
+          "qid": qid, **olf, **mvf, **fcf}
 
 
 # --------------------------- self-test -------------------------------------
