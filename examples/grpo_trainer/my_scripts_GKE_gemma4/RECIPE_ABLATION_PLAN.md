@@ -101,7 +101,7 @@ Question-paired intervals do not measure training-seed uncertainty. Consecutive 
 | A1 | `gemma4_e2b_rl05fp32_a1fmt0_16n64g_s100_seed1_1023_0058`: `REWARD_FMT_WEIGHT_TRAIN=0` + `REWARD_EVAL_QUESTIONS` (eval keeps 0.1) | Valid: exit 0, guards PASS, 100 / 100 steps, dumps complete | 36.18% | 38.96% | −0.66 [−1.66, +0.30] | 3 h 22 min; not a candidate (format compliance falls, no detectable accuracy change) |
 | A2 | `gemma4_e2b_rl05fp32_a2wrap1_16n64g_s100_seed1_1023_0423`: `GEMMA_TRAIN_FILE=train_single_wrap.parquet` (format coefficient 0.1, eval unchanged) | Valid: exit 0, guards PASS, 100 / 100 steps, template-change identity checks pass | 36.18% | 39.20% | −0.42 [−1.40, +0.56] | 3 h 18 min; not a candidate (no detectable accuracy change; slightly lower training accuracy) |
 | A3a | LR `2e-6`, constant, no warmup: `gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753` (override `actor_rollout_ref.actor.optim.lr=2e-6`) | A3a valid: exit 0, guards PASS, 100 / 100 steps, `actor/lr` 2e-06 at every step | 36.06% | **40.96%** | **+1.34 [+0.32, +2.44]** | 3 h 08 min; **candidate**; A3b rule met, so A3b (4e-6) launched; entropy 0.20 → 0.37 and `k3_kl` 0.00071 → 0.00106 drift upward |
-| A3b | LR `4e-6`, constant, no warmup: `gemma4_e2b_rl05fp32_a3lr4e6_16n64g_s100_seed1_1023_1116` (override `actor_rollout_ref.actor.optim.lr=4e-6`; A0 reward and prompt; fresh start) | **Unstable: the policy collapses from about step 60** (see [A3b interim](#a3b-interim-instability-at-lr-4e-6)); still running at step ~72 when recorded | 35.96% | — | step 60: −1.50 [−2.58, −0.30] | collapse; not a candidate |
+| A3b | LR `4e-6`, constant, no warmup: `gemma4_e2b_rl05fp32_a3lr4e6_16n64g_s100_seed1_1023_1116` (override `actor_rollout_ref.actor.optim.lr=4e-6`; A0 reward and prompt; fresh start) | **Unstable: the policy collapses from about step 60** (see [A3b interim](#a3b-interim-instability-at-lr-4e-6)); still running (step 80: held-out 11.32%) | 35.96% | — | step 60: −1.50 [−2.58, −0.30]; step 80: −27.44 [−28.74, −26.20] | collapse; not a candidate; stop recommended, awaiting the user |
 
 Add reproducible launch/config evidence, per-question/per-step summaries and plots alongside each result. Preserve failed or inconclusive observations rather than deleting or pooling them.
 
@@ -402,6 +402,8 @@ Recorded at step ~72 (2026-10-23T13:47Z).
 | 72 | **15.7** | 60.3 | **20.3** | **74.0** | **26,050** |
 
 Responses degenerate into long completions without an answer. Every predeclared stop signal is crossed: entropy above 0.6, `k3_kl` above 0.003, and held-out below A0.
+
+**Step-80 eval (2026-10-23T14:28Z):** held-out **11.32%**, which is −27.44 pp vs A0 [−28.74, −26.20]. 21.18% of completions are formatted, 78.5% have no `</answer>`, and the mean completion is 15,767 characters. Each training step now takes about 393 s, against about 100 s before the collapse.
 
 **Reading:** LR 4e-6 is unstable for this recipe within 100 steps. A3a's slower drift in entropy and `k3_kl` was an early sign of the same mechanism.
 
