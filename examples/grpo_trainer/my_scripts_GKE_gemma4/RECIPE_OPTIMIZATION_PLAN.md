@@ -49,38 +49,84 @@ Except for the declared factor, preserve:
 
 | Arm | Only recipe change vs A3a | Hypothesis | Extra evidence required |
 |---|---|---|---|
-| **A4 — LR decay** | LR 2e-6 through update 40, then linear decay to 1e-6 at update 100; no warmup | Keep early progress while reducing late update size | Update-used LR sequence and scheduler/logging index check; full stability trajectory |
+| **A4 — native cosine** | First 100 updates of a 200-step cosine from peak 2e-6 to 0; no warmup (schedule value at count 100 is 1e-6) | Reduce update size with a schedule available on GPU and TPU | Exact update-used LR sequence, resolved schedule horizon and stability trajectory |
 | **A5 — temperature** | Training T **0.8 → 1.0**; keep top-p=0.95, top-k=50 and n=8 | More sampling diversity may increase mixed-correctness groups and useful learning signal | Actual sampler/trainer temperature and log-prob semantics; correctness/zero-advantage group shares |
 | **A6 — completions** | n **8 → 16**; keep 256 prompts and A3a's T=0.8, constant LR 2e-6 | More answers per question may expose correctness differences within a group | 4,096 completions/update, 256 groups × 16, one update; measured token and time cost |
 
-A4 first addresses the observed late drift. A5 then tests the most direct sampling difference suggested by the closer Qwen OMI2 comparator. A6 is a separate, higher-cost signal-density screen. **Each compares against A3a; A5 does not inherit A4's decay, and A6 does not inherit either preceding change.** Record an arm's exact command/config before launch. After each result, record whether the next planned arm still addresses an unresolved question; no automatic large sweep.
+A4 first addresses the observed late drift using a native cosine schedule; it no longer uses a custom hold-then-linear schedule. A5 then tests the most direct sampling difference suggested by the closer Qwen OMI2 comparator. A6 is a separate, higher-cost signal-density screen. **Each compares against A3a; A5 does not inherit A4's decay, and A6 does not inherit either preceding change.** Record an arm's exact command/config before launch. After each result, record whether the next planned arm still addresses an unresolved question; no automatic large sweep.
 
-**A4 schedule definition.** Let `k` be the 1-based optimizer update and `lr_used(k)` the LR actually used for that update:
+**A4 decision: native half-cosine, no custom scheduler.** Use zero-based optimizer count `s`:
 
 ```text
-k = 1..40:    lr_used(k) = 2e-6
-k = 41..100:  lr_used(k) = 2e-6 - (k - 40) * 1e-6 / 60
+lr(s) = 1e-6 * (1 + cos(pi * s / 200))
+1-based update k uses s = k - 1, for k = 1..100.
 ```
 
-Check update 1 = 2e-6, 40 = 2e-6, 41 = 1.983333333e-6 and 100 = 1e-6. A post-scheduler logged LR may describe the next update; do not shift this schedule to match a label. Implement and test this exact schedule before launching; do not claim that an existing cosine flag implements it. This arm tests decay only, not adding warmup.
+| Setting | GPU / verl FSDP | TPU / MaxText RL |
+|---|---|---|
+| Peak LR | `actor.optim.lr=2e-6` | `learning_rate=2e-6` |
+| Training horizon | `actor.optim.total_training_steps=100` and trainer runs 100 updates | Actual training horizon 100 updates |
+| Schedule | `lr_scheduler_type=cosine`, `num_cycles=0.25`, `min_lr_ratio=0` | `learning_rate_schedule_steps=200`, RL cosine end value 0 |
+| Warmup | Resolved warmup steps 0 (`lr_warmup_steps=0`, `lr_warmup_steps_ratio=0`) | `warmup_steps_fraction=0` |
+| Optimizer count | `zero_indexed_step=true`; update 1 uses count 0 | Fresh optimizer count 0; verify the update-used values |
 
-**A5 is deliberately not the entire Qwen sampling bundle.** Top-p/top-k stay fixed so temperature is the only recipe factor. Removing either filter would be a separately declared follow-up, not a silent addition. At the new temperature verify that teacher-forced trainer log-probs and saved sampler log-probs use the intended matching probability convention. Trainer entropy at different T is not an apples-to-apples numerical comparison.
+GPU optimizer fields above are under `actor_rollout_ref.actor.optim`. Confirm the fields and scheduler implementation in the actual pinned runtime before launch.
+
+**Indexing matters:** `lr(0)=2e-6`, `lr(40)=1.809016994e-6`, `lr(99)=1.015707317e-6`, `lr(100)=1e-6`. Thus **update 100 uses about 1.0157e-6**; the GPU LR logged after its scheduler advances can be 1e-6. Do not call a post-step value the LR used for that update. The mean over the 100 update-used values `s=0..99` is **1.641606682e-6**. This replaces the former hold-40-then-linear schedule and its average LR.
+
+MaxText's `get_optimizer` may treat `learning_rate_schedule_steps == steps` as unset and fall back to its computed training horizon. Require the **effective schedule horizon to be 200**, the actual update count to be 100 and zero warmup; do not infer the effective horizon from one YAML field. Compare all update-used values, rather than assuming that identically named step counters have the same meaning.
+
+Sources checked: [verl schedule at runtime pin ace775e8](https://github.com/verl-project/verl/blob/ace775e87d8765bcdd114aac734ab71da5367a0f/verl/utils/torch_functional.py) and [MaxText RL optimizer at c28166ca7](https://github.com/AI-Hypercomputer/maxtext/blob/c28166ca7/src/maxtext/trainers/post_train/rl/utils_rl.py). This checks the referenced implementations; it does not verify the TPU team's current Gemma image.
+
+Before eventual TPU parity, obtain its actual optimizer implementation, resolved LR/warmup/schedule fields and used-LR sequence. A very long cosine with **zero warmup** can approximate constant LR, but that is not exact constant LR; retaining 10% warmup with a huge horizon instead creates a huge warmup. Defaults alone do not establish how TPU's current constant-LR baseline was implemented. This verification need not delay the GPU-only screening.
+
+**A5 is deliberately not the entire Qwen sampling bundle.** Top-p/top-k stay fixed so temperature is the only recipe factor. Removing either filter would be a separately declared follow-up, not a silent addition. At the new temperature verify that teacher-forced trainer log-probs and saved sampler log-probs use the intended matching probability convention. Trainer entropy at different T is not an apples-to-apples numerical comparison. **T=1 plus LR 2e-6 is an unvalidated combination**; Qwen's closer OMI2 reference used LR 1e-6. If A5 fails, report failure of this combination/run, not that T=1 is generally ineffective or that its failure shares A3b's mechanism. Use growth relative to A5's own early entropy baseline, not an absolute entropy=0.6 stop line.
 
 **A6 is not a performance-only change.** It keeps question coverage at 25,600 prompt slots over 100 steps but increases completions from 204,800 to 409,600. It changes the statistical training batch. Report actual generated/trained tokens and GPU-hours; wall time need not double exactly. A larger mixed-group fraction alone is not success: it can rise mechanically with n and must translate to accuracy or measured cost efficiency. Do not halve prompts to keep 2,048 completions and call it the same experiment.
+
+Keep **eval every 20 steps** for this screen. A6 step 40 and A3a step 80 each represent **163,840 completions**, but differ in prompt exposure, optimizer updates, token lengths and compute. Label this an **equal-completion-count comparison**, not equal compute. Use measured cumulative tokens and GPU-hours for resource comparisons; do not add five extra evals to the primary arm at this stage.
 
 ### 4. Implement and validate before the next GPU runs
 
 - [ ] Archive the A3a control manifest, exact launch command/resolved config, model/data/code hashes and result paths.
-- [ ] Add the A4 schedule with meaningful boundary and update-index checks; verify its actual trainer path on a short smoke.
+- [ ] Configure A4's native cosine, export all 100 update-used learning rates and verify the zero-based update index/horizon against the formula below. Compare the intended MaxText schedule using its actual resolved config before claiming TPU parity; then verify the GPU trainer path on a short smoke.
 - [ ] Make each arm's override explicit in the launcher and resolved config; compare against A3a and reject unintended recipe changes. Keep training-only changes out of eval settings.
 - [ ] Verify A5's probability convention at T=1, including raw/processed sampler log-probs and retained top-k/top-p filters. A training log-prob mismatch must not be mistaken for a useful exploration change.
 - [ ] Generalize comparison/signal tools that currently assume 2,048 rows and groups of eight. For A6 require **4,096 rows, exactly 256 groups × 16**, consistent prompt/answer per group and unchanged ordered prompt membership. Add a valid n=16 case and negative incomplete/incorrect-group cases; do not disable identity checks.
 - [ ] Confirm global token-mean loss normalization and one optimizer update across A6's full batch. Record gradient-accumulation/microbatch settings; more completions must not silently become multiple optimizer steps.
-- [ ] Predeclare and implement the run's monitoring/stop rules before launch. Node/RoPE guard failures and non-finite numerics stop the run. Large sustained entropy/log-prob/cap-hit deterioration triggers investigation; thresholds must be labeled engineering screening rules, not a GPU/TPU parity gate. Preserve any aborted arm as incomplete/failed, with no step-100 result invented.
+- [ ] Run an **A6 two-step smoke** before its 100-step run to check memory, the 256 × 16 grouping contract and completion of both updates. Record memory and component timing; two startup-heavy steps do not establish steady-state throughput. The proposed 1.4–1.9× step-time / 4.5–6 h budget is an estimate to replace with measurements, not a performance result.
+- [ ] Implement and test the predeclared stop rules in §4.1, including consecutive-step counting, complete-dump validation, metric freshness and experiment-specific termination. Do not run unattended until the monitor can observe each completed step promptly.
 - [ ] Run the existing reward-scope/template-identity tests and the changed schedule/batch-contract checks. Keep code and manifests identical across nodes; record probe results.
 - [ ] Launch each authorized arm from the initial checkpoint only after its preflight passes.
 
 No production launch commands are promised in this initial draft: exact overrides will be added with the implementation, rather than presenting unsupported scheduler flags as runnable.
+
+### 4.1 Predeclared monitoring and stop authorization
+
+**Decision:** once the rules below are implemented and checked, the experiment operator/monitor may terminate the affected PR #12 run as soon as any applicable rule triggers, **without waiting for another confirmation**. Terminate only that run's driver/workers; do not stop other jobs or tear down the cluster. These are conservative experiment-budget rules, not calibrated GPU/TPU parity thresholds or proof of a particular failure mechanism.
+
+| Signal | Stop condition |
+|---|---|
+| Numerical or correctness fault | Any non-finite loss/gradient/log-prob metric, or failed node/RoPE guard: stop immediately |
+| Trainer–sampler mismatch | `k3_kl > 0.003` for **3 consecutive complete training steps** |
+| Missing final answer delimiter | Fraction of responses without `</answer>` **>10% for 3 consecutive complete training steps** |
+| Sampled training accuracy, A4/A6 | Accuracy **more than 10 pp below A3a on the same step's prompt instances for 3 consecutive steps**, with prompt identity validated |
+| Sampled training accuracy, A5 | Apply the temperature-offset rule below, starting at step 6 |
+| Held-out degradation | At a complete frozen eval, accuracy **at least 2 pp below this run's own step 0**, **and** the question-paired 95% CI upper bound for that difference is below 0 |
+
+A single small held-out decrease or one unusual training batch does not trigger these statistical rules. The held-out rule is a conservative abort heuristic under repeated checks, not a sequentially calibrated significance test.
+
+**A5 temperature-offset rule:** compute `d_k = train_acc_A5(k) - train_acc_A3a(k)` in percentage points on matched prompt instances. Freeze `b = median(d_1,...,d_5)` once the first five complete dumps are available. Starting at step 6, stop only if **both** `d_k < -10 pp` and `d_k - b < -10 pp` hold for 3 consecutive steps. This avoids treating a persistent initial sampling-accuracy shift as training collapse; it can also miss a static quality deficit, which still appears in frozen eval. The other stop rules apply from the beginning.
+
+**Entropy:** report A5's early baseline and relative growth (e.g. last-20 / first-20 median), but do not use entropy=0.6 as a cross-temperature hard cutoff. A4/A6 retain A3a's temperature; report their same-temperature trajectories too.
+
+**Fresh evidence, not delayed Ray log delivery:**
+
+- Read only complete step dumps: 2,048 rows / 256 × 8 for A4/A5, 4,096 / 256 × 16 for A6, with complete group identity and required fields. An atomic completion marker or validated manifest is preferable to guessing from file existence. A partially written dump is neither a low-accuracy batch nor a missing-answer event.
+- Derive training accuracy from the explicit correctness field (or unchanged scorer), not total reward; compute missing-delimiter rate from response text.
+- Text/reward dumps alone may not contain `k3_kl`, loss or gradient metrics. Require a promptly flushed, per-step trainer metric stream/JSONL or TensorBoard for those signals, keyed by the same update number. A Ray driver log arriving 10–20 steps late is insufficient for this monitor.
+- Test monitor latency and metric completeness during smoke. Missing/unreadable metrics are not zeros; resolve an observability failure before unattended training rather than claiming the run stayed below a threshold.
+- Save the trigger step, measured values, threshold, timestamp, stop request and actual last completed update; preserve existing logs/dumps/artifacts. Mark the arm `early-stopped/incomplete` with reason, and do not substitute an earlier best checkpoint for step 100 or promise a checkpoint that was never saved.
 
 ### 5. Judge accuracy, signal quality, stability and cost together
 
@@ -89,6 +135,8 @@ No production launch commands are promised in this initial draft: exact override
 **Learning diagnostics:** sampled training accuracy and format separately from total reward; all-correct/all-wrong/mixed-correctness groups; zero-advantage and format-only groups; advantage-mass shares; response length/cap-hit rate; entropy, gradient norm, PPO clipping and trainer–sampler mismatch. Track whether the chosen arm makes correctness-bearing updates more useful, not only more numerous. Trainer–sampler `k3_kl` is not KL to the initial policy.
 
 **Cost:** report time from the same launch boundary through completion of step-100 eval, GPU-hours, generated response tokens and trainer tokens. For steady throughput give full-window mean plus median/p90 with a declared warmup/eval exclusion policy. Plot accuracy against cumulative tokens and time as well as step. A6's twofold completion budget must be visible; fixed-step improvement alone does not establish better compute efficiency.
+
+**A4 stability-candidate label:** accuracy and stability are separate axes. If the step-100 paired CI vs A3a includes zero, A4 can still be recorded as a **provisional stability candidate, quality unresolved** when both entropy and `k3_kl` have lower last-20-step medians and at least **25% less early-to-late drift** than A3a, with no stop rule triggered. Define drift for each metric as `median(steps 81..100) - median(steps 1..20)`, computed from full-resolution recorded values at the same T. The 25% reduction is a predeclared descriptive screen, not a significance claim. Report any observed accuracy loss alongside it; if accuracy clearly degrades, label a quality/stability tradeoff rather than a winning recipe. No detectable difference does not prove accuracy equivalence or long-term stability.
 
 **Selection:** a positive paired interval, a consistent full curve and acceptable diagnostics nominate a candidate. If the interval includes zero, describe the result as inconclusive; a cheaper arm with comparable observed accuracy can still be recorded as a cost candidate, without claiming statistical equivalence. These intervals describe fixed trained models, not seed variance. Repeated recipe screening can overfit the validation set; freeze the candidate before fresh-seed confirmation and do not advertise a seed-1 screen as final generalization proof.
 
@@ -105,7 +153,7 @@ After choosing a recipe, freeze it and evaluate the longer horizon and additiona
 | Arm | Exact command/config and experiment ID | Validity / completed steps | Step-0 acc | Step-100 acc | Difference vs A3a, pp (paired 95% CI) | Tokens / GPU-hours / decision |
 |---|---|---|---:|---:|---|---|
 | A3a control | PR #11 run `gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753` | Complete: 100 steps, all six evals | 36.06% | 40.96% | Reference | Reuse recorded evidence; stability caveat |
-| A4 decay | Not launched | Pending implementation/preflight | — | — | — | — |
+| A4 native cosine | Not launched | Pending implementation/preflight | — | — | — | — |
 | A5 T=1 | Not launched | Pending implementation/preflight | — | — | — | — |
 | A6 n=16 | Not launched | Pending implementation/preflight | — | — | — | — |
 
@@ -113,6 +161,6 @@ Keep completed, null, failed and aborted arms in this ledger. Link commands, man
 
 ## Initial validation and scope
 
-Documentation only: no runtime change or GPU job in this commit. The draft was checked against merged PR #11, the Qwen rulebook/guide/launcher, the existing Gemma comparison evidence and frozen eval protocol; relative document links were checked. No new runtime test is warranted for this plan-only commit; implementation checks are listed above.
+Documentation only: no runtime change or GPU job in this commit. The draft was checked against merged PR #11, the Qwen rulebook/guide/launcher, the existing Gemma comparison evidence and frozen eval protocol; relative document links were checked. The later prelaunch decision selects native half-cosine, records explicit abort authorization and rules, and keeps A6 eval every 20 steps; no monitor or scheduler runtime implementation is claimed by these documentation edits. No new runtime test is warranted for this plan-only commit; implementation checks are listed above.
 
 This follows the completed PR #11 screen. No overlapping open experimental PR was found in this fork or the upstream `gemma4 ablation` search during closeout. AI assistance: Codex drafted the plan at the user's request; experiment implementation, human review and runtime evidence remain to be added.
