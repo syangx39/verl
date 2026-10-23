@@ -6,7 +6,7 @@ Optimize the already-learning Gemma-4 E2B FP32 recipe by isolating the effects o
 
 PR #10 established learning, not a plateau: held-out accuracy rose **35.76% → 39.62% (+3.86 pp)** at step 100, with question-paired bootstrap 95% **[+2.82, +4.96] pp**. Its run was deliberately stopped at step 107; only steps 0–100 are the comparison reference. Qwen results motivate optimization but are not a Gemma acceptance threshold.
 
-**Status:** A1 (reward) and A2 (prompt) are complete; neither is a candidate. A3a (LR 2e-6) is complete and is the first candidate: +1.34 pp vs A0 at step 100, paired 95% [+0.32, +2.44] (see [A3a result](#a3a-result-100-steps-complete)). Per the predeclared rule, A3b (LR 4e-6) ran next; its policy collapsed from about step 60 and reached 0% by step 100 (see [A3b interim](#a3b-interim-instability-at-lr-4e-6) and the [A3 summary](#a3-summary-learning-rate)). Next: the user's decision on the candidate and on validation. See the [execution record](#execution-record). The initial commit was plan only.
+**Status:** A1 (reward) and A2 (prompt) are complete; neither is a candidate. A3a (LR 2e-6) is complete and is the first candidate: +1.34 pp vs A0 at step 100, paired 95% [+0.32, +2.44] (see [A3a result](#a3a-result-100-steps-complete)). Per the predeclared rule, A3b (LR 4e-6) ran next; its policy collapsed from about step 60 and reached 0% by step 100 (see [A3b interim](#a3b-interim-instability-at-lr-4e-6) and the [A3 summary](#a3-summary-learning-rate)). Closeout: use A3a as the control for another 100-step optimization round in PR #12; final recipe freezing and multi-seed validation remain pending. See the [execution record](#execution-record). The initial commit was plan only.
 
 ## Plan
 
@@ -87,8 +87,8 @@ Question-paired intervals do not measure training-seed uncertainty. Consecutive 
 
 ### 5. Select, freeze and validate
 
-- [ ] Complete and record the reward screen before advancing to prompt, then LR; keep the independent A0 comparison even if an earlier arm improves.
-- [ ] Choose a candidate based on fixed-step accuracy, the full trajectory, stability and cost. Document the selection without using Qwen's gain as a pass/fail threshold.
+- [x] Complete and record the reward screen before advancing to prompt, then LR; keep the independent A0 comparison even if an earlier arm improves.
+- [x] Nominate A3a (LR 2e-6) as the control for further optimization in PR #12, based on fixed-step accuracy and the full trajectory, with its stability caveat recorded. This is not a final recipe selection or a Qwen-derived pass/fail threshold.
 - [ ] If combining useful changes, run and label the combined recipe separately; single-factor results do not establish that their benefits add.
 - [ ] Freeze the selected recipe and validate with multiple seeds before claiming the final GPU reference.
 - [ ] Keep every change reproducible on TPU. The existing customer protocol remains **step 200, three-seed mean, TPU ≥ GPU − 1 pp** unless explicitly revised before final validation. These 100-step screens do not complete or redefine that gate.
@@ -187,7 +187,7 @@ A row whose `extra_info["question"]` hashes into that set keeps the canonical 0.
 - 1,847 held-out completions are unformatted. 1,768 of them have an answer, and all 1,768 have at least 200 characters of text before it. Their accuracy is 33.6%.
 - In training at step 100, all 757 unformatted completions have an answer and at least 200 characters of text before it.
 
-**Signal and diagnostics** (window medians; [`signal_density_s100.json`](recipe_ablation/a1_reward/signal_density_s100.json))
+**Signal and diagnostics** (window summaries; [`signal_density_s100.json`](recipe_ablation/a1_reward/signal_density_s100.json))
 - Correctness-mixed groups: 25.1–27.7% (A0: 25.5–27.1%). The format-only groups (A0: 0.5–3.4%) are gone, by construction.
 - `k3_kl`: 0.00067–0.00071 (A0: 0.00069–0.00073).
 - Entropy: 0.191–0.209 (A0: 0.196–0.216).
@@ -281,7 +281,7 @@ Early behavior, descriptive only: with the single-wrapped prompt the initial pol
 | 81–100 | 61.76 | 61.46 | −0.30 | 7 / 20 | 99.85 / 99.82 |
 | 1–100 | 61.02 | 60.69 | −0.33 | 34 / 100 | 99.62 / 99.05 |
 
-**Signal and diagnostics** (window medians; [`signal_density_s100.json`](recipe_ablation/a2_prompt/signal_density_s100.json), [`format_breakdown.json`](recipe_ablation/a2_prompt/format_breakdown.json))
+**Signal and diagnostics** (window summaries; [`signal_density_s100.json`](recipe_ablation/a2_prompt/signal_density_s100.json), [`format_breakdown.json`](recipe_ablation/a2_prompt/format_breakdown.json))
 - Correctness-mixed groups: 28.7% in steps 1–20, then 26.0–27.4% (A0: 25.5–27.1%). Format-only groups are 6.9% in steps 1–20, because of the initial format dip, then 0.6–1.1%.
 - `k3_kl`: 0.00068–0.00073 (A0: 0.00069–0.00073).
 - Entropy: 0.194–0.218 (A0: 0.196–0.216).
@@ -289,7 +289,7 @@ Early behavior, descriptive only: with the single-wrapped prompt the initial pol
 - Clip ratio and `timing_s/step` are similar.
 
 **Reading**
-- **Not a candidate.** At the fixed step-100 endpoint A2 is −0.42 pp vs A0, and the paired interval [−1.40, +0.56] includes 0. Across the trajectory, 4 of 5 trained checkpoints are below A0 (−0.14, −0.72, +0.60, −0.12, −0.42), but every interval includes 0 and every difference is within the ~0.7 pp same-recipe spread.
+- **Not a candidate.** At the fixed step-100 endpoint A2 is −0.42 pp vs A0, and the paired interval [−1.40, +0.56] includes 0. Across the trajectory, 4 of 5 trained checkpoints are below A0 (−0.14, −0.72, +0.60, −0.12, −0.42), but every interval includes 0. Earlier same-recipe repeats provide context, not a calibrated tolerance or a bound on run-to-run variation.
 - **Training accuracy.** On the same raw questions it is lower in every 20-step window: −0.33 pp over 100 steps, with A2 ahead in 34 / 100 steps. The same-recipe repeat was +0.06 pp, ahead in 32 / 60. This is descriptive, because consecutive steps are not independent.
 - **What A2 shows:** under the frozen evaluation protocol, applying the chat template once to training prompts did not improve accuracy. If anything, the direction is slightly negative, but that is not detectable.
   - The initial policy formats noticeably less with single-wrapped prompts (76.8% vs 97.2% at step 1); the 0.1 format reward restores at least 99.6% by step 20.
@@ -344,20 +344,20 @@ Early behavior, descriptive only: with the single-wrapped prompt the initial pol
 | 61–80 | 0.00072 → 0.00087 | 0.208 → 0.287 | 1611 → 1385 | 0.24 → 0.24 |
 | 81–100 | 0.00073 → 0.00096 | 0.216 → 0.328 | 1576 → 1313 | 0.27 → 0.22 |
 
-- No divergence:
-  - held-out accuracy and format keep improving to step 100;
-  - `grad_norm` stays in A0's range (A0 also has isolated spikes, e.g. 1.90 at step 50);
-  - truncation stays at or below 0.15%, and no PPO clipping occurs (`pg_clipfrac` 0, one update per rollout);
+- No collapse observed through step 100:
+  - held-out accuracy reaches 40.96% and format compliance reaches 99.16% at the fixed endpoint;
+  - window-median `grad_norm` is comparable to A0, but the isolated maximum is **3.17 at step 83**, above A0's **1.90 at step 50**;
+  - the maximum response-cap hit rate (`response_length/clip_ratio`) is **0.5371% at step 9**. Logged `pg_clipfrac` is 0 in this run; this observation is not a general guarantee from using one update per rollout;
   - correctness-mixed groups stay at 26–27%.
 - Two monotone drifts that had not levelled off by step 100:
   - Policy entropy rises from 0.204 at step 1 to 0.366 at step 100 (maximum 0.372 at step 98). A0 stays within 0.19–0.23.
-  - The trainer–sampler `k3_kl` rises from 0.00071 to 0.00106. A0 stays within 0.00068–0.00075, and the earlier reference range was 0.00064–0.00078. It moves together with entropy, as expected when more probability mass sits on low-probability tokens. It remains far below the 0.98 seen with the RoPE bug (LOGPROB_PARITY.md).
+  - The trainer–sampler `k3_kl` rises from 0.00071 to 0.00106. A0 stays within 0.00068–0.00075, and the earlier reference range was 0.00064–0.00078. It rises alongside entropy; these observations do not establish the cause. This metric measures trainer–sampler disagreement, not KL to the initial/reference policy. It remains far below the 0.98 seen with the RoPE bug (LOGPROB_PARITY.md).
 - Responses also get shorter faster: 2,020 → 1,354 tokens, against A0's 2,021 → 1,713.
 
 **Reading**
 - **Candidate.** A3a is the first arm to beat A0.
   - The fixed step-100 endpoint is +1.34 pp, and the paired interval [+0.32, +2.44] excludes 0.
-  - All five trained checkpoints are above A0; four of five intervals exclude 0; the differences at steps 20, 60, 80 and 100 exceed the ~0.7 pp same-recipe spread.
+  - All five trained checkpoints are above A0; four of five question-paired intervals exclude 0. Those intervals condition on the trained models and do not include training-seed uncertainty.
   - Training accuracy on identical prompts is higher in every 20-step window: +0.81 pp, A3a ahead in 77 / 100 steps.
   - The gain vs its own step 0 is +4.90 pp, against A0's +3.86 pp.
   - Single seed: this nominates LR 2e-6, it does not establish it.
@@ -401,7 +401,7 @@ Recorded at step ~72 (2026-10-23T13:47Z).
 | 68 | 31.1 | 60.2 | 54.9 | 30.5 | 22,584 |
 | 72 | **15.7** | 60.3 | **20.3** | **74.0** | **26,050** |
 
-Responses degenerate into long completions without an answer. Every predeclared stop signal is crossed: entropy above 0.6, `k3_kl` above 0.003, and held-out below A0.
+Responses degenerate into long completions without an answer. The monitored warning signals are all present: entropy above 0.6, `k3_kl` above 0.003, and held-out below A0. These were investigation/stop recommendations, not an automatic stop implemented by this PR.
 
 **Step-80 eval (2026-10-23T14:28Z):** held-out **11.32%**, which is −27.44 pp vs A0 [−28.74, −26.20]. 21.18% of completions are formatted, 78.5% have no `</answer>`, and the mean completion is 15,767 characters. Each training step now takes about 393 s, against about 100 s before the collapse.
 
@@ -443,9 +443,9 @@ The stop recommendation was not confirmed before the run ended on its own at 15:
 | 81–100 | 0.75 | 12.45 | 0.03 | 22% | 2,198 | 103 |
 
 **What happened**
-- By steps 81–100, entropy reaches 12.45 nats, close to ln(262,144) ≈ 12.48 for Gemma-4's vocabulary, so the policy is essentially uniform over tokens.
-- No completion is correct (96% of groups all-wrong). With no reward variance, the gradient vanishes (`grad_norm` about 0.03).
-- The collapse is irreversible within the run. Its precursors were visible from step ~20: entropy and `k3_kl` rose monotonically and faster than in A3a.
+- In steps 81–100, median entropy is 12.45 nats; the final step is 12.473, close to ln(262,144) ≈ 12.477. This indicates nearly uniform token probabilities on the measured training contexts, not a proof about every possible context.
+- Training accuracy averages **0.72%** over steps 81–100, and **96.3%** of groups are all-wrong; neither statistic means that every completion in that window is wrong. Median `grad_norm` is about 0.03; at step 100 the logged gradient norm and policy loss are 0, and held-out accuracy is 0%. All-wrong correctness alone does not prove zero reward variance, because format credit can still differ within a group.
+- No recovery was observed by step 100. Entropy and `k3_kl` rose faster than in A3a before the collapse, but their co-movement does not identify a causal mechanism.
 
 ### A3 summary: learning rate
 
@@ -455,16 +455,25 @@ The stop recommendation was not confirmed before the run ended on its own at 15:
 | **2e-6 (A3a)** | **40.96%** | **+1.34 [+0.32, +2.44]** | no divergence; entropy 0.20 → 0.37 and `k3_kl` 0.0007 → 0.0011, still rising at step 100 |
 | 4e-6 (A3b) | 0.00% | −39.62 | collapses from ~step 60; entropy → 12.5 |
 
-- A3a is the only arm with a step-100 gain whose interval excludes 0. The trend is the same as A3b's, only slower.
-- So LR 2e-6 is the nominated candidate, with a stability caveat. A longer run, a different seed, or the 200-step horizon of the customer gate could reach the same instability.
-- Candidate selection, freezing and multi-seed validation are pending the user's decision (plan §5). Stability monitoring (entropy, `k3_kl`) or a stabilizer would have to be part of any longer-horizon validation.
+- A3a is the only arm with a positive step-100 difference vs A0 whose question-paired interval excludes 0. It is a candidate from one seed, not an established optimum.
+- Its rising entropy and trainer–sampler `k3_kl` warrant monitoring. A3b shares these warning indicators, but this does not establish a common collapse mechanism or show that A3a will collapse.
+- The next decision is to continue 100-step recipe optimization in PR #12 with A3a as the control. Final freezing, 200-step validation and seeds 2/3 are deferred until that screening is complete.
 
-**Reading:** LR 4e-6 is unstable for this recipe within 100 steps. A3a's slower drift in entropy and `k3_kl` was an early sign of the same mechanism.
+**Reading:** LR 4e-6 failed within 100 steps. LR 2e-6 improved accuracy in this screen, with longer-horizon stability still untested.
 
-## Initial validation and scope
+## Closeout validation and scope
 
-This initial commit adds the experiment plan only. It changes no launcher, scorer, training data or eval protocol and runs no GPU jobs. The plan was checked against the current launcher, reward implementation, comparison tool, PR #10 results and frozen eval contract.
+PR #11 now includes the scorer/comparison tooling and all four completed 100-step screens, not only the initial plan. A1 and A2 show no detectable accuracy improvement over A0 under frozen eval; A3a is the next optimization control; A3b is retained as a failed recipe. The customer gate remains **step 200, three-seed mean, TPU ≥ GPU − 1 pp** and has not been completed by these screens.
 
-No overlapping experimental PR was found among this fork's open PRs; the upstream open-PR search for `gemma4 ablation` returned no match. This work follows PR #10's precision investigation and has a distinct scope: recipe ablations.
+Targeted checks were re-run on the closing code with real, recipe-pinned math dependencies (`math-verify==0.9.0`, `latex2sympy2_extended==1.11.0`, `antlr4-python3-runtime==4.9.3`):
 
-AI assistance: Codex drafted this plan at the user's request. Implementation review and experimental validation remain to be recorded as work proceeds.
+- `python3 test_gemma4_ab_compare_template.py`: PASS, all 7 positive/negative identity checks.
+- `python test_maxtext_reward_fmt_scope.py`: PASS, default/scoped reward paths, correct/incorrect × formatted/unformatted training/eval cases, and failure checks.
+- `python maxtext_math_reward.py`: PASS, all 7 built-in scorer cases, including symbolic equivalence through the real worker pool.
+- `python -m py_compile maxtext_math_reward.py gemma4_ab_compare.py gemma4_build_single_wrap_train.py gemma4_eval_question_hashes.py`: PASS.
+
+The local test environment was prepared with `uv`. No new GPU job was launched for the closeout review, and raw experiment artifacts were not modified. Full repository CI is not green: the example-naming and repository-wide pre-commit checks report broader style/naming issues. Targeted test success is not a claim that those checks passed.
+
+No overlapping experimental PR was found among this fork's open PRs; the upstream open-PR search for `gemma4 ablation` returned no match. This follows PR #10's precision investigation and has a distinct scope: recipe ablations.
+
+AI assistance: Codex drafted the initial plan and performed the requested closeout edits and targeted checks. The recorded GPU experiments remain the user's run evidence; no additional training was performed during closeout.
