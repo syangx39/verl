@@ -7,7 +7,7 @@ Colocated `verl` GRPO (DAPO clip-higher) launcher, GKE A4X (`a4x-highgpu-4g-a4x-
 > - Launch / training-flow smoke: **complete** (§3). Four steps with non-zero updates, driver `exit_code=0`.
 > - Numerical correctness: **fixed** ([LOGPROB_PARITY.md](LOGPROB_PARITY.md)). The FSDP trainer computed wrong log-probs on ~half of its ranks because RoPE buffers were scrambled at FSDP init; the vLLM rollout was correct. With [`patch_verl_gemma4_rope_buffers.py`](patch_verl_gemma4_rope_buffers.py) applied on every pod, trainer and rollout agree to bf16 noise (step 1 at T=1: `k3_kl` 0.98 → 0.00046, Pearson 0.51 → 0.9992). Trainer-side metrics from earlier runs (k3, entropy, `grad_norm`) are invalid. Their step times are kept as a historical record; the post-fix 4-step smoke shows no obvious regression (§3.2), but post-fix throughput has not been measured.
 > - Fix persistence and guard: the launcher now runs [`gemma4_node_prep.py`](gemma4_node_prep.py) on every launch, which brings every Ray node to "verl pin + managed patches" and aborts unless all nodes pass. Inside the trainer, the `[GEMMA4-ROPE]` guard checks every rank's RoPE buffers right after the FSDP wrap and fails the whole job if any rank is wrong ([ROPE_GUARD.md](ROPE_GUARD.md)).
-> - Accuracy / convergence gate: **Seed 1 complete (`200/200` steps on `16n64g`), Seeds 2 & 3 in progress** (§4, [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)). Held-out `eval_5000` greedy accuracy improved from **36.26% ± 0.68 pp** at step 0 to a steps 60–200 plateau mean of **37.12%** (+0.86 pp; peak **37.50%** at step 120, final step 200 **36.80%** [+0.54 pp]), with format compliance rising from **93.94%** to **96.70%** (+2.76 pp) and `k3_kl = 0.000640 – 0.000739` across all 200 steps.
+> - Accuracy / convergence: **FP32 seed 1 clearly learns; recipe optimization and multi-seed validation remain open** (§4, [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)). The PR #9 BF16 seed 1 ran 200 steps stably (`k3_kl = 0.000640 – 0.000739`), but its held-out `eval_5000` change at the predeclared step-200 endpoint is **+0.54 pp** (36.26% → 36.80%, question-paired bootstrap 95% [−0.48, +1.48] pp), the same size as the difference between two greedy evals of identical weights. Seeds 2/3 of this recipe are on hold. [PR #10](UPDATE_PRECISION_RESULTS.md) measured that the BF16 optimizer path retained only 12–17% of the intended AdamW update norm in the two-step probe; in a 60-step A/B on identical prompts, FP32 persistent weights and moments learned faster (training accuracy +1.87 pp in steps 41–60; held-out +2.20 pp vs its own step 0 at step 60). The FP32 configuration is now frozen in the launcher (sha256 `7d511735…`). Its seed 1 was stopped at step 107 by decision. At step 100, held-out accuracy is **39.62%**: +3.86 pp vs its own step 0 (95% [+2.82, +4.96]) and +2.70 pp vs BF16 at the same step ([+1.64, +3.74]). FP32 clearly learns, but recipe optimization remains open. Qwen3-0.6B `stab_kl0` gained +12.1 pp by step 100 on its own held-out set; differences in model, held-out set and recipe make this context, not an acceptance threshold. Recipe ablations, with 100-step screens, continue in PR #11 ([UPDATE_PRECISION_RESULTS.md](UPDATE_PRECISION_RESULTS.md) §4).
 
 ---
 
@@ -20,7 +20,7 @@ Colocated `verl` GRPO (DAPO clip-higher) launcher, GKE A4X (`a4x-highgpu-4g-a4x-
 | Batch & rollout | `train_batch_size=256`, `rollout.n=8` | 2,048 completions per step, `ppo_mini_batch_size=256` ($\mu=1$ update per step) |
 | Sequence lengths | `max_prompt_length=8192`, `max_response_length=8192` | `filter_overlong_prompts=False`, `truncation=error` |
 | Algorithm & loss | `adv_estimator=grpo`, `use_kl_loss=False` ($\beta=0$) | Clip-higher `clip_ratio_low=0.2`, `clip_ratio_high=0.28`, `entropy_coeff=0` |
-| Optimizer | `lr=1e-6`, `grad_clip=1.0` | FSDP (`bfloat16`), gradient checkpointing, `use_remove_padding=True` |
+| Optimizer & precision | `lr=1e-6`, `grad_clip=1.0`, AdamW (0.9, 0.999), wd 0.01 | FSDP1 with **FP32 persistent weights and Adam moments** (`actor.fsdp_config.model_dtype=fp32`, since PR #10; launcher sha256 `7d511735…`), BF16 compute (FSDP mixed precision) and BF16 rollout weights; gradient checkpointing, `use_remove_padding=True`. The PR #9 BF16 reference used `model_dtype=bfloat16` (launcher sha256 `8646c173…`) |
 | Dynamic batching | `ppo_max_token_len_per_gpu=16384` | Lowered from Qwen's 32768 because of Gemma-4's 262,144-token vocab (peak reserved HBM 51–53 GB/GPU in the smoke) |
 | Rollout (vLLM) | `tp=1`, `gpu_memory_utilization=0.30` | `temperature=0.8`, `top_p=0.95`, `top_k=50`, `max_num_batched_tokens=32768`, chunked prefill, prefix caching |
 | Trainer attention | `attn_implementation=flex_attention` (`ATTN_IMPL`) | With the `[GEMMA4]` Triton tile pinning for `head_dim=512` (§2) |
@@ -118,21 +118,28 @@ The 09-02 runs used an older verl checkout that did not log these metrics, so th
 
 ---
 
-## 4. Accuracy gate — protocol frozen ([EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)); Seed 1 complete (200/200 steps), Seeds 2 & 3 next
+## 4. Accuracy gate — protocol frozen ([EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)); BF16 and FP32 seed-1 references only, recipe ablations next (PR #11)
 
 - **Gate (customer, Meta)**: $\overline{\text{Acc}}_{\text{TPU}}(200) \ge \overline{\text{Acc}}_{\text{GPU}}(200) - 1.0\text{ pp}$, where $\overline{\text{Acc}}(200) = \frac{1}{3}\sum_{s=1}^{3} \text{Acc}_s(200)$ is the **3-seed arithmetic mean** held-out greedy accuracy on `eval_5000.parquet` at the pre-declared **final checkpoint (step 200)** ([EVAL_PROTOCOL.md](EVAL_PROTOCOL.md) §3.1). Full 11-point learning curves (`steps 0, 20, ..., 200`), across-seed standard deviation / min–max spread, and within-seed paired SEs vs step 0 are reported alongside the step-200 gate to prevent post-hoc checkpoint cherry-picking.
 - **Frozen held-out set (`eval_5000.parquet`)**: built deterministically by [`build_gemma4_eval_set.py`](build_gemma4_eval_set.py) ([`eval_5k/manifest.json`](eval_5k/manifest.json)). In raw `val.parquet` (50,000 rows), **37,372 rows (74.7%) overlap `train.parquet`** after alphanumeric normalization. Excluding all train-overlapping questions and deduplicating by question leaves 11,652 unique problems, from which 5,000 are selected by ascending `sha256(key)` (`eval_5000.parquet`, sha256 `d092a9c5e80aa2b3cf8e4e12d8367769e770f69ee6627ff1285fd5693efc662d`, binomial SE $\approx 0.70\text{ pp}$ at 55%).
 - **Frozen prompt-token ID fixture**: [`eval_5k/eval_5000_prompt_tokens.parquet`](eval_5k/eval_5000_prompt_tokens.parquet) (sha256 `a54fbb327d9c60545c49edfc26107b21a1e55f3ef9e673d80024c79e821b5ca4`), rendered through `verl`'s `Gemma4VLContinuousTokenBuilder` (`Gemma4Processor` + `GemmaTokenizer`) and verified 256/256 token-exact against online rollout prompts.
 - **Frozen 200-step baseline protocol ([`run_gemma4_e2b_rl05_accuracy_baseline.sh`](run_gemma4_e2b_rl05_accuracy_baseline.sh))**: `TOTAL_STEPS=200`, `trainer.val_before_train=True`, `trainer.test_freq=20` (11 checkpoints: steps `0, 20, ..., 200`), greedy decoding (`do_sample=False, temperature=0, top_k=-1, top_p=1.0, n=1`), explicit `SEED=1, 2, 3`.
-- **Seed 1 (`gemma4_e2b_rl05_16n64g_s200_seed1_1021_1955`, `16n64g`) — complete ([EVAL_PROTOCOL.md](EVAL_PROTOCOL.md) §5, [`eval_5k/seed1_16n64g/seed1_report.md`](eval_5k/seed1_16n64g/seed1_report.md))**:
+- **BF16 seed 1 (`gemma4_e2b_rl05_16n64g_s200_seed1_1021_1955`, `16n64g`) — complete, kept as the original-recipe reference ([EVAL_PROTOCOL.md](EVAL_PROTOCOL.md) §5, [`eval_5k/seed1_16n64g/seed1_report.md`](eval_5k/seed1_16n64g/seed1_report.md))**:
   - Guard check: [`eval_5k/seed1_16n64g/guard_check.txt`](eval_5k/seed1_16n64g/guard_check.txt) (**16/16 PASS**, `16/16` nodes, `64/64` unique ranks, `exit_code=0`, `steps=0..200`).
   - Numerical stability across all 200 steps: `rollout_corr/k3_kl = 0.000640 – 0.000739` (median `0.000684`), `actor/grad_norm = 0.1289 – 3.3281` (median `0.2588`).
-  - Held-out `eval_5000` greedy accuracy curve: step 0 **36.26% ± 0.68 pp** (format **93.94%**) $\to$ step 60 **37.32%** (+1.06 pp) $\to$ step 120 **37.50%** (+1.24 pp) $\to$ step 180 **37.34%** (+1.08 pp) $\to$ step 200 **36.80% ± 0.68 pp** (+0.54 pp vs step 0, paired SE `0.49 pp`, format **96.70%** [+2.76 pp]; mean across steps 60–200 = **37.12%** [+0.86 pp]).
+  - Held-out `eval_5000`: step 0 **36.26%** → predeclared step-200 endpoint **36.80%** (+0.54 pp, question-paired bootstrap 95% [−0.48, +1.48] pp); intermediate checkpoints 36.34–37.50%. Two greedy evals of identical step-0 weights differ by +0.48 pp (+305 / −281 questions), so this change is not distinguishable from eval nondeterminism. Format compliance 93.94% → 96.70% (not monotonic).
+  - Seed 2 of this recipe was stopped at step 147; seed 3 was not launched. Any revised-precision recipe restarts from seed 1 and is not pooled with these BF16 seeds ([UPDATE_PRECISION_RESULTS.md](UPDATE_PRECISION_RESULTS.md)).
+- **FP32 seed 1 (`gemma4_e2b_rl05fp32_16n64g_s200_seed1_1022_2019`, `16n64g`, frozen launcher sha256 `7d511735…`). Stopped at step 107 by decision; steps 0–100 reported ([UPDATE_PRECISION_RESULTS.md](UPDATE_PRECISION_RESULTS.md) §4, [`update_precision/fp32_seed1_100steps/`](update_precision/fp32_seed1_100steps/)). This is a separate cohort.**
+  - Held-out `eval_5000`: 35.76% at step 0, then 37.40 / 38.52 / 38.30 / 38.76 / **39.62%** at steps 20 / 40 / 60 / 80 / 100. At step 100 that is +3.86 pp vs its own step 0 (question-paired bootstrap 95% [+2.82, +4.96]) and +2.70 pp vs BF16 seed 1 at the same step ([+1.64, +3.74]).
+  - Training accuracy on the same prompts as BF16 seed 1: +1.75 pp averaged over steps 1–100, with FP32 ahead in 93 of 100 steps. This is descriptive; consecutive steps are not independent replicates.
+  - RoPE guard PASS on 64 / 64 ranks and node prep PASS. `rollout_corr/k3_kl` stayed near 7e-4. The driver exit code is 1 only because the run was stopped.
 - **Trainer log-prob parity (§3.4) and persistence/guard ([ROPE_GUARD.md](ROPE_GUARD.md)) are resolved and enforced on every launch.**
 
 ![Seed 1 Held-Out Evaluation Curve](eval_5k/seed1_16n64g/seed1_eval_curve.png)
 
 ![Seed 1 Online Training & Numerical Guard Diagnostics](eval_5k/seed1_16n64g/seed1_training_diagnostics.png)
+
+![FP32 vs BF16, seed 1, steps 0–100 (PR #10)](update_precision/fp32_seed1_100steps/fp32_vs_bf16_s100.png)
 
 ---
 
@@ -183,6 +190,13 @@ Component columns are per-component medians, so they do not sum to the step medi
 | `patch_verl_pin_rank_probe.py` | Diagnostic, env-gated (`VERL_RANK_PROBE_DIR`): per-rank canary forward with per-module output and buffer checksums. Not applied by node prep, which rebuilds `transformer_impl.py` from the pin |
 | `gemma4_logprob_parity.py` | Offline parity ladder on a fixture: HF backends, packed vs unpacked, vLLM prefill, online values; summary tables and error-vs-position plots |
 | `logprob_parity/` | Ladder results before and after the fix (`summary.md`, plots, rank-probe comparisons, per-rank chunk stats) |
+| `UPDATE_PRECISION_PLAN.md` / `UPDATE_PRECISION_RESULTS.md` | PR #10: plan and results of the weak-learning / optimizer-update-precision investigation |
+| `gemma4_optim_probe/` | Env-gated Ray `worker_process_setup_hook` that wraps `torch.optim.AdamW.step` for the first N steps: optimizer-held dtypes, applied vs fp32-ideal update on the same gradients (moments x write-back 2x2), changed-element fractions, per original parameter. No change to verl or the managed files |
+| `gemma4_optim_probe_report.py` / `test_gemma4_optim_probe.py` | Aggregates probe records over ranks (coverage check, totals, 2x2, categories); CPU self-test (bf16 vs fp32 positive control) |
+| `gemma4_learning_signal.py` | Offline audit of rollout / eval dumps: GRPO group classes and advantage mass, eval pairing by validated `qid` with bootstrap intervals and an identical-weights replicate, grading audit |
+| `gemma4_ab_compare.py` | Paired comparison of two runs with the same seed / data order: held-out by validated `qid` (bootstrap), training accuracy on identical prompts per step (windows 1–10, 11–20, then every 20 steps), diagnostics from the driver logs, optional 2x2 figure |
+| `gemma4_signal_density.py` | GRPO signal density per step window from training dumps (correctness-mixed / all-correct / all-wrong / format-or-penalty-only groups, sampled accuracy); reads Gemma-4 and Qwen3 dumps alike |
+| `update_precision/` | PR #10 evidence: reference manifest, audit, probe summaries and self-test, FP32 vs BF16 A/B (tables, figure, guard check), FP32 seed 1 steps 0–100 (`fp32_seed1_100steps/`: comparison with BF16, same-recipe reproducibility, eval report, signal density, guard check) |
 
 ---
 

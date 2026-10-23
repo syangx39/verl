@@ -1,0 +1,312 @@
+{
+ "gemma_fp32_s1": {
+  "1-20": {
+   "steps": [
+    1,
+    20
+   ],
+   "groups": 5120,
+   "train_acc": 59.5263671875,
+   "mixed": 27.1484375,
+   "all_correct": 44.90234375,
+   "all_wrong": 24.53125,
+   "other_only": 3.41796875
+  },
+  "21-40": {
+   "steps": [
+    21,
+    40
+   ],
+   "groups": 5120,
+   "train_acc": 61.51611328125,
+   "mixed": 26.09375,
+   "all_correct": 48.125,
+   "all_wrong": 24.9609375,
+   "other_only": 0.8203125
+  },
+  "41-60": {
+   "steps": [
+    41,
+    60
+   ],
+   "groups": 5120,
+   "train_acc": 61.25732421875,
+   "mixed": 26.171875,
+   "all_correct": 48.22265625,
+   "all_wrong": 24.9609375,
+   "other_only": 0.64453125
+  },
+  "61-80": {
+   "steps": [
+    61,
+    80
+   ],
+   "groups": 5120,
+   "train_acc": 61.04736328125,
+   "mixed": 25.48828125,
+   "all_correct": 48.0859375,
+   "all_wrong": 25.87890625,
+   "other_only": 0.546875
+  },
+  "81-100": {
+   "steps": [
+    81,
+    100
+   ],
+   "groups": 5120,
+   "train_acc": 61.7578125,
+   "mixed": 25.9765625,
+   "all_correct": 49.0625,
+   "all_wrong": 24.47265625,
+   "other_only": 0.48828125
+  }
+ },
+ "gemma_bf16_s1": {
+  "1-20": {
+   "steps": [
+    1,
+    20
+   ],
+   "groups": 5120,
+   "train_acc": 59.267578125,
+   "mixed": 27.6953125,
+   "all_correct": 44.0625,
+   "all_wrong": 22.0703125,
+   "other_only": 6.171875
+  },
+  "21-40": {
+   "steps": [
+    21,
+    40
+   ],
+   "groups": 5120,
+   "train_acc": 59.921875,
+   "mixed": 26.8359375,
+   "all_correct": 45.9375,
+   "all_wrong": 22.96875,
+   "other_only": 4.2578125
+  },
+  "41-60": {
+   "steps": [
+    41,
+    60
+   ],
+   "groups": 5120,
+   "train_acc": 59.2626953125,
+   "mixed": 27.9296875,
+   "all_correct": 44.94140625,
+   "all_wrong": 23.80859375,
+   "other_only": 3.3203125
+  },
+  "61-80": {
+   "steps": [
+    61,
+    80
+   ],
+   "groups": 5120,
+   "train_acc": 58.86474609375,
+   "mixed": 26.40625,
+   "all_correct": 44.94140625,
+   "all_wrong": 24.9609375,
+   "other_only": 3.69140625
+  },
+  "81-100": {
+   "steps": [
+    81,
+    100
+   ],
+   "groups": 5120,
+   "train_acc": 59.033203125,
+   "mixed": 27.6171875,
+   "all_correct": 45.078125,
+   "all_wrong": 24.453125,
+   "other_only": 2.8515625
+  }
+ },
+ "qwen_stab_kl0_seed1": {
+  "1-20": {
+   "steps": [
+    1,
+    20
+   ],
+   "groups": 5120,
+   "train_acc": 42.78564453125,
+   "mixed": 50.78125,
+   "all_correct": 15.9765625,
+   "all_wrong": 14.08203125,
+   "other_only": 19.16015625
+  },
+  "21-40": {
+   "steps": [
+    21,
+    40
+   ],
+   "groups": 5120,
+   "train_acc": 44.34814453125,
+   "mixed": 55.05859375,
+   "all_correct": 16.54296875,
+   "all_wrong": 14.66796875,
+   "other_only": 13.73046875
+  },
+  "41-60": {
+   "steps": [
+    41,
+    60
+   ],
+   "groups": 5120,
+   "train_acc": 44.1015625,
+   "mixed": 56.953125,
+   "all_correct": 15.95703125,
+   "all_wrong": 23.18359375,
+   "other_only": 3.90625
+  },
+  "61-80": {
+   "steps": [
+    61,
+    80
+   ],
+   "groups": 5120,
+   "train_acc": 46.33056640625,
+   "mixed": 55.87890625,
+   "all_correct": 18.26171875,
+   "all_wrong": 24.74609375,
+   "other_only": 1.11328125
+  },
+  "81-100": {
+   "steps": [
+    81,
+    100
+   ],
+   "groups": 5120,
+   "train_acc": 48.994140625,
+   "mixed": 51.15234375,
+   "all_correct": 23.1640625,
+   "all_wrong": 24.19921875,
+   "other_only": 1.484375
+  }
+ },
+ "qwen_stab_kl0_seed2": {
+  "1-20": {
+   "steps": [
+    1,
+    20
+   ],
+   "groups": 5120,
+   "train_acc": 42.18994140625,
+   "mixed": 50.29296875,
+   "all_correct": 15.546875,
+   "all_wrong": 13.59375,
+   "other_only": 20.56640625
+  },
+  "21-40": {
+   "steps": [
+    21,
+    40
+   ],
+   "groups": 5120,
+   "train_acc": 45.26611328125,
+   "mixed": 54.8828125,
+   "all_correct": 17.3046875,
+   "all_wrong": 15.13671875,
+   "other_only": 12.67578125
+  },
+  "41-60": {
+   "steps": [
+    41,
+    60
+   ],
+   "groups": 5120,
+   "train_acc": 45.0048828125,
+   "mixed": 58.984375,
+   "all_correct": 15.87890625,
+   "all_wrong": 20.9765625,
+   "other_only": 4.16015625
+  },
+  "61-80": {
+   "steps": [
+    61,
+    80
+   ],
+   "groups": 5120,
+   "train_acc": 45.98876953125,
+   "mixed": 55.76171875,
+   "all_correct": 18.18359375,
+   "all_wrong": 24.609375,
+   "other_only": 1.4453125
+  },
+  "81-100": {
+   "steps": [
+    81,
+    100
+   ],
+   "groups": 5120,
+   "train_acc": 48.59130859375,
+   "mixed": 53.28125,
+   "all_correct": 21.38671875,
+   "all_wrong": 24.1796875,
+   "other_only": 1.15234375
+  }
+ },
+ "qwen_stab_kl0_seed3": {
+  "1-20": {
+   "steps": [
+    1,
+    20
+   ],
+   "groups": 5120,
+   "train_acc": 42.431640625,
+   "mixed": 50.64453125,
+   "all_correct": 15.56640625,
+   "all_wrong": 14.296875,
+   "other_only": 19.4921875
+  },
+  "21-40": {
+   "steps": [
+    21,
+    40
+   ],
+   "groups": 5120,
+   "train_acc": 45.16845703125,
+   "mixed": 54.296875,
+   "all_correct": 17.63671875,
+   "all_wrong": 14.94140625,
+   "other_only": 13.125
+  },
+  "41-60": {
+   "steps": [
+    41,
+    60
+   ],
+   "groups": 5120,
+   "train_acc": 45.53466796875,
+   "mixed": 56.328125,
+   "all_correct": 17.87109375,
+   "all_wrong": 22.36328125,
+   "other_only": 3.4375
+  },
+  "61-80": {
+   "steps": [
+    61,
+    80
+   ],
+   "groups": 5120,
+   "train_acc": 48.04443359375,
+   "mixed": 54.12109375,
+   "all_correct": 20.21484375,
+   "all_wrong": 23.80859375,
+   "other_only": 1.85546875
+  },
+  "81-100": {
+   "steps": [
+    81,
+    100
+   ],
+   "groups": 5120,
+   "train_acc": 50.9716796875,
+   "mixed": 50.72265625,
+   "all_correct": 24.6484375,
+   "all_wrong": 22.890625,
+   "other_only": 1.73828125
+  }
+ }
+}

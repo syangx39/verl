@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarize Gemma-4 200-step accuracy baseline runs from validation/training JSONL dumps and driver logs.
+"""Summarize Gemma-4 accuracy runs from validation/training JSONL dumps and driver logs.
 
 Usage:
     python3 gemma4_eval_report.py \
@@ -226,7 +226,7 @@ def _plot_run(label: str, data: dict, plot_dir: pathlib.Path) -> list[pathlib.Pa
     # Figure 1: Held-out eval_5000 curve (4 panels)
     fig, axes = plt.subplots(2, 2, figsize=(14, 9.5), dpi=160)
     fig.suptitle(
-        f"Gemma-4 E2B (rl-05) 200-Step GPU Baseline ({label}) — Held-Out Evaluation on eval_5000 (N = 5,000, Greedy T = 0)",
+        f"Gemma-4 E2B (rl-05) GPU Reference ({label}, steps {steps_v[0]}–{steps_v[-1]}) — Held-Out eval_5000 (N = 5,000, Greedy T = 0)",
         fontsize=12.5, fontweight="bold", y=0.98,
     )
 
@@ -266,7 +266,7 @@ def _plot_run(label: str, data: dict, plot_dir: pathlib.Path) -> list[pathlib.Pa
         ax.errorbar(
             steps_v[1:], delta_v[1:], yerr=delta_se_v[1:], fmt="-s", color="#d62728",
             ecolor="#d62728", elinewidth=2.0, capsize=4, markersize=6, linewidth=2.0,
-            label="Paired ΔAcc vs Step 0 ± 1 Paired SE (~0.48 pp)",
+            label="Paired ΔAcc vs Step 0 ± 1 Paired SE",
         )
         for s, d, g, l in zip(steps_v[1:], delta_v[1:], gained_v[1:], lost_v[1:]):
             ax.annotate(
@@ -344,7 +344,7 @@ def _plot_run(label: str, data: dict, plot_dir: pathlib.Path) -> list[pathlib.Pa
 
     fig, axes = plt.subplots(2, 2, figsize=(14, 9.5), dpi=160)
     fig.suptitle(
-        f"Gemma-4 E2B (rl-05) 200-Step GPU Baseline ({label}) — Online Training & Numerical Guard Diagnostics (16n64g)",
+        f"Gemma-4 E2B (rl-05) GPU Reference ({label}, steps {ts[0]}–{ts[-1]}) — Training & Numerical Guard Diagnostics (16n64g)",
         fontsize=12.5, fontweight="bold", y=0.98,
     )
 
@@ -353,7 +353,7 @@ def _plot_run(label: str, data: dict, plot_dir: pathlib.Path) -> list[pathlib.Pa
     ax.plot(ts, _rolling(tr_acc, 20), color="#1f77b4", linewidth=2.2, label=f"20-step Rolling Mean Acc ({statistics.mean(tr_acc[:20]):.2f}% → {statistics.mean(tr_acc[-20:]):.2f}%)")
     ax2 = ax.twinx()
     ax2.plot(ts, _rolling(tr_fmt, 20), color="#2ca02c", linestyle="--", linewidth=1.8, label=f"20-step Rolling Format ({statistics.mean(tr_fmt[:20]):.2f}% → {statistics.mean(tr_fmt[-20:]):.2f}%) [right]")
-    ax.set_title("A. Online Training Rollout Accuracy & Format Rate (Steps 1–200)")
+    ax.set_title(f"A. Online Training Rollout Accuracy & Format Rate (Steps {ts[0]}–{ts[-1]})")
     ax.set_xlabel("Training Step")
     ax.set_ylabel("Sampled Train Accuracy (%)", color="#1f77b4")
     ax2.set_ylabel("Sampled Format Compliance (%)", color="#2ca02c")
@@ -369,7 +369,7 @@ def _plot_run(label: str, data: dict, plot_dir: pathlib.Path) -> list[pathlib.Pa
     ax.axhline(statistics.median(k3_kl) * 1e3, color="#8c1515", linestyle="--", linewidth=1.2)
     ax2 = ax.twinx()
     ax2.plot(ts, pearson, color="#1f77b4", linewidth=1.2, alpha=0.75, label=f"Pearson(p_train, p_rollout): med={statistics.median(pearson):.5f} [right]")
-    ax.set_title("B. Trainer–Sampler Log-Prob Parity Across All 200 Steps (Pre-Fix k3_kl was ~980–1350 ×10⁻³)")
+    ax.set_title(f"B. Trainer–Sampler Log-Prob Parity (Steps {ts[0]}–{ts[-1]}; Pre-Fix k3_kl ~980–1350 ×10⁻³)")
     ax.set_xlabel("Training Step")
     ax.set_ylabel("rollout_corr/k3_kl (× 10⁻³)", color="#d62728")
     ax2.set_ylabel("Pearson Correlation", color="#1f77b4")
@@ -385,7 +385,7 @@ def _plot_run(label: str, data: dict, plot_dir: pathlib.Path) -> list[pathlib.Pa
     ax.plot(ts, _rolling(grad_norm, 15), color="#d95f02", linewidth=2.0, label="15-step Rolling Mean grad_norm")
     ax2 = ax.twinx()
     ax2.plot(ts, entropy, color="#9467bd", linewidth=1.6, label=f"actor/entropy ({entropy[0]:.3f} → {entropy[-1]:.3f}) [right]")
-    ax.set_title("C. Actor Gradient Norm & Policy Entropy (Steps 1–200)")
+    ax.set_title(f"C. Actor Gradient Norm & Policy Entropy (Steps {ts[0]}–{ts[-1]})")
     ax.set_xlabel("Training Step")
     ax.set_ylabel("actor/grad_norm (post-fix; pre-fix was 10–350)", color="#d95f02")
     ax2.set_ylabel("actor/entropy", color="#9467bd")
@@ -400,17 +400,25 @@ def _plot_run(label: str, data: dict, plot_dir: pathlib.Path) -> list[pathlib.Pa
     ax.plot(ts, resp_len, color="#2ca02c", alpha=0.45, linewidth=1.0)
     ax.plot(ts, _rolling(resp_len, 15), color="#1b7837", linewidth=2.0, label=f"Mean Response Length (med={statistics.median(resp_len):.0f} tok)")
     ax2 = ax.twinx()
-    ax2.plot(ts[1:], step_s[1:], color="#555555", alpha=0.55, linewidth=1.2, label=f"timing_s/step (steps 2–200 med={statistics.median(step_s[1:]):.1f}s, p90={sorted(step_s[1:])[int(0.9*len(step_s[1:]))]:.1f}s) [right]")
+    if len(ts) > 1:
+        ax2.plot(ts[1:], step_s[1:], color="#555555", alpha=0.55, linewidth=1.2, label=f"timing_s/step (steps {ts[1]}–{ts[-1]} med={statistics.median(step_s[1:]):.1f}s, p90={sorted(step_s[1:])[int(0.9*len(step_s[1:]))]:.1f}s) [right]")
     ax.set_title("D. Mean Response Length (Tokens) & Trainer Step Time (s)")
     ax.set_xlabel("Training Step")
     ax.set_ylabel("Mean Response Length (tokens)", color="#1b7837")
     ax2.set_ylabel("timing_s/step (s)", color="#555555")
-    ax.set_ylim(1600, 2100)
+    ax.margins(y=0.08)  # Keep every response-length point visible as the recipe changes.
     ax2.set_ylim(50, 115)
+    # Annotate step times above the clipped axis instead of silently cutting them off.
+    gen_s = [log_steps[s].get("timing_s/gen", float("nan")) for s in ts]
+    for s, v, g in zip(ts[1:], step_s[1:], gen_s[1:]):
+        if v > 115:
+            ax2.plot([s], [114], marker="^", color="#d62728", markersize=7, clip_on=False)
+            ax2.annotate(f"step {s}: {v:.0f}s (rollout {g:.0f}s), off scale", (s, 114), textcoords="offset points",
+                         xytext=(-215, -30), fontsize=7.5, color="#d62728")
     ax2.grid(False)
     h1, l1 = ax.get_legend_handles_labels()
     h2, l2 = ax2.get_legend_handles_labels()
-    ax.legend(h1 + h2, l1 + l2, loc="upper right", fontsize=8.0)
+    ax.legend(h1 + h2, l1 + l2, loc="lower left", fontsize=8.0)
 
     fig.tight_layout(rect=[0, 0, 1, 0.96])
     p2 = plot_dir / f"{label}_training_diagnostics.png"
@@ -425,6 +433,7 @@ def main() -> int:
     ap.add_argument("--run", action="append", default=[], help="label=/path/to/eval_dump_dir")
     ap.add_argument("--log", action="append", default=[], help="label=/path/to/driver.log")
     ap.add_argument("--from-json", default="", help="Load pre-computed summary JSON instead of re-reading dumps")
+    ap.add_argument("--max-step", type=int, default=None, help="Report and plot only steps at or below this value")
     ap.add_argument("--expected-n", type=int, default=5000)
     ap.add_argument("--out-json", default="")
     ap.add_argument("--out-md", default="")
@@ -442,6 +451,13 @@ def main() -> int:
             label: _summarize_run(label, rdir, log_map.get(label), args.expected_n)
             for label, rdir in run_map.items()
         }
+    if args.max_step is not None:
+        for data in runs.values():
+            data["val_steps"] = [v for v in data["val_steps"] if v["step"] <= args.max_step]
+            for key in ("train_steps", "log_steps"):
+                data[key] = {s: v for s, v in data.get(key, {}).items() if int(s) <= args.max_step}
+            data["n_train_steps_dumped"] = len(data["train_steps"])
+            data["n_train_steps_logged"] = len(data["log_steps"])
     md = _render_md(runs)
     print(md)
     if args.out_md:
