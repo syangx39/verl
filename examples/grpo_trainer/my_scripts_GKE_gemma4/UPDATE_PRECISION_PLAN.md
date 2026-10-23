@@ -6,7 +6,7 @@ Investigate why the numerically stable Gemma-4 `rl-05` run in [PR #9](https://gi
 
 The first hypotheses to test are ineffective small updates with BF16 persistent weights / optimizer state, and weak or misleading training reward signal. Neither is an established root cause. This work should produce measured update evidence and a reproducible recipe decision, including a negative result if precision is not responsible.
 
-**Status: items 1–3 complete; item 4 in progress (FP32 frozen, 200-step seed 1 running)** ([UPDATE_PRECISION_RESULTS.md](UPDATE_PRECISION_RESULTS.md)). The initial commit was plan only.
+**Status: items 1–3 complete. Item 4 closed early: the frozen FP32 seed 1 was stopped at step 107 by decision, and steps 0–100 are reported. Recipe ablations continue in PR #11, with 100-step runs** ([UPDATE_PRECISION_RESULTS.md](UPDATE_PRECISION_RESULTS.md) §4). The initial commit was plan only.
 
 ## Plan
 
@@ -48,12 +48,14 @@ Short runs establish numerical and operational behavior; they do not establish a
 ### 4. Establish the revised learning baseline, then replicate
 
 > Revised order after the `ab70122` review: (1) FP32 seed 1 for the full 200 steps; (2) single-variable optimization against that curve, compared under the fixed eval on accuracy vs steps and vs wall time, screened with seed 1; (3) select and freeze the recipe that balances accuracy and training efficiency, then validate it with multiple seeds. FP32 fixes update precision but is not yet the optimized recipe.
+>
+> **Decision on 2026-10-22 at step ~105:** stop the FP32 run, report steps 0–100 in this PR, and move the ablation study to PR #11, where every run is 100 steps. The goal there is a recipe that clearly learns. At step 100 the FP32 run learns (held-out +3.86 pp vs its own step 0), but much more slowly than the Qwen3-0.6B `stab_kl0` reference (+12.1 pp by step 100).
 
-- [x] Freeze the chosen candidate recipe before running a controlled 200-step seed 1 with the existing 5,000-question greedy eval protocol. — done: FP32 frozen in `run_gemma4_e2b_rl05_parity.sh` (sha256 `7d511735…`, commit `203b40f`); 200-step seed 1 `gemma4_e2b_rl05fp32_16n64g_s200_seed1_1022_2019` running.
-- [ ] Report the full trajectory and the predeclared step-200 endpoint, with question-paired uncertainty after identity validation. Do not replace the endpoint with the best checkpoint.
-- [ ] Compare learning behavior, trainer–sampler consistency, response lengths and cost against the preserved BF16 reference.
-- [ ] Decide whether the evidence justifies freezing the candidate and launching seeds 2/3. If gains remain unclear, document that outcome and the next diagnostic decision rather than claiming convergence.
-- [ ] Keep different precision/recipe cohorts separate. A revised seed 1 must not be pooled with original BF16 seeds for the three-seed reference.
+- [x] Freeze the chosen candidate recipe before running a controlled 200-step seed 1 with the existing 5,000-question greedy eval protocol. — done: FP32 frozen in `run_gemma4_e2b_rl05_parity.sh` (sha256 `7d511735…`, commit `203b40f`). Seed 1 `gemma4_e2b_rl05fp32_16n64g_s200_seed1_1022_2019` ran 107 steps and was then stopped by decision.
+- [ ] Report the full trajectory and the predeclared step-200 endpoint, with question-paired uncertainty after identity validation. Do not replace the endpoint with the best checkpoint. — **not done:** the run was stopped at step 107. The trajectory for steps 0–100 is reported with question-paired intervals at every checkpoint ([results](UPDATE_PRECISION_RESULTS.md#41-held-out-eval_5000-greedy-paired-by-qid) §4.1). Step 100 is reported because it is the last checkpoint evaluated, not because it is the best one.
+- [x] Compare learning behavior, trainer–sampler consistency, response lengths and cost against the preserved BF16 reference. — done for steps 1–100 ([results](UPDATE_PRECISION_RESULTS.md#4-fp32-seed-1-steps-0100-plan-item-4--stopped-at-step-107) §4.2–4.4).
+- [x] Decide whether the evidence justifies freezing the candidate and launching seeds 2/3. If gains remain unclear, document that outcome and the next diagnostic decision rather than claiming convergence. — decided: no seeds 2/3 of this recipe. FP32 learns, but too slowly to be the reference. The next step is single-factor ablations in PR #11 ([results](UPDATE_PRECISION_RESULTS.md#46-handoff-to-pr-11) §4.6).
+- [x] Keep different precision/recipe cohorts separate. A revised seed 1 must not be pooled with original BF16 seeds for the three-seed reference. — done: the BF16 seeds, the 60-step FP32 A/B run and the frozen-FP32 run are reported separately; nothing is pooled.
 
 The shared eval protocol remains fixed. A comparable GPU/TPU gate reference still requires the agreed final recipe and its three-seed endpoint results; this investigation alone does not establish the customer accuracy gate.
 

@@ -201,14 +201,19 @@ def main() -> int:
                 "diff_sd": statistics.stdev(d), "n_positive": sum(1 for x in d if x > 0),
                 "fmt_a": statistics.mean(x["fmt_a"] for x in sel), "fmt_b": statistics.mean(x["fmt_b"] for x in sel)}
 
+    def twenty_step_windows(last):
+        # (1, 20), (21, 40), (41, 60), ... with the last window clipped to `last` (60-, 100- and 200-step runs alike).
+        return [(lo, min(lo + 19, last)) for lo in range(1, last + 1, 20)]
+
     if tsteps:
         last = tsteps[-1]
-        wins = [(1, min(10, last)), (11, min(20, last)), (21, min(40, last)), (41, min(60, last)), (1, last)]
+        wins = [(1, min(10, last)), (11, min(20, last))] + twenty_step_windows(last)[1:] + [(1, last)]
         wins = list(dict.fromkeys((lo, hi) for lo, hi in wins if hi >= lo))
         res["train"]["windows"] = [w for w in (window(lo, hi) for lo, hi in wins) if w]
 
     ga, gb = _log_steps(args.a_log), _log_steps(args.b_log)
-    for lo, hi in ((1, 20), (21, 40), (41, 60)):
+    log_last = min(max(ga, default=0), max(gb, default=0), args.max_step)
+    for lo, hi in twenty_step_windows(log_last):
         row = {}
         for k in KEYS:
             xa = [ga[s][k] for s in ga if lo <= s <= hi and s <= args.max_step and k in ga[s]]
