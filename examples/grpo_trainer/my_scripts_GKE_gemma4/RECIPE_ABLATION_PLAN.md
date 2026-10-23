@@ -6,7 +6,7 @@ Optimize the already-learning Gemma-4 E2B FP32 recipe by isolating the effects o
 
 PR #10 established learning, not a plateau: held-out accuracy rose **35.76% → 39.62% (+3.86 pp)** at step 100, with question-paired bootstrap 95% **[+2.82, +4.96] pp**. Its run was deliberately stopped at step 107; only steps 0–100 are the comparison reference. Qwen results motivate optimization but are not a Gemma acceptance threshold.
 
-**Status:** A1 (reward) and A2 (prompt) are complete; neither is a candidate. A3a (LR 2e-6) is complete and is the first candidate: +1.34 pp vs A0 at step 100, paired 95% [+0.32, +2.44] (see [A3a result](#a3a-result-100-steps-complete)). Per the predeclared rule, A3b (LR 4e-6) ran next; its policy collapsed from about step 60 (see [A3b interim](#a3b-interim-instability-at-lr-4e-6)). See the [execution record](#execution-record). The initial commit was plan only.
+**Status:** A1 (reward) and A2 (prompt) are complete; neither is a candidate. A3a (LR 2e-6) is complete and is the first candidate: +1.34 pp vs A0 at step 100, paired 95% [+0.32, +2.44] (see [A3a result](#a3a-result-100-steps-complete)). Per the predeclared rule, A3b (LR 4e-6) ran next; its policy collapsed from about step 60 and reached 0% by step 100 (see [A3b interim](#a3b-interim-instability-at-lr-4e-6) and the [A3 summary](#a3-summary-learning-rate)). Next: the user's decision on the candidate and on validation. See the [execution record](#execution-record). The initial commit was plan only.
 
 ## Plan
 
@@ -101,7 +101,7 @@ Question-paired intervals do not measure training-seed uncertainty. Consecutive 
 | A1 | `gemma4_e2b_rl05fp32_a1fmt0_16n64g_s100_seed1_1023_0058`: `REWARD_FMT_WEIGHT_TRAIN=0` + `REWARD_EVAL_QUESTIONS` (eval keeps 0.1) | Valid: exit 0, guards PASS, 100 / 100 steps, dumps complete | 36.18% | 38.96% | −0.66 [−1.66, +0.30] | 3 h 22 min; not a candidate (format compliance falls, no detectable accuracy change) |
 | A2 | `gemma4_e2b_rl05fp32_a2wrap1_16n64g_s100_seed1_1023_0423`: `GEMMA_TRAIN_FILE=train_single_wrap.parquet` (format coefficient 0.1, eval unchanged) | Valid: exit 0, guards PASS, 100 / 100 steps, template-change identity checks pass | 36.18% | 39.20% | −0.42 [−1.40, +0.56] | 3 h 18 min; not a candidate (no detectable accuracy change; slightly lower training accuracy) |
 | A3a | LR `2e-6`, constant, no warmup: `gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753` (override `actor_rollout_ref.actor.optim.lr=2e-6`) | A3a valid: exit 0, guards PASS, 100 / 100 steps, `actor/lr` 2e-06 at every step | 36.06% | **40.96%** | **+1.34 [+0.32, +2.44]** | 3 h 08 min; **candidate**; A3b rule met, so A3b (4e-6) launched; entropy 0.20 → 0.37 and `k3_kl` 0.00071 → 0.00106 drift upward |
-| A3b | LR `4e-6`, constant, no warmup: `gemma4_e2b_rl05fp32_a3lr4e6_16n64g_s100_seed1_1023_1116` (override `actor_rollout_ref.actor.optim.lr=4e-6`; A0 reward and prompt; fresh start) | **Unstable: the policy collapses from about step 60** (see [A3b interim](#a3b-interim-instability-at-lr-4e-6)); still running (step 80: held-out 11.32%) | 35.96% | — | step 60: −1.50 [−2.58, −0.30]; step 80: −27.44 [−28.74, −26.20] | collapse; not a candidate; stop recommended, awaiting the user |
+| A3b | LR `4e-6`, constant, no warmup: `gemma4_e2b_rl05fp32_a3lr4e6_16n64g_s100_seed1_1023_1116` (override `actor_rollout_ref.actor.optim.lr=4e-6`; A0 reward and prompt; fresh start) | Valid run (exit 0, guards PASS, 100 / 100 steps); **policy collapse from ~step 60** (entropy → 12.45, `k3_kl` up to 7.0) | 35.96% | **0.00%** | **−39.62 [−40.92, −38.28]** | 4 h 10 min; not a candidate (ahead at steps 20 / 40, then collapsed) |
 
 Add reproducible launch/config evidence, per-question/per-step summaries and plots alongside each result. Preserve failed or inconclusive observations rather than deleting or pooling them.
 
@@ -404,6 +404,60 @@ Recorded at step ~72 (2026-10-23T13:47Z).
 Responses degenerate into long completions without an answer. Every predeclared stop signal is crossed: entropy above 0.6, `k3_kl` above 0.003, and held-out below A0.
 
 **Step-80 eval (2026-10-23T14:28Z):** held-out **11.32%**, which is −27.44 pp vs A0 [−28.74, −26.20]. 21.18% of completions are formatted, 78.5% have no `</answer>`, and the mean completion is 15,767 characters. Each training step now takes about 393 s, against about 100 s before the collapse.
+
+#### A3b final (100 steps, complete; not stopped early)
+
+The stop recommendation was not confirmed before the run ended on its own at 15:26Z.
+
+**Validity**
+- `exit_code=0`, guard check PASS ([`a3b_guard_check.txt`](recipe_ablation/a3_lr/a3b_guard_check.txt)).
+- Identical prompts to A0 at every step.
+- `actor/lr` is `4e-06` at all 100 steps.
+- Evidence: `recipe_ablation/a3_lr/a3b_*` ([vs A0](recipe_ablation/a3_lr/a3b_vs_a0_s100.md), [vs A3a](recipe_ablation/a3_lr/a3b_vs_a3a_s100.md)), driver log [`logs/gemma4_e2b_rl05fp32_a3lr4e6_16n64g_s100_seed1_1023_1116.log`](logs/gemma4_e2b_rl05fp32_a3lr4e6_16n64g_s100_seed1_1023_1116.log).
+
+![A3b vs A0](recipe_ablation/a3_lr/a3b_vs_a0_s100.png)
+
+| Held-out `eval_5000` | A0 (%) | A3a (%) | A3b (%) | A3b − A0 (pp, 95%) | A3b − A3a (pp, 95%) | A3b format (%) |
+|---:|---:|---:|---:|---|---|---:|
+| 0 | 35.76 | 36.06 | 35.96 | +0.20 [−0.76, +1.08] | −0.10 [−1.02, +0.80] | 94.64 |
+| 20 | 37.40 | 39.26 | 39.92 | +2.52 [+1.54, +3.60] | +0.66 [−0.30, +1.66] | 99.40 |
+| 40 | 38.52 | 39.24 | 40.72 | +2.20 [+1.08, +3.28] | +1.48 [+0.44, +2.56] | 98.50 |
+| 60 | 38.30 | 40.52 | 36.80 | −1.50 [−2.58, −0.30] | −3.72 [−4.86, −2.58] | 91.88 |
+| 80 | 38.76 | 40.92 | 11.32 | −27.44 [−28.74, −26.20] | −29.60 [−30.96, −28.24] | 21.18 |
+| **100** | **39.62** | **40.96** | **0.00** | **−39.62 [−40.92, −38.28]** | **−40.96 [−42.30, −39.62]** | 0.00 |
+
+| Training (identical prompts) | A0 train acc (%) | A3b train acc (%) | A3b − A0 (pp) | A3b format (%) |
+|---|---:|---:|---:|---:|
+| 1–20 | 59.53 | 60.99 | +1.47 | 99.42 |
+| 21–40 | 61.52 | 62.27 | +0.75 | 99.91 |
+| 41–60 | 61.26 | 61.47 | +0.21 | 99.53 |
+| 61–80 | 61.05 | 26.05 | −35.00 | 42.54 |
+| 81–100 | 61.76 | 0.72 | −61.04 | 0.72 |
+
+| Window medians (A3b) | `k3_kl` | entropy | `grad_norm` | truncation | response length (tokens) | `timing_s/step` |
+|---|---:|---:|---:|---:|---:|---:|
+| 1–20 | 0.00074 | 0.216 | 0.33 | 0.05% | 1,597 | 59 |
+| 21–40 | 0.0010 | 0.337 | 0.21 | 0 | 1,206 | 52 |
+| 41–60 | 0.0017 | 0.541 | 0.34 | 0 | 1,211 | 58 |
+| 61–80 | 3.64 | 9.14 | 15.6 | 36% | 5,055 | 131 |
+| 81–100 | 0.75 | 12.45 | 0.03 | 22% | 2,198 | 103 |
+
+**What happened**
+- By steps 81–100, entropy reaches 12.45 nats, close to ln(262,144) ≈ 12.48 for Gemma-4's vocabulary, so the policy is essentially uniform over tokens.
+- No completion is correct (96% of groups all-wrong). With no reward variance, the gradient vanishes (`grad_norm` about 0.03).
+- The collapse is irreversible within the run. Its precursors were visible from step ~20: entropy and `k3_kl` rose monotonically and faster than in A3a.
+
+### A3 summary: learning rate
+
+| LR | Step-100 held-out | vs A0 (pp, 95%) | Stability within 100 steps |
+|---|---:|---|---|
+| 1e-6 (A0) | 39.62% | — | stable; entropy 0.20–0.23, `k3_kl` about 0.0007 |
+| **2e-6 (A3a)** | **40.96%** | **+1.34 [+0.32, +2.44]** | no divergence; entropy 0.20 → 0.37 and `k3_kl` 0.0007 → 0.0011, still rising at step 100 |
+| 4e-6 (A3b) | 0.00% | −39.62 | collapses from ~step 60; entropy → 12.5 |
+
+- A3a is the only arm with a step-100 gain whose interval excludes 0. The trend is the same as A3b's, only slower.
+- So LR 2e-6 is the nominated candidate, with a stability caveat. A longer run, a different seed, or the 200-step horizon of the customer gate could reach the same instability.
+- Candidate selection, freezing and multi-seed validation are pending the user's decision (plan §5). Stability monitoring (entropy, `k3_kl`) or a stabilizer would have to be part of any longer-horizon validation.
 
 **Reading:** LR 4e-6 is unstable for this recipe within 100 steps. A3a's slower drift in entropy and `k3_kl` was an early sign of the same mechanism.
 

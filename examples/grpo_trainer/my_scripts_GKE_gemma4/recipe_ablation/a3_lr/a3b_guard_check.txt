@@ -1,0 +1,17 @@
+[PASS] node_prep verdict PASS  (PASS)
+[PASS] node_prep one ok record per alive node  (16 records / 16 alive nodes)
+[PASS] node_prep managed files identical on every node  ({"verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7", "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"})
+[PASS] exactly one guard report for role=actor  (found 1)
+[PASS] guard report covers ranks 0..W-1  (world_size=64 ranks=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63])
+[PASS] guard report: all ranks PASS  (n_fail=0)
+[PASS] no fault injected  (null)
+[PASS] every rank rebuilt fp32 bit-exact
+[PASS] per-rank init records for ranks 0..W-1  (have [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63])
+[PASS] per-rank init records: all PASS
+[PASS] per-rank init records: all buffers post-rebuild fp32 bit-exact  (256 buffers)
+[PASS] no fault applied  ([])
+[PASS] first-forward records for ranks 0..W-1  (have [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63])
+[PASS] first-forward records: all PASS, nothing restored
+[PASS] driver exit_code=0  (exit_code=0)
+[PASS] >= 100 training steps logged  (steps=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100])
+GEMMA4-GUARD-CHECK: PASS mode=positive world=64 exit_code=0 steps=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100]
