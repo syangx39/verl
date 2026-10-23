@@ -6,7 +6,7 @@ Find a better **100-step Gemma-4 E2B FP32 recipe** by testing learning-rate deca
 
 PR #11 is merged at `39ca638358c121b83b0f8a1c7646932ca993250a`. Its [result ledger](RECIPE_ABLATION_PLAN.md#result-ledger-update-as-experiments-finish) is the frozen source for A0–A3. A3a improved from **36.06% to 40.96% (+4.90 pp)**; vs A0 at step 100 it gained **+1.34 pp, question-paired 95% CI [+0.32, +2.44]**. LR 4e-6 collapsed, and removing format reward or the inner training wrapper did not produce a detectable accuracy improvement under frozen eval.
 
-**Status: plan only. No new experiment or launcher change is included yet.** The plan and PR description will be updated with implementation, commands, checks and results as work proceeds.
+**Status: implementation and local validation committed (section 4.2); GPU preflight and launches pending.** No PR #12 GPU job has run yet: the RayCluster's node pool has had no nodes since about 2026-10-23T19:36Z. The plan and PR description will be updated with commands, checks and results as work proceeds.
 
 ## Plan
 
@@ -88,15 +88,18 @@ Keep **eval every 20 steps** for this screen. A6 step 40 and A3a step 80 each re
 
 ### 4. Implement and validate before the next GPU runs
 
-- [ ] Archive the A3a control manifest, exact launch command/resolved config, model/data/code hashes and result paths.
-- [ ] Configure A4's native cosine, export all 100 update-used learning rates and verify the zero-based update index/horizon against the formula below. Compare the intended MaxText schedule using its actual resolved config before claiming TPU parity; then verify the GPU trainer path on a short smoke.
-- [ ] Make each arm's override explicit in the launcher and resolved config; compare against A3a and reject unintended recipe changes. Keep training-only changes out of eval settings.
-- [ ] Verify A5's probability convention at T=1, including raw/processed sampler log-probs and retained top-k/top-p filters. A training log-prob mismatch must not be mistaken for a useful exploration change.
-- [ ] Generalize comparison/signal tools that currently assume 2,048 rows and groups of eight. For A6 require **4,096 rows, exactly 256 groups × 16**, consistent prompt/answer per group and unchanged ordered prompt membership. Add a valid n=16 case and negative incomplete/incorrect-group cases; do not disable identity checks.
-- [ ] Confirm global token-mean loss normalization and one optimizer update across A6's full batch. Record gradient-accumulation/microbatch settings; more completions must not silently become multiple optimizer steps.
-- [ ] Run an **A6 two-step smoke** before its 100-step run to check memory, the 256 × 16 grouping contract and completion of both updates. Record memory and component timing; two startup-heavy steps do not establish steady-state throughput. The proposed 1.4–1.9× step-time / 4.5–6 h budget is an estimate to replace with measurements, not a performance result.
-- [ ] Implement and test the predeclared stop rules in §4.1, including consecutive-step counting, complete-dump validation, metric freshness and experiment-specific termination. Do not run unattended until the monitor can observe each completed step promptly.
-- [ ] Run the existing reward-scope/template-identity tests and the changed schedule/batch-contract checks. Keep code and manifests identical across nodes; record probe results.
+- [x] Archive the A3a control manifest, exact launch command/resolved config, model/data/code hashes and result paths. — [`a3a_control/manifest.json`](recipe_optimization/a3a_control/manifest.json) and the 922-key runtime config [`resolved_config.json`](recipe_optimization/a3a_control/resolved_config.json), extracted from A3a's driver log. Model file hashes are still to be recorded at the GPU preflight.
+- [ ] Configure A4's native cosine, export all 100 update-used learning rates and verify the zero-based update index/horizon against the formula below. Compare the intended MaxText schedule using its actual resolved config before claiming TPU parity; then verify the GPU trainer path on a short smoke. — Configured in [`g4run_pr12.sh`](recipe_optimization/launch/g4run_pr12.sh). The re-implemented verl lambda gives all 100 values and PASSes the formula checks: [`used_lr_pure.json`](recipe_optimization/a4_cosine/used_lr_pure.json). Still open: verl's own scheduler on the pod (`--use-verl`), the GPU trainer path (section 4.2) and MaxText.
+- [ ] Make each arm's override explicit in the launcher and resolved config; compare against A3a and reject unintended recipe changes. Keep training-only changes out of eval settings. — Overrides are explicit in [`g4run_pr12.sh`](recipe_optimization/launch/g4run_pr12.sh). [`gemma4_config_diff.py`](gemma4_config_diff.py) compares runtime configs and fails on any undeclared key. On PR #11's logs, A3b vs A3a differs only in the declared LR plus 6 run-identity keys. The per-arm check runs at each launch.
+- [ ] Verify A5's probability convention at T=1, including raw/processed sampler log-probs and retained top-k/top-p filters. A training log-prob mismatch must not be mistaken for a useful exploration change. — Pending (pod code path plus A5's step-1 `k3_kl`).
+- [x] Generalize comparison/signal tools that currently assume 2,048 rows and groups of eight. For A6 require **4,096 rows, exactly 256 groups × 16**, consistent prompt/answer per group and unchanged ordered prompt membership. Add a valid n=16 case and negative incomplete/incorrect-group cases; do not disable identity checks. — Each run is now validated against its own declared shape, with the same identity checks:
+  - [`gemma4_ab_compare.py`](gemma4_ab_compare.py): `--a/--b-rows-per-step`, `--a/--b-group-size`. Tests: 1 valid 8-vs-16 case plus 5 negative cases (shared shape on n=16, ragged 15/17-row groups, a missing row, a different question, a different group count).
+  - [`gemma4_signal_density.py`](gemma4_signal_density.py): `--shape` validation and an n=8-equivalent mixed share.
+  - The stop monitor accepts only complete 256 × n dumps.
+- [ ] Confirm global token-mean loss normalization and one optimizer update across A6's full batch. Record gradient-accumulation/microbatch settings; more completions must not silently become multiple optimizer steps. — Confirmed in code (section 4.2): one optimizer update per step for any n. Still to observe in the A6 smoke.
+- [ ] Run an **A6 two-step smoke** before its 100-step run to check memory, the 256 × 16 grouping contract and completion of both updates. Record memory and component timing; two startup-heavy steps do not establish steady-state throughput. The proposed 1.4–1.9× step-time / 4.5–6 h budget is an estimate to replace with measurements, not a performance result. — Arm `A6SMOKE` of [`g4run_pr12.sh`](recipe_optimization/launch/g4run_pr12.sh), with an observe-only monitor.
+- [x] Implement and test the predeclared stop rules in §4.1, including consecutive-step counting, complete-dump validation, metric freshness and experiment-specific termination. Do not run unattended until the monitor can observe each completed step promptly. — [`gemma4_stop_monitor.py`](gemma4_stop_monitor.py), with 38 checks in [`test_gemma4_stop_monitor.py`](test_gemma4_stop_monitor.py). Metric freshness is measured by the monitor; its live latency still has to be confirmed in the smoke before any unattended run (section 4.2).
+- [ ] Run the existing reward-scope/template-identity tests and the changed schedule/batch-contract checks. Keep code and manifests identical across nodes; record probe results. — Done locally: template identity (7/7), new shape tests (7/7 and 8/8), config diff (10/10), LR export (6/6). The reward-scope and RoPE-guard tests need the pod image (`torch`, `math_verify`).
 - [ ] Launch each authorized arm from the initial checkpoint only after its preflight passes.
 
 No production launch commands are promised in this initial draft: exact overrides will be added with the implementation, rather than presenting unsupported scheduler flags as runnable.
@@ -128,6 +131,86 @@ A single small held-out decrease or one unusual training batch does not trigger 
 - Test monitor latency and metric completeness during smoke. Missing/unreadable metrics are not zeros; resolve an observability failure before unattended training rather than claiming the run stayed below a threshold.
 - Save the trigger step, measured values, threshold, timestamp, stop request and actual last completed update; preserve existing logs/dumps/artifacts. Mark the arm `early-stopped/incomplete` with reason, and do not substitute an earlier best checkpoint for step 100 or promise a checkpoint that was never saved.
 
+### 4.2 Implementation and prelaunch decisions
+
+**One launcher for every PR #12 run:** [`recipe_optimization/launch/g4run_pr12.sh`](recipe_optimization/launch/g4run_pr12.sh) `A4 | A5 | A6 | A6SMOKE`.
+
+- Each arm is the frozen wrapper plus A3a's `actor_rollout_ref.actor.optim.lr=2e-6` plus its own declared overrides. The overrides are appended through the wrapper's `"$@"`, so they win over the launcher's `lr=1e-6`.
+- It unsets the A1 variables and `GEMMA_TRAIN_FILE`.
+- It writes a provenance line (file hashes of data, reward, launcher, wrapper, monitor and itself) and appends `<time, arm, experiment>` to `logs/gemma4_pr12_launches.tsv`.
+- It starts the stop monitor before the run.
+
+| Arm | Overrides on top of A3a (`actor_rollout_ref.` prefix omitted) | Monitor |
+|---|---|---|
+| A4 | `actor.optim.lr_scheduler_type=cosine`, `num_cycles=0.25`, `min_lr_ratio=0.0`, `lr_warmup_steps=0`, `lr_warmup_steps_ratio=0.0`, `zero_indexed_step=true` | acts; logged LR checked against `used_lr_pure.json` |
+| A5 | `rollout.temperature=1.0` | acts; LR 2e-6 |
+| A6 | `rollout.n=16` | acts; 256 × 16 dumps; LR 2e-6 |
+| A6SMOKE | A6's override, `TOTAL_STEPS=2`, no eval | observes only |
+
+**Driver stdout unbuffered (logging only).**
+
+- *Observed in PR #11:* per-step metric lines reached the driver log 13–18 steps late. When A1's progress bar showed step 26, its metrics had reached only step 13; when A3b was at about step 78, they had reached step 60.
+- *Likely cause:* the TaskRunner prints each line with `flush=True`, and the progress bar (stderr) arrived promptly. The most likely culprit is therefore the driver's block-buffered stdout, which is redirected to a file on GCS Fuse.
+- *A second symptom:* the same buffering lets stderr lines land inside stdout lines. A1's log copy has garbled configuration keys for this reason.
+- *Change:* `g4run_pr12.sh` sets `PYTHONUNBUFFERED=1` for the driver process only. It is not a Hydra key and does not reach the Ray workers, so the recipe and resolved config are unchanged.
+- *Verification before any unattended run:* the monitor records when every dump and metric line first becomes visible. The A6 smoke must show step 1's metric line before step 2's dump. A4's first steps must also arrive promptly.
+- *Safeguard:* a line without its final key (`perf/throughput`) raises an alert, and its missing values count as unevaluable.
+
+**Stop monitor:** [`gemma4_stop_monitor.py`](gemma4_stop_monitor.py) implements §4.1 as written and acts only on its own run's driver.
+
+- *Process match:* the driver must have both `verl.trainer.main_ppo` and `trainer.experiment_name=<exp>` as exact argv elements. The monitor sends SIGTERM, then SIGKILL after 180 s, and records `ray status`.
+- *Outputs:* `status.json` (per-step values, streaks, latency, alerts), `monitor.jsonl`, and `stop_trigger.json` when a rule triggers. All are written under `logs/gemma4_stop_monitor/<exp>/`.
+- *Validation, 38 checks:*
+  - every rule on synthetic runs;
+  - partial and invalid dumps;
+  - prompt-identity mismatch;
+  - the A5 offset baseline;
+  - 256 × 16 against an 8-completion reference;
+  - a held-out interval that spans 0;
+  - guard records;
+  - a live `--act` run that terminates only the matching dummy driver;
+  - a finished run that exits cleanly.
+- *Replay of the committed PR #11 driver logs:*
+  - The metric rules trigger on A3b at step 57: `k3_kl` was 0.00349, 0.00485 and 0.00640 at steps 55–57.
+  - They never trigger on A0, A1, A2 or A3a, whose `k3_kl` max is 0.00107.
+  - No watched metric is non-finite in any committed log.
+- *Still to replay:* the dump-based rules, against the A3b, A3a and A0 dumps on the pod, before A4 starts.
+
+**Configuration check at every launch:** [`gemma4_config_diff.py`](gemma4_config_diff.py).
+
+- It compares the configuration the TaskRunner prints before any training step with A3a's.
+- `--expect` marks a declared change; `--assert` marks a restated value. Interpolated copies of a factor are declared too.
+- An undeclared difference stops the run as an *invalid launch*, not an experiment result.
+
+| Arm | Declarations |
+|---|---|
+| A4 | `--expect` `lr_scheduler_type=cosine`, `num_cycles=0.25`, `lr_warmup_steps=0`; `--assert` `lr=2e-6`, `min_lr_ratio=0.0`, `lr_warmup_steps_ratio=0.0`, `zero_indexed_step=true` |
+| A5 | `rollout.temperature=1.0` and its unused interpolation `distillation.teacher_models.teacher_model.inference.temperature` |
+| A6 | `rollout.n=16` and its copies `actor.rollout_n`, `ref.rollout_n`, `critic.rollout_n` |
+| A6SMOKE | A6, plus `trainer.total_training_steps=2`, `test_freq=-1`, `val_before_train=False` |
+
+**A4's GPU trainer path is checked on A4's own first updates.**
+
+- *Why not a 2-step smoke:* the trainer sets `actor.optim.total_training_steps` to the run length, so a 2-step smoke would build a 2-step cosine and test a different schedule.
+- *Checks:*
+  - rank 0 must print `Total steps: 100, num_warmup_steps: 0`;
+  - the logged post-step `actor/lr` must be 1.99988e-6 at step 1 and 1.99951e-6 at step 2. The monitor checks every later step too.
+- *On failure:* the same as a failed smoke. The run is stopped, recorded as an invalid launch, and relaunched from the initial checkpoint after the fix.
+- *Before launch:* `gemma4_lr_schedule_export.py --use-verl` runs verl's own scheduler class on the pod.
+
+**A6 performs one optimizer update per step (code at runtime pin `ace775e8`).**
+
+- `RayPPOTrainer._update_actor` sets `mini_batch_size = global_batch_size = ppo_mini_batch_size × rollout.n` = 256 × 16 = 4,096.
+- `train_mini_batch` then takes 4,096 / 64 = 64 completions per GPU, which is all of each GPU's share. So `total_num_iterations = 1`: one `train_batch` call, one optimizer step and one scheduler step.
+- Each mini-batch's per-sequence token counts are all-gathered across the 64 ranks. Micro-batching (`use_dynamic_bsz`, 16,384 tokens per GPU) only splits gradient accumulation inside that single update.
+- The smoke records memory, component timing and `agent_loop/num_preempted`.
+
+**Analysis tools for unequal batch shapes.**
+
+- [`gemma4_ab_compare.py`](gemma4_ab_compare.py) takes per-run shapes (`--b-rows-per-step 4096 --b-group-size 16`) and per-run training temperatures (labels only).
+- [`gemma4_signal_density.py`](gemma4_signal_density.py) validates `--shape label=256x16`. It also reports `mixed_n8eq`, the expected correctness-mixed share had 8 of each group's completions been drawn, because the raw n=16 share rises mechanically with n.
+- [`gemma4_eval_report.py`](gemma4_eval_report.py) labels completions per step from the dumps, and the training temperature via `--train-temp`.
+
 ### 5. Judge accuracy, signal quality, stability and cost together
 
 **Primary endpoint:** greedy held-out accuracy at **fixed step 100 vs A3a's 40.96%**. Report question-paired gained/lost counts and bootstrap 95% CI, with exact eval identity checks. Also show each arm's gain from its own step 0 and the complete six-point curve. Do not tune eval prompts, question membership or scorers after seeing results.
@@ -152,15 +235,32 @@ After choosing a recipe, freeze it and evaluate the longer horizon and additiona
 
 | Arm | Exact command/config and experiment ID | Validity / completed steps | Step-0 acc | Step-100 acc | Difference vs A3a, pp (paired 95% CI) | Tokens / GPU-hours / decision |
 |---|---|---|---:|---:|---|---|
-| A3a control | PR #11 run `gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753` | Complete: 100 steps, all six evals | 36.06% | 40.96% | Reference | Reuse recorded evidence; stability caveat |
-| A4 native cosine | Not launched | Pending implementation/preflight | — | — | — | — |
-| A5 T=1 | Not launched | Pending implementation/preflight | — | — | — | — |
-| A6 n=16 | Not launched | Pending implementation/preflight | — | — | — | — |
+| A3a control | PR #11 run `gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753`; [manifest](recipe_optimization/a3a_control/manifest.json) | Complete: 100 steps, all six evals | 36.06% | 40.96% | Reference | Reuse recorded evidence; stability caveat |
+| A4 native cosine | Not launched; `g4run_pr12.sh A4` | Pending GPU preflight | — | — | — | — |
+| A5 T=1 | Not launched; `g4run_pr12.sh A5` | Pending GPU preflight | — | — | — | — |
+| A6 smoke (2 steps) | Not launched; `g4run_pr12.sh A6SMOKE` | Pending GPU preflight; not an accuracy result | — | — | — | Memory / timing / latency only |
+| A6 n=16 | Not launched; `g4run_pr12.sh A6` | Pending GPU preflight and smoke | — | — | — | — |
 
 Keep completed, null, failed and aborted arms in this ledger. Link commands, manifests, logs, per-question results and plots beside each result. Update the PR description around the final experiments as they are completed.
 
 ## Initial validation and scope
 
-Documentation only: no runtime change or GPU job in this commit. The draft was checked against merged PR #11, the Qwen rulebook/guide/launcher, the existing Gemma comparison evidence and frozen eval protocol; relative document links were checked. The later prelaunch decision selects native half-cosine, records explicit abort authorization and rules, and keeps A6 eval every 20 steps; no monitor or scheduler runtime implementation is claimed by these documentation edits. No new runtime test is warranted for this plan-only commit; implementation checks are listed above.
+The initial plan commits were documentation only, with no runtime change or GPU job. The draft was checked against merged PR #11, the Qwen rulebook/guide/launcher, the existing Gemma comparison evidence and frozen eval protocol; relative document links were checked. The later prelaunch decision selects native half-cosine, records explicit abort authorization and rules, and keeps A6 eval every 20 steps; no monitor or scheduler runtime implementation is claimed by these documentation edits. No new runtime test is warranted for this plan-only commit; implementation checks are listed above.
+
+### Implementation validation (no GPU job)
+
+Run locally with Python 3.13; numpy only for `gemma4_ab_compare.py`.
+
+| Test | Result |
+|---|---|
+| [`test_gemma4_stop_monitor.py`](test_gemma4_stop_monitor.py) | **38/38**, including the replay of the committed PR #11 driver logs |
+| [`test_gemma4_ab_compare_groups.py`](test_gemma4_ab_compare_groups.py) | **7/7** |
+| [`test_gemma4_ab_compare_template.py`](test_gemma4_ab_compare_template.py) (existing; unchanged behavior) | **7/7** |
+| [`test_gemma4_signal_density_shapes.py`](test_gemma4_signal_density_shapes.py) | **8/8** |
+| [`test_gemma4_config_diff.py`](test_gemma4_config_diff.py) | **10/10**, including A3b vs A3a from the committed logs |
+| `gemma4_lr_schedule_export.py` (pure) | 6/6 checks |
+
+- **Frozen files unchanged:** launcher `7d511735…`, wrapper `2a37aad5…` and reward `d0bde7b8…` hash to the values A3a recorded.
+- **Not yet run:** anything needing the pod image or GPUs. That covers the reward-scope and RoPE-guard tests (`torch`, `math_verify`), the verl scheduler export, dump-based monitor replays, the A6 smoke and every launch-time check above.
 
 This follows the completed PR #11 screen. No overlapping open experimental PR was found in this fork or the upstream `gemma4 ablation` search during closeout. AI assistance: Codex drafted the plan at the user's request; experiment implementation, human review and runtime evidence remain to be added.

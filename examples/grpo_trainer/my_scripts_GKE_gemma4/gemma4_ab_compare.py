@@ -8,9 +8,10 @@ the same 256 prompts in both. The script checks that, then reports:
      ground-truth hashes): accuracy of each run, B - A difference, paired SE, question-paired bootstrap 95% interval,
      gained / lost, and each run's own change vs its step 0. Step 0 scores identical weights in both runs, so the
      step-0 difference is the eval noise floor.
-  2. Training accuracy (T = 0.8 rollouts) per step on identical prompts: B - A per step, and its mean, standard
-     deviation and number of steps with B ahead over step windows. These are descriptive: consecutive steps of the same
-     two runs are not independent replicates (each run's state carries over), so no standard error is reported.
+  2. Training accuracy (sampled rollouts, T = 0.8 unless --a-temp / --b-temp say otherwise) per step on identical
+     prompts: B - A per step, and its mean, standard deviation and number of steps with B ahead over step windows. These
+     are descriptive: consecutive steps of the same two runs are not independent replicates (each run's state carries
+     over), so no standard error is reported.
      Before comparing, every training dump is validated: complete step coverage, exactly rows_per_step rows,
      rows_per_step / group_size prompt groups of exactly group_size rows, one input and one ground truth per group,
      and the same qid -> (input, ground truth) mapping in both runs.
@@ -21,10 +22,16 @@ With --train-template-change strip_inner_gemma3 (PR #11 A2), B's training prompt
 exactly that declared template change: A's input is mapped to its expected B form before the same exact equality check,
 so a different question or instruction still fails. Eval prompts are always compared strictly.
 
+Runs with different completions per prompt (PR #12 A6: n=16 vs the n=8 control) are compared with per-run batch
+shapes, e.g. --a-rows-per-step 2048 --a-group-size 8 --b-rows-per-step 4096 --b-group-size 16. Both runs must have the
+same number of prompt groups per step and the same qid -> (input, ground truth) per step; each side is validated
+against its own declared shape (no identity check is relaxed). Training accuracy is then each run's mean over all of
+its completions on the same prompt instances.
+
 Usage:
     python3 gemma4_ab_compare.py --a bf16=<eval_dump_dir_A> --a-log <driver_log_A> \\
         --b fp32=<eval_dump_dir_B> --b-log <driver_log_B> [--max-step 60] [--out-json x.json] [--out-md x.md] \\
-        [--train-template-change strip_inner_gemma3]
+        [--train-template-change strip_inner_gemma3] [--b-rows-per-step 4096 --b-group-size 16]
 """
 
 from __future__ import annotations
@@ -167,8 +174,15 @@ def main() -> int:
     ap.add_argument("--max-step", type=int, default=10**9)
     ap.add_argument("--expect-steps", type=int, default=0,
                     help="require training dumps for steps 1..N in both runs (default: 1..last step present)")
-    ap.add_argument("--rows-per-step", type=int, default=2048, help="train_batch_size x rollout.n")
-    ap.add_argument("--group-size", type=int, default=8, help="rollout.n")
+    ap.add_argument("--rows-per-step", type=int, default=2048, help="train_batch_size x rollout.n (both runs)")
+    ap.add_argument("--group-size", type=int, default=8, help="rollout.n (both runs)")
+    for side in ("a", "b"):
+        ap.add_argument(f"--{side}-rows-per-step", type=int, default=0,
+                        help=f"run {side.upper()}'s rows per step if it differs (default: --rows-per-step)")
+        ap.add_argument(f"--{side}-group-size", type=int, default=0,
+                        help=f"run {side.upper()}'s rollout.n if it differs (default: --group-size)")
+        ap.add_argument(f"--{side}-temp", type=float, default=0.8,
+                        help=f"run {side.upper()}'s training temperature (labels only)")
     ap.add_argument("--out-json", default="")
     ap.add_argument("--out-md", default="")
     ap.add_argument("--plot", default="", help="write a 2x2 PNG summary here (needs matplotlib)")
@@ -183,9 +197,19 @@ def main() -> int:
     lb, db = args.b.split("=", 1)
     tmpl = _template_transform(args.train_template_change)
     same_prompts = tmpl is None
+    a_rows, a_g = args.a_rows_per_step or args.rows_per_step, args.a_group_size or args.group_size
+    b_rows, b_g = args.b_rows_per_step or args.rows_per_step, args.b_group_size or args.group_size
+    for side, rows, g in (("A", a_rows, a_g), ("B", b_rows, b_g)):
+        if g < 1 or rows % g:
+            raise SystemExit(f"[train] {side}: rows per step {rows} is not a multiple of group size {g}")
+    if a_rows // a_g != b_rows // b_g:
+        raise SystemExit(f"[train] A has {a_rows // a_g} prompt groups per step but B has {b_rows // b_g}: "
+                         "the runs must train on the same prompt instances")
+    n_groups = a_rows // a_g
+    same_shape = (a_rows, a_g) == (b_rows, b_g)
 
     res = {"a": {"label": la, "dir": da}, "b": {"label": lb, "dir": db}, "eval": {}, "train": {}, "diag": {},
-           "train_template_change": args.train_template_change}
+           "train_template_change": args.train_template_change, "train_temps": (args.a_temp, args.b_temp)}
     va = {s: _load_val(os.path.join(da, "val", f"{s}.jsonl")) for s in _steps(da, "val") if s <= args.max_step}
     vb = {s: _load_val(os.path.join(db, "val", f"{s}.jsonl")) for s in _steps(db, "val") if s <= args.max_step}
     common = sorted(set(va) & set(vb))
@@ -208,8 +232,8 @@ def main() -> int:
     for s in tsteps:
         ra = list(_rows(os.path.join(da, "train", f"{s}.jsonl")))
         rb = list(_rows(os.path.join(db, "train", f"{s}.jsonl")))
-        ga_ = _check_batch(ra, f"A step {s}", args.rows_per_step, args.group_size, transform=tmpl)
-        gb_ = _check_batch(rb, f"B step {s}", args.rows_per_step, args.group_size)
+        ga_ = _check_batch(ra, f"A step {s}", a_rows, a_g, transform=tmpl)
+        gb_ = _check_batch(rb, f"B step {s}", b_rows, b_g)
         if set(ga_) != set(gb_):
             raise SystemExit(f"[train] step {s}: prompt qid sets differ between A and B")
         bad = [q for q in ga_ if ga_[q] != gb_[q]]
@@ -222,10 +246,11 @@ def main() -> int:
     res["train"]["per_step"] = per
     res["train"]["batch_checks"] = {
         "steps": [tsteps[0], tsteps[-1]] if tsteps else None, "n_steps": len(tsteps),
-        "rows_per_step": args.rows_per_step, "groups_per_step": args.rows_per_step // args.group_size,
-        "group_size": args.group_size,
-        "checks": "complete step coverage; exact rows per step; groups of exactly group_size per qid; one input and one "
-                  "ground truth per group; identical qid -> (input, ground truth) between A and B"
+        "rows_per_step": a_rows if same_shape else None, "groups_per_step": n_groups,
+        "group_size": a_g if same_shape else None,
+        "a": {"rows_per_step": a_rows, "group_size": a_g}, "b": {"rows_per_step": b_rows, "group_size": b_g},
+        "checks": "complete step coverage; exact rows per step; groups of exactly group_size per qid (per run); one "
+                  "input and one ground truth per group; identical qid -> (input, ground truth) between A and B"
                   + ("" if same_prompts else f", where A's input is first mapped by the declared template change "
                                               f"{args.train_template_change}"),
     }
@@ -264,10 +289,16 @@ def main() -> int:
             res["diag"][f"{lo}-{hi}"] = row
 
     prompt_label = "identical prompts" if same_prompts else "same raw questions, different training templates"
+    if not same_shape:
+        prompt_label += f", n={a_g} (A) vs n={b_g} (B)"
+    if args.a_temp != args.b_temp:
+        prompt_label += f", T={args.a_temp:g} (A) vs T={args.b_temp:g} (B)"
+    shape = (f"{a_rows} rows = {n_groups} x {a_g}" if same_shape else
+             f"A {a_rows} rows = {n_groups} x {a_g}, B {b_rows} rows = {n_groups} x {b_g}")
     L = [f"### Paired A/B: `{lb}` (B) vs `{la}` (A)", ""]
     L.append(f"- A: `{da}`  B: `{db}`; eval checkpoints in common: {common}; training steps in common: "
              f"{tsteps[0] if tsteps else '-'}–{tsteps[-1] if tsteps else '-'}; training dumps validated at every step "
-             f"({args.rows_per_step} rows = {args.rows_per_step // args.group_size} x {args.group_size}, one input / ground "
+             f"({shape}, one input / ground "
              f"truth per group, identical qid -> input / ground truth in A and B"
              + ("" if same_prompts else f" after the declared training-template change `{args.train_template_change}`; "
                                         "eval prompts compared strictly") + ").")
@@ -321,6 +352,16 @@ def _rolling(x, w):
     return [sum(x[max(0, i - w + 1): i + 1]) / (i - max(0, i - w + 1) + 1) for i in range(len(x))]
 
 
+def _sampling_label(res):
+    """'T=0.8, 2,048 completions/step' when both runs share it, else per run (n and T are also in the prompt label)."""
+    bc = res["train"].get("batch_checks", {})
+    ra, rb = bc.get("a", {}).get("rows_per_step"), bc.get("b", {}).get("rows_per_step")
+    ta, tb = res.get("train_temps", (0.8, 0.8))
+    t = f"T={ta:g}" if ta == tb else f"T={ta:g} / {tb:g}"
+    c = f"{ra:,} completions/step" if ra == rb else f"{ra:,} / {rb:,} completions/step"
+    return f"{t}, {c}"
+
+
 def _plot(res, la, lb, ga, gb, rep, path, prompt_label="identical prompts"):
     import matplotlib
 
@@ -363,7 +404,7 @@ def _plot(res, la, lb, ga, gb, rep, path, prompt_label="identical prompts"):
     ax.plot(ts, bb, color=cb, alpha=0.25, lw=1)
     ax.plot(ts, _rolling(aa, 10), color=ca, lw=2.2, label=f"{la}: 10-step rolling mean")
     ax.plot(ts, _rolling(bb, 10), color=cb, lw=2.2, label=f"{lb}: 10-step rolling mean")
-    ax.set_title(f"B. Training accuracy (T=0.8, 2,048 completions/step, {prompt_label})")
+    ax.set_title(f"B. Training accuracy ({_sampling_label(res)}, {prompt_label})")
     ax.set_xlabel("Training step")
     ax.set_ylabel("Sampled accuracy (%)")
     ax.legend(loc="lower right", fontsize=8.5)

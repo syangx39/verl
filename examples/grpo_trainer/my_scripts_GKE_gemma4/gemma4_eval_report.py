@@ -349,7 +349,10 @@ def _plot_run(label: str, data: dict, plot_dir: pathlib.Path) -> list[pathlib.Pa
     )
 
     ax = axes[0, 0]
-    ax.plot(ts, tr_acc, color="#1f77b4", alpha=0.30, linewidth=1.0, label="Per-step Train Accuracy (T=0.8, 2,048 completions)")
+    n_rows = sorted({int(train_steps[s].get("n", 0)) for s in ts})
+    rows_lbl = f"{n_rows[0]:,}" if len(n_rows) == 1 else "/".join(f"{n:,}" for n in n_rows)
+    ax.plot(ts, tr_acc, color="#1f77b4", alpha=0.30, linewidth=1.0,
+            label=f"Per-step Train Accuracy (T={data.get('train_temp', 0.8):g}, {rows_lbl} completions)")
     ax.plot(ts, _rolling(tr_acc, 20), color="#1f77b4", linewidth=2.2, label=f"20-step Rolling Mean Acc ({statistics.mean(tr_acc[:20]):.2f}% → {statistics.mean(tr_acc[-20:]):.2f}%)")
     ax2 = ax.twinx()
     ax2.plot(ts, _rolling(tr_fmt, 20), color="#2ca02c", linestyle="--", linewidth=1.8, label=f"20-step Rolling Format ({statistics.mean(tr_fmt[:20]):.2f}% → {statistics.mean(tr_fmt[-20:]):.2f}%) [right]")
@@ -438,6 +441,8 @@ def main() -> int:
     ap.add_argument("--out-json", default="")
     ap.add_argument("--out-md", default="")
     ap.add_argument("--plot-dir", default="", help="Directory to write <label>_eval_curve.png and <label>_training_diagnostics.png")
+    ap.add_argument("--train-temp", action="append", default=[],
+                    help="label=T: training rollout temperature for plot labels (default 0.8)")
     args = ap.parse_args()
 
     if args.from_json:
@@ -470,7 +475,9 @@ def main() -> int:
         p.write_text(json.dumps(runs, indent=2, sort_keys=True))
     if args.plot_dir:
         pdir = pathlib.Path(args.plot_dir)
+        temps = {k: float(v) for k, v in (t.split("=", 1) for t in args.train_temp)}
         for label, rdata in runs.items():
+            rdata["train_temp"] = temps.get(label, rdata.get("train_temp", 0.8))
             _plot_run(label, rdata, pdir)
     return 0
 

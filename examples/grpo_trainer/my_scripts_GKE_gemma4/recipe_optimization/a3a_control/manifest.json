@@ -1,0 +1,57 @@
+{
+ "role": "PR #12 control: PR #11 arm A3a (A0 FP32 recipe with constant LR 2e-6, no warmup; the only change vs A0)",
+ "experiment_id": "gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753",
+ "launch": {
+  "arm_command": "env -u REWARD_FMT_WEIGHT_TRAIN -u REWARD_EVAL_QUESTIONS -u GEMMA_TRAIN_FILE SEED=1 NNODES=16 TOTAL_STEPS=100 EXPERIMENT_NAME=gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753 bash run_gemma4_e2b_rl05_accuracy_baseline.sh actor_rollout_ref.actor.optim.lr=2e-6",
+  "provenance_line": "[a3a-provenance] exp=gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753 lr=2e-6 train_file=/workspace/meta-RL/data/openmathinstruct2/train.parquet train_sha256=5404981a07c78a5c02d4f493293fc30bd1ddb42908376566fa9a1020abbdf01b reward_sha256=d0bde7b82f9ab6270b26423184fc1633fc05c15161de7a66e5a2fb0de4a56ed7 launcher_sha256=7d511735c00a1c883645ba4fd02fc802bbc535f51a7f36229768f24d29969c2a wrapper_sha256=2a37aad5d1a03ce5a1d2f5aaacec8402666e35e5aad17d3ef175e40dd92d4e2e",
+  "main_ppo_command_from_driver_log": "python3 -m verl.trainer.main_ppo algorithm.adv_estimator=grpo algorithm.use_kl_in_reward=False 'data.train_files=['\\''/workspace/meta-RL/data/openmathinstruct2/train.parquet'\\'']' 'data.val_files=['\\''/workspace/meta-RL/data/openmathinstruct2/gemma4_eval_5k/eval_5000.parquet'\\'']' data.train_batch_size=256 data.max_prompt_length=8192 data.max_response_length=8192 data.filter_overlong_prompts=False data.truncation=error actor_rollout_ref.model.path=/workspace/meta-RL/models/gemma-4-E2B-it actor_rollout_ref.model.use_remove_padding=True actor_rollout_ref.model.enable_gradient_checkpointing=True actor_rollout_ref.actor.optim.lr=1e-6 actor_rollout_ref.actor.ppo_mini_batch_size=256 actor_rollout_ref.actor.use_dynamic_bsz=True actor_rollout_ref.actor.ppo_max_token_len_per_gpu=16384 actor_rollout_ref.actor.use_kl_loss=False actor_rollout_ref.actor.kl_loss_coef=0.0 actor_rollout_ref.actor.clip_ratio_low=0.2 actor_rollout_ref.actor.clip_ratio_high=0.28 actor_rollout_ref.actor.entropy_coeff=0 actor_rollout_ref.actor.fsdp_config.param_offload=False actor_rollout_ref.actor.fsdp_config.optimizer_offload=False actor_rollout_ref.actor.fsdp_config.model_dtype=fp32 actor_rollout_ref.ref.log_prob_use_dynamic_bsz=True actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=16384 actor_rollout_ref.ref.fsdp_config.param_offload=False actor_rollout_ref.rollout.name=vllm actor_rollout_ref.rollout.tensor_model_parallel_size=1 actor_rollout_ref.rollout.gpu_memory_utilization=0.30 actor_rollout_ref.rollout.n=8 actor_rollout_ref.rollout.temperature=0.8 actor_rollout_ref.rollout.top_p=0.95 actor_rollout_ref.rollout.top_k=50 actor_rollout_ref.rollout.max_num_batched_tokens=32768 actor_rollout_ref.rollout.enable_chunked_prefill=True actor_rollout_ref.rollout.enforce_eager=False actor_rollout_ref.rollout.free_cache_engine=False actor_rollout_ref.rollout.log_prob_use_dynamic_bsz=True actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu=16384 +actor_rollout_ref.rollout.engine_kwargs.vllm.enable_prefix_caching=True +actor_rollout_ref.model.override_config.attn_implementation=flex_attention custom_reward_function.path=/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gemma4/maxtext_math_reward.py custom_reward_function.name=compute_score reward.custom_reward_function.path=/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gemma4/maxtext_math_reward.py reward.custom_reward_function.name=compute_score actor_rollout_ref.actor.strategy=fsdp actor_rollout_ref.ref.strategy=fsdp trainer.use_v1=False ++ray_kwargs.ray_init.runtime_env.env_vars.REWARD_DUMP_DIR=/workspace/meta-RL/reward_dumps/gemma4 '++ray_kwargs.ray_init.runtime_env.env_vars.REWARD_DUMP_EVERY=\"256\"' '++ray_kwargs.ray_init.runtime_env.env_vars.VLLM_NO_USAGE_STATS=\"1\"' '++ray_kwargs.ray_init.runtime_env.env_vars.DO_NOT_TRACK=\"1\"' ++ray_kwargs.ray_init.runtime_env.env_vars.VERL_GEMMA4_ROPE_REPORT_DIR=/workspace/meta-RL/logs/gemma4_guard/gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753 trainer.balance_batch=True 'trainer.logger=[\"console\",\"tensorboard\"]' trainer.project_name=rl05_parity_gemma4 trainer.experiment_name=gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753 trainer.n_gpus_per_node=4 trainer.nnodes=16 trainer.save_freq=-1 trainer.test_freq=-1 trainer.val_before_train=False trainer.total_epochs=1 trainer.total_training_steps=100 data.seed=1 data.validation_shuffle=False actor_rollout_ref.rollout.seed=1 actor_rollout_ref.actor.data_loader_seed=1 actor_rollout_ref.actor.fsdp_config.seed=1 actor_rollout_ref.rollout.val_kwargs.do_sample=False actor_rollout_ref.rollout.val_kwargs.temperature=0 actor_rollout_ref.rollout.val_kwargs.top_k=-1 actor_rollout_ref.rollout.val_kwargs.top_p=1.0 actor_rollout_ref.rollout.val_kwargs.n=1 trainer.val_before_train=True trainer.test_freq=20 trainer.validation_data_dir=/workspace/meta-RL/logs/gemma4_eval/gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753/val trainer.rollout_data_dir=/workspace/meta-RL/logs/gemma4_eval/gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753/train actor_rollout_ref.actor.optim.lr=2e-6"
+ },
+ "hashes_sha256": {
+  "train_parquet": "5404981a07c78a5c02d4f493293fc30bd1ddb42908376566fa9a1020abbdf01b",
+  "reward_fn": "d0bde7b82f9ab6270b26423184fc1633fc05c15161de7a66e5a2fb0de4a56ed7",
+  "launcher": "7d511735c00a1c883645ba4fd02fc802bbc535f51a7f36229768f24d29969c2a",
+  "wrapper": "2a37aad5d1a03ce5a1d2f5aaacec8402666e35e5aad17d3ef175e40dd92d4e2e",
+  "eval_5000_parquet": "d092a9c5e80aa2b3cf8e4e12d8367769e770f69ee6627ff1285fd5693efc662d",
+  "eval_5000_prompt_tokens": "a54fbb327d9c60545c49edfc26107b21a1e55f3ef9e673d80024c79e821b5ca4",
+  "managed_patches_on_every_node": {
+   "verl/models/transformers/monkey_patch.py": "9be46b096f096ab17596f91880929398b9919179a74851a1505e23a5803bfbb7",
+   "verl/workers/engine/fsdp/transformer_impl.py": "9a43adb81f9e8d39dc77a715e341190778da43f95152127f8a43e5f6c08c3263"
+  }
+ },
+ "verl_pin": "ace775e87d8765bcdd114aac734ab71da5367a0f",
+ "model": {
+  "hf_id": "google/gemma-4-E2B-it",
+  "path": "/workspace/meta-RL/models/gemma-4-E2B-it",
+  "file_hashes": "recorded at PR #12 GPU preflight (model_manifest.json)"
+ },
+ "resolved_config": {
+  "file": "resolved_config.json",
+  "source": "TaskRunner print of OmegaConf.to_container(resolve=True) in the A3a driver log",
+  "n_keys": 922
+ },
+ "results": {
+  "eval_acc_pct": {
+   "0": 36.06,
+   "20": 39.26,
+   "40": 39.24,
+   "60": 40.52,
+   "80": 40.92,
+   "100": 40.96
+  },
+  "step100_vs_A0_pp": {
+   "delta": 1.34,
+   "boot95": [
+    0.32,
+    2.44
+   ]
+  },
+  "steps_completed": 100,
+  "guard_check": "PASS"
+ },
+ "paths": {
+  "driver_log": "/workspace/meta-RL/logs/gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753.log (repo copy: logs/gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753.log)",
+  "train_and_eval_dumps": "/workspace/meta-RL/logs/gemma4_eval/gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753/{train,val}/<step>.jsonl",
+  "guard_dir": "/workspace/meta-RL/logs/gemma4_guard/gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753",
+  "pr11_artifacts": "recipe_ablation/a3_lr/ (a3a_eval_report.*, a3a_vs_a0_s100.*, guard_check.*, signal_density_s100.json)"
+ }
+}
