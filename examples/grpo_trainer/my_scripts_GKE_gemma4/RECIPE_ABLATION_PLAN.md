@@ -6,7 +6,7 @@ Optimize the already-learning Gemma-4 E2B FP32 recipe by isolating the effects o
 
 PR #10 established learning, not a plateau: held-out accuracy rose **35.76% → 39.62% (+3.86 pp)** at step 100, with question-paired bootstrap 95% **[+2.82, +4.96] pp**. Its run was deliberately stopped at step 107; only steps 0–100 are the comparison reference. Qwen results motivate optimization but are not a Gemma acceptance threshold.
 
-**Status:** A1 (reward) and A2 (prompt) are complete, and neither is a candidate (see [A1 result](#a1-result-100-steps-complete), [A2 result](#a2-result-100-steps-complete)). A3a (LR 2e-6) is running, started 07:53Z. See the [execution record](#execution-record). The initial commit was plan only.
+**Status:** A1 (reward) and A2 (prompt) are complete; neither is a candidate. A3a (LR 2e-6) is complete and is the first candidate: +1.34 pp vs A0 at step 100, paired 95% [+0.32, +2.44] (see [A3a result](#a3a-result-100-steps-complete)). Per the predeclared rule, A3b (LR 4e-6) runs next. See the [execution record](#execution-record). The initial commit was plan only.
 
 ## Plan
 
@@ -100,7 +100,7 @@ Question-paired intervals do not measure training-seed uncertainty. Consecutive 
 | A0 | PR #10 FP32 seed 1, steps 0–100 | Reported window verified; full run stopped at 107 | 35.76% | 39.62% | Reference | See PR #10 |
 | A1 | `gemma4_e2b_rl05fp32_a1fmt0_16n64g_s100_seed1_1023_0058`: `REWARD_FMT_WEIGHT_TRAIN=0` + `REWARD_EVAL_QUESTIONS` (eval keeps 0.1) | Valid: exit 0, guards PASS, 100 / 100 steps, dumps complete | 36.18% | 38.96% | −0.66 [−1.66, +0.30] | 3 h 22 min; not a candidate (format compliance falls, no detectable accuracy change) |
 | A2 | `gemma4_e2b_rl05fp32_a2wrap1_16n64g_s100_seed1_1023_0423`: `GEMMA_TRAIN_FILE=train_single_wrap.parquet` (format coefficient 0.1, eval unchanged) | Valid: exit 0, guards PASS, 100 / 100 steps, template-change identity checks pass | 36.18% | 39.20% | −0.42 [−1.40, +0.56] | 3 h 18 min; not a candidate (no detectable accuracy change; slightly lower training accuracy) |
-| A3 | Predeclared: A3a LR `2e-6` (constant, no warmup); A3b LR `4e-6` only if A3a meets the rule above. **A3a running:** `gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753` (override `actor_rollout_ref.actor.optim.lr=2e-6`) | A3a started 2026-10-23T07:53Z; start check passed (`actor/lr` 2e-06, A0 reward and prompt, identical prompts to A0, guards PASS) | 36.06% | — | — | — |
+| A3 | Predeclared: A3a LR `2e-6` (constant, no warmup); A3b LR `4e-6` only if A3a meets the rule above. **A3a:** `gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753` (override `actor_rollout_ref.actor.optim.lr=2e-6`) | A3a valid: exit 0, guards PASS, 100 / 100 steps, `actor/lr` 2e-06 at every step | 36.06% | **40.96%** | **+1.34 [+0.32, +2.44]** | 3 h 08 min; **candidate**; A3b rule met, so A3b (4e-6) launched; entropy 0.20 → 0.37 and `k3_kl` 0.00071 → 0.00106 drift upward |
 
 Add reproducible launch/config evidence, per-question/per-step summaries and plots alongside each result. Preserve failed or inconclusive observations rather than deleting or pooling them.
 
@@ -294,6 +294,77 @@ Early behavior, descriptive only: with the single-wrapped prompt the initial pol
   - The initial policy formats noticeably less with single-wrapped prompts (76.8% vs 97.2% at step 1); the 0.1 format reward restores at least 99.6% by step 20.
   - Not tested by design: the effect when eval prompts are also single-wrapped.
 - **Next:** A3a keeps A0's double-wrapped training prompt and format coefficient 0.1. This also preserves TPU parity.
+
+### A3a record: LR 2e-6
+
+**Launch.** `gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753`, started 2026-10-23T07:53Z after A2 was recorded.
+- Frozen launcher and wrapper, `SEED=1`, `NNODES=16`, `TOTAL_STEPS=100`.
+- A0 prompt (`train.parquet`, sha256 `5404981a…`) and A0 reward (format coefficient 0.1; the A1 variables and `GEMMA_TRAIN_FILE` are unset).
+- Only override: `actor_rollout_ref.actor.optim.lr=2e-6`, appended last.
+
+#### A3a result (100 steps, complete)
+
+**Validity**
+- Driver `exit_code=0` (`LAUNCHER_RC=0`), 100 / 100 steps, all six evals.
+- [Guard check](recipe_ablation/a3_lr/guard_check.txt) PASS: node prep 16 / 16, RoPE guard 64 / 64.
+- Strict comparison with A0 validated identical prompts at every step 1–100.
+- Logged `actor/lr` is `2e-06` at all 100 steps; the resolved config also gives `2e-06`, so the LR is constant with no warmup.
+- The single traceback is the known exit-phase `DataLoader worker ... killed`.
+- Wall time: launched 07:53Z, log closed 11:01Z, about 3 h 08 min.
+- Evidence: [`recipe_ablation/a3_lr/`](recipe_ablation/a3_lr/), driver log [`logs/gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753.log`](logs/gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753.log).
+
+![A3a vs A0](recipe_ablation/a3_lr/a3a_vs_a0_s100.png)
+
+| Held-out `eval_5000` (paired by `qid`) | A0 (%) | A3a (%) | A3a − A0 (pp), bootstrap 95% | A3a vs own step 0 (pp, 95%) | format A0 / A3a (%) |
+|---:|---:|---:|---|---|---|
+| 0 (identical weights) | 35.76 | 36.06 | +0.30 [−0.62, +1.16] | — | 94.26 / 94.58 |
+| 20 | 37.40 | 39.26 | **+1.86 [+0.92, +2.84]** | +3.20 [+2.16, +4.22] | 97.44 / 98.16 |
+| 40 | 38.52 | 39.24 | +0.72 [−0.34, +1.76] | +3.18 [+2.08, +4.26] | 97.98 / 98.54 |
+| 60 | 38.30 | 40.52 | **+2.22 [+1.20, +3.30]** | +4.46 [+3.32, +5.58] | 97.96 / 98.32 |
+| 80 | 38.76 | 40.92 | **+2.16 [+1.08, +3.20]** | +4.86 [+3.72, +6.00] | 98.28 / 98.62 |
+| **100 (fixed endpoint)** | **39.62** | **40.96** | **+1.34 [+0.32, +2.44]** | **+4.90 [+3.76, +6.06]** | 98.62 / 99.16 |
+
+| Training (identical prompts, T=0.8) | A0 train acc (%) | A3a train acc (%) | A3a − A0 mean (pp) | steps with A3a ahead |
+|---|---:|---:|---:|---:|
+| 1–20 | 59.53 | 60.11 | +0.59 | 15 / 20 |
+| 21–40 | 61.52 | 62.32 | +0.81 | 16 / 20 |
+| 41–60 | 61.26 | 62.40 | +1.14 | 16 / 20 |
+| 61–80 | 61.05 | 61.66 | +0.61 | 15 / 20 |
+| 81–100 | 61.76 | 62.68 | +0.92 | 15 / 20 |
+| 1–100 | 61.02 | 61.83 | +0.81 | 77 / 100 |
+
+**Stability** (window medians A0 → A3a; per-step values in the driver log)
+
+| Steps | `k3_kl` | entropy | response length (tokens) | `grad_norm` |
+|---|---|---|---|---|
+| 1–20 | 0.00070 → 0.00072 | 0.198 → 0.207 | 1857 → 1730 | 0.37 → 0.27 |
+| 21–40 | 0.00069 → 0.00075 | 0.196 → 0.224 | 1728 → 1484 | 0.24 → 0.36 |
+| 41–60 | 0.00070 → 0.00080 | 0.202 → 0.250 | 1661 → 1403 | 0.20 → 0.22 |
+| 61–80 | 0.00072 → 0.00087 | 0.208 → 0.287 | 1611 → 1385 | 0.24 → 0.24 |
+| 81–100 | 0.00073 → 0.00096 | 0.216 → 0.328 | 1576 → 1313 | 0.27 → 0.22 |
+
+- No divergence:
+  - held-out accuracy and format keep improving to step 100;
+  - `grad_norm` stays in A0's range (A0 also has isolated spikes, e.g. 1.90 at step 50);
+  - truncation stays at or below 0.15%, and no PPO clipping occurs (`pg_clipfrac` 0, one update per rollout);
+  - correctness-mixed groups stay at 26–27%.
+- Two monotone drifts that had not levelled off by step 100:
+  - Policy entropy rises from 0.204 at step 1 to 0.366 at step 100 (maximum 0.372 at step 98). A0 stays within 0.19–0.23.
+  - The trainer–sampler `k3_kl` rises from 0.00071 to 0.00106. A0 stays within 0.00068–0.00075, and the earlier reference range was 0.00064–0.00078. It moves together with entropy, as expected when more probability mass sits on low-probability tokens. It remains far below the 0.98 seen with the RoPE bug (LOGPROB_PARITY.md).
+- Responses also get shorter faster: 2,020 → 1,354 tokens, against A0's 2,021 → 1,713.
+
+**Reading**
+- **Candidate.** A3a is the first arm to beat A0.
+  - The fixed step-100 endpoint is +1.34 pp, and the paired interval [+0.32, +2.44] excludes 0.
+  - All five trained checkpoints are above A0; four of five intervals exclude 0; the differences at steps 20, 60, 80 and 100 exceed the ~0.7 pp same-recipe spread.
+  - Training accuracy on identical prompts is higher in every 20-step window: +0.81 pp, A3a ahead in 77 / 100 steps.
+  - The gain vs its own step 0 is +4.90 pp, against A0's +3.86 pp.
+  - Single seed: this nominates LR 2e-6, it does not establish it.
+- **Predeclared A3b rule:**
+  - (1) step-100 accuracy is higher than A0 — met;
+  - (2) the paired interval supports an improvement — met;
+  - (3) training is stable — met in the sense of no divergence or instability within 100 steps. The rising entropy and `k3_kl` are recorded as the main risk for a higher LR or a longer horizon.
+- **Decision:** A3b (LR `4e-6`) is launched from the initial checkpoint. Its entropy and `k3_kl` are watched in particular.
 
 ## Initial validation and scope
 
