@@ -6,7 +6,7 @@ Optimize the already-learning Gemma-4 E2B FP32 recipe by isolating the effects o
 
 PR #10 established learning, not a plateau: held-out accuracy rose **35.76% → 39.62% (+3.86 pp)** at step 100, with question-paired bootstrap 95% **[+2.82, +4.96] pp**. Its run was deliberately stopped at step 107; only steps 0–100 are the comparison reference. Qwen results motivate optimization but are not a Gemma acceptance threshold.
 
-**Status:** A1 (reward) and A2 (prompt) are complete, and neither is a candidate (see [A1 result](#a1-result-100-steps-complete), [A2 result](#a2-result-100-steps-complete)). A3a (LR 2e-6) runs next. See the [execution record](#execution-record). The initial commit was plan only.
+**Status:** A1 (reward) and A2 (prompt) are complete, and neither is a candidate (see [A1 result](#a1-result-100-steps-complete), [A2 result](#a2-result-100-steps-complete)). A3a (LR 2e-6) is running, started 07:53Z. See the [execution record](#execution-record). The initial commit was plan only.
 
 ## Plan
 
@@ -61,8 +61,8 @@ Eval prompt tokens remain frozen for this screen. This measures the effect of ch
 **A3 — LR**
 
 - [x] Predeclare LR candidate value(s) in the result ledger; each value is its own fresh run. — decided 2026-10-23, see below.
-- [ ] Confirm resolved and logged LR match the intended constant value, with no warmup or scheduler change.
-- [ ] Restore A0 reward and prompt settings before launching.
+- [ ] Confirm resolved and logged LR match the intended constant value, with no warmup or scheduler change. — resolved actor `lr: 2e-06` in A3a's printed config; the per-step `actor/lr` metric check is pending.
+- [x] Restore A0 reward and prompt settings before launching. — A3a uses `train.parquet` (sha256 `5404981a…`); the launch script unsets the A1 variables and `GEMMA_TRAIN_FILE`.
 
 **Predeclared LR plan (2026-10-23):**
 - **A3a:** LR `2e-6`, constant, no warmup, 100 steps, seed 1. Reward 0.1 and the original double-wrapped prompt, as in A0. Fresh start from the initial checkpoint.
@@ -100,7 +100,7 @@ Question-paired intervals do not measure training-seed uncertainty. Consecutive 
 | A0 | PR #10 FP32 seed 1, steps 0–100 | Reported window verified; full run stopped at 107 | 35.76% | 39.62% | Reference | See PR #10 |
 | A1 | `gemma4_e2b_rl05fp32_a1fmt0_16n64g_s100_seed1_1023_0058`: `REWARD_FMT_WEIGHT_TRAIN=0` + `REWARD_EVAL_QUESTIONS` (eval keeps 0.1) | Valid: exit 0, guards PASS, 100 / 100 steps, dumps complete | 36.18% | 38.96% | −0.66 [−1.66, +0.30] | 3 h 22 min; not a candidate (format compliance falls, no detectable accuracy change) |
 | A2 | `gemma4_e2b_rl05fp32_a2wrap1_16n64g_s100_seed1_1023_0423`: `GEMMA_TRAIN_FILE=train_single_wrap.parquet` (format coefficient 0.1, eval unchanged) | Valid: exit 0, guards PASS, 100 / 100 steps, template-change identity checks pass | 36.18% | 39.20% | −0.42 [−1.40, +0.56] | 3 h 18 min; not a candidate (no detectable accuracy change; slightly lower training accuracy) |
-| A3 | Predeclared: A3a LR `2e-6` (constant, no warmup); A3b LR `4e-6` only if A3a meets the rule above | Not run | — | — | — | — |
+| A3 | Predeclared: A3a LR `2e-6` (constant, no warmup); A3b LR `4e-6` only if A3a meets the rule above. **A3a running:** `gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753` (override `actor_rollout_ref.actor.optim.lr=2e-6`) | A3a started 2026-10-23T07:53Z; node prep PASS; resolved `lr: 2e-06` | — | — | — | — |
 
 Add reproducible launch/config evidence, per-question/per-step summaries and plots alongside each result. Preserve failed or inconclusive observations rather than deleting or pooling them.
 
