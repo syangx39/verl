@@ -91,7 +91,7 @@ Keep **eval every 20 steps** for this screen. A6 step 40 and A3a step 80 each re
 - [x] Archive the A3a control manifest, exact launch command/resolved config, model/data/code hashes and result paths. — [`a3a_control/manifest.json`](recipe_optimization/a3a_control/manifest.json) and the 922-key runtime config [`resolved_config.json`](recipe_optimization/a3a_control/resolved_config.json), extracted from A3a's driver log. Model file hashes are still to be recorded at the GPU preflight.
 - [ ] Configure A4's native cosine, export all 100 update-used learning rates and verify the zero-based update index/horizon against the formula below. Compare the intended MaxText schedule using its actual resolved config before claiming TPU parity; then verify the GPU trainer path on a short smoke. — Configured in [`g4run_pr12.sh`](recipe_optimization/launch/g4run_pr12.sh). The re-implemented verl lambda gives all 100 values and PASSes the formula checks: [`used_lr_pure.json`](recipe_optimization/a4_cosine/used_lr_pure.json). Still open: verl's own scheduler on the pod (`--use-verl`), the GPU trainer path (section 4.2) and MaxText.
 - [ ] Make each arm's override explicit in the launcher and resolved config; compare against A3a and reject unintended recipe changes. Keep training-only changes out of eval settings. — Overrides are explicit in [`g4run_pr12.sh`](recipe_optimization/launch/g4run_pr12.sh). [`gemma4_config_diff.py`](gemma4_config_diff.py) compares runtime configs and fails on any undeclared key. On PR #11's logs, A3b vs A3a differs only in the declared LR plus 6 run-identity keys. The per-arm check runs at each launch.
-- [ ] Verify A5's probability convention at T=1, including raw/processed sampler log-probs and retained top-k/top-p filters. A training log-prob mismatch must not be mistaken for a useful exploration change. — Pending (pod code path plus A5's step-1 `k3_kl`).
+- [ ] Verify A5's probability convention at T=1, including raw/processed sampler log-probs and retained top-k/top-p filters. A training log-prob mismatch must not be mistaken for a useful exploration change. — Code path checked at the pin (section 4.2): sampler log-probs are processed, i.e. temperature + top-k/top-p and renormalized; trainer log-probs are full-vocabulary at temperature T. So T=1 can raise `k3_kl` mechanically. Still pending: the installed vLLM version on the pod and A5's step-1 `k3_kl`.
 - [x] Generalize comparison/signal tools that currently assume 2,048 rows and groups of eight. For A6 require **4,096 rows, exactly 256 groups × 16**, consistent prompt/answer per group and unchanged ordered prompt membership. Add a valid n=16 case and negative incomplete/incorrect-group cases; do not disable identity checks. — Each run is now validated against its own declared shape, with the same identity checks:
   - [`gemma4_ab_compare.py`](gemma4_ab_compare.py): `--a/--b-rows-per-step`, `--a/--b-group-size`. Tests: 1 valid 8-vs-16 case plus 5 negative cases (shared shape on n=16, ragged 15/17-row groups, a missing row, a different question, a different group count).
   - [`gemma4_signal_density.py`](gemma4_signal_density.py): `--shape` validation and an n=8-equivalent mixed share.
@@ -204,6 +204,23 @@ A single small held-out decrease or one unusual training batch does not trigger 
 - `train_mini_batch` then takes 4,096 / 64 = 64 completions per GPU, which is all of each GPU's share. So `total_num_iterations = 1`: one `train_batch` call, one optimizer step and one scheduler step.
 - Each mini-batch's per-sequence token counts are all-gathered across the 64 ranks. Micro-batching (`use_dynamic_bsz`, 16,384 tokens per GPU) only splits gradient accumulation inside that single update.
 - The smoke records memory, component timing and `agent_loop/num_preempted`.
+
+**A5 log-prob convention (code at the runtime pin; confirm the installed vLLM on the pod).**
+
+- *Sampler log-probs:* verl's rollout config defaults to `logprobs_mode=processed_logprobs`. vLLM then returns `log_softmax` of the logits after temperature and top-k/top-p masking, renormalized over the kept tokens.
+- *Trainer log-probs:* `old_log_prob` and the policy log-probs are `log_softmax(logits / T)` over the full vocabulary, with no top-k/top-p.
+- *Effect on the diagnostic only:* `rollout_corr/k3_kl` therefore contains a truncation term, `(Z − 1) − log Z` per token, where `Z` is the kept probability mass at temperature T. The term is at most about 0.0013 while only top-p = 0.95 binds. It is larger where top-k = 50 binds. Raising T increases it mechanically, without any change in training.
+- *Effect on the update: none.* The PPO ratio uses trainer log-probs only, and this recipe has no rollout importance correction. The gap changes the diagnostic and the `k3_kl` stop rule, not the update.
+- *Existing measurements:*
+
+  | Run | Truncation | `k3_kl` |
+  |---|---|---|
+  | T=0.8 runs | top-k / top-p on | about 0.0007 |
+  | PR #8 post-fix T=1 run, 4n16g | none (`top_k=-1`, `top_p=1.0`) | 0.00046 at step 1 |
+
+  The numeric part of a KL scales roughly as 1/T². That is consistent with almost all of the 0.0007 at T=0.8 being numeric, and the truncation term being small there.
+- *Expectation for A5:* step-1 `k3_kl` of about 0.0005–0.0015, below the 0.003 rule with margin.
+- *If A5's first steps are much higher:* that is reported as a convention effect before the rule is relied on. A trigger caused only by the convention would not be evidence of a training failure.
 
 **Analysis tools for unequal batch shapes.**
 
