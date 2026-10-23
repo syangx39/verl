@@ -1,0 +1,188 @@
+{
+ "a0": {
+  "1-20": {
+   "steps": [
+    1,
+    20
+   ],
+   "groups": 5120,
+   "train_acc": 59.5263671875,
+   "mixed": 27.1484375,
+   "all_correct": 44.90234375,
+   "all_wrong": 24.53125,
+   "other_only": 3.41796875
+  },
+  "21-40": {
+   "steps": [
+    21,
+    40
+   ],
+   "groups": 5120,
+   "train_acc": 61.51611328125,
+   "mixed": 26.09375,
+   "all_correct": 48.125,
+   "all_wrong": 24.9609375,
+   "other_only": 0.8203125
+  },
+  "41-60": {
+   "steps": [
+    41,
+    60
+   ],
+   "groups": 5120,
+   "train_acc": 61.25732421875,
+   "mixed": 26.171875,
+   "all_correct": 48.22265625,
+   "all_wrong": 24.9609375,
+   "other_only": 0.64453125
+  },
+  "61-80": {
+   "steps": [
+    61,
+    80
+   ],
+   "groups": 5120,
+   "train_acc": 61.04736328125,
+   "mixed": 25.48828125,
+   "all_correct": 48.0859375,
+   "all_wrong": 25.87890625,
+   "other_only": 0.546875
+  },
+  "81-100": {
+   "steps": [
+    81,
+    100
+   ],
+   "groups": 5120,
+   "train_acc": 61.7578125,
+   "mixed": 25.9765625,
+   "all_correct": 49.0625,
+   "all_wrong": 24.47265625,
+   "other_only": 0.48828125
+  }
+ },
+ "a3a_lr2e6": {
+  "1-20": {
+   "steps": [
+    1,
+    20
+   ],
+   "groups": 5120,
+   "train_acc": 60.11474609375,
+   "mixed": 27.24609375,
+   "all_correct": 45.83984375,
+   "all_wrong": 23.73046875,
+   "other_only": 3.18359375
+  },
+  "21-40": {
+   "steps": [
+    21,
+    40
+   ],
+   "groups": 5120,
+   "train_acc": 62.32421875,
+   "mixed": 26.1328125,
+   "all_correct": 49.1796875,
+   "all_wrong": 24.43359375,
+   "other_only": 0.25390625
+  },
+  "41-60": {
+   "steps": [
+    41,
+    60
+   ],
+   "groups": 5120,
+   "train_acc": 62.39501953125,
+   "mixed": 26.66015625,
+   "all_correct": 48.76953125,
+   "all_wrong": 24.19921875,
+   "other_only": 0.37109375
+  },
+  "61-80": {
+   "steps": [
+    61,
+    80
+   ],
+   "groups": 5120,
+   "train_acc": 61.6552734375,
+   "mixed": 26.640625,
+   "all_correct": 48.28125,
+   "all_wrong": 24.84375,
+   "other_only": 0.234375
+  },
+  "81-100": {
+   "steps": [
+    81,
+    100
+   ],
+   "groups": 5120,
+   "train_acc": 62.6806640625,
+   "mixed": 26.89453125,
+   "all_correct": 48.90625,
+   "all_wrong": 24.0625,
+   "other_only": 0.13671875
+  }
+ },
+ "a3b_lr4e6": {
+  "1-20": {
+   "steps": [
+    1,
+    20
+   ],
+   "groups": 5120,
+   "train_acc": 60.9912109375,
+   "mixed": 25.41015625,
+   "all_correct": 47.890625,
+   "all_wrong": 25.0,
+   "other_only": 1.69921875
+  },
+  "21-40": {
+   "steps": [
+    21,
+    40
+   ],
+   "groups": 5120,
+   "train_acc": 62.2705078125,
+   "mixed": 25.76171875,
+   "all_correct": 49.140625,
+   "all_wrong": 24.74609375,
+   "other_only": 0.3515625
+  },
+  "41-60": {
+   "steps": [
+    41,
+    60
+   ],
+   "groups": 5120,
+   "train_acc": 61.47216796875,
+   "mixed": 27.8125,
+   "all_correct": 47.6171875,
+   "all_wrong": 23.4375,
+   "other_only": 1.1328125
+  },
+  "61-80": {
+   "steps": [
+    61,
+    80
+   ],
+   "groups": 5120,
+   "train_acc": 26.05224609375,
+   "mixed": 31.15234375,
+   "all_correct": 11.9921875,
+   "all_wrong": 33.28125,
+   "other_only": 23.57421875
+  },
+  "81-100": {
+   "steps": [
+    81,
+    100
+   ],
+   "groups": 5120,
+   "train_acc": 0.72021484375,
+   "mixed": 3.41796875,
+   "all_correct": 0.0,
+   "all_wrong": 96.2890625,
+   "other_only": 0.29296875
+  }
+ }
+}
