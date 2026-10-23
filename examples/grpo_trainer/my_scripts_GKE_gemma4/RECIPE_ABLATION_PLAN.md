@@ -38,9 +38,9 @@ All screens use **100 training steps**, eval at **0, 20, 40, 60, 80, 100**, and 
 
 **A1 — reward**
 
-- [ ] Make the format-coefficient change explicit in the actual Ray reward workers; a head-shell environment variable alone is not sufficient evidence. — implemented (see [A1 record](#a1-record-training-format-coefficient-0)); the check in the run's own train/eval dumps is pending.
+- [x] Make the format-coefficient change explicit in the actual Ray reward workers; a head-shell environment variable alone is not sufficient evidence. — implemented (see [A1 record](#a1-record-training-format-coefficient-0)) and confirmed in the run's own dumps: every training row at steps 1–3 has `fmt_coef` 0 and `score = acc`; every eval row at step 0 keeps 0.1.
 - [x] Preserve `acc` and binary `fmt` reporting. Check representative completions: training score changes from `acc + 0.1 * fmt` to `acc`, while correctness and format flags stay unchanged; length penalty remains disabled. — [`test_maxtext_reward_fmt_scope.py`](test_maxtext_reward_fmt_scope.py) PASS.
-- [x] Keep eval grading unchanged: `acc`, `fmt`, and canonical `score = acc + 0.1 * fmt`. The current scorer reads `REWARD_FMT_WEIGHT` process-wide, so a global zero override would also change eval total reward. Scope the ablation to training, and verify that eval keeps its frozen coefficient. — scoped by eval-question membership; tested; the check in the run's validation dumps is pending.
+- [x] Keep eval grading unchanged: `acc`, `fmt`, and canonical `score = acc + 0.1 * fmt`. The current scorer reads `REWARD_FMT_WEIGHT` process-wide, so a global zero override would also change eval total reward. Scope the ablation to training, and verify that eval keeps its frozen coefficient. — scoped by eval-question membership and tested; confirmed in the run's step-0 validation dump (5,000 / 5,000 rows).
 - [x] Check both correct/incorrect and formatted/unformatted cases before the 100-step run. — all four cases, for both training and eval rows.
 
 Removing format credit mechanically lowers total reward. Compare accuracy and format rate separately; do not treat a lower total reward as a learning regression.
@@ -87,7 +87,7 @@ Question-paired intervals do not measure training-seed uncertainty. Consecutive 
 | Arm | Experiment ID / exact override | Run validity | Step-0 acc | Step-100 acc | Δ vs A0 at step 100 (paired 95%) | Time / decision |
 |---|---|---|---:|---:|---|---|
 | A0 | PR #10 FP32 seed 1, steps 0–100 | Reported window verified; full run stopped at 107 | 35.76% | 39.62% | Reference | See PR #10 |
-| A1 | `gemma4_e2b_rl05fp32_a1fmt0_16n64g_s100_seed1_1023_0058`: `REWARD_FMT_WEIGHT_TRAIN=0` + `REWARD_EVAL_QUESTIONS` (eval keeps 0.1) | Running (started 2026-10-23T00:58Z) | — | — | — | — |
+| A1 | `gemma4_e2b_rl05fp32_a1fmt0_16n64g_s100_seed1_1023_0058`: `REWARD_FMT_WEIGHT_TRAIN=0` + `REWARD_EVAL_QUESTIONS` (eval keeps 0.1) | Running (started 2026-10-23T00:58Z); coefficient confirmed in worker dumps | 36.18% | — | — | — |
 | A2 | Pending: training template applied once | Not run | — | — | — | — |
 | A3 | Pending: predeclared constant LR value(s) | Not run | — | — | — | — |
 
@@ -120,6 +120,16 @@ A row whose `extra_info["question"]` hashes into that set keeps the canonical 0.
 - Only additions: the two Ray runtime-environment variables:
   - `++ray_kwargs.ray_init.runtime_env.env_vars.REWARD_FMT_WEIGHT_TRAIN="0"`
   - `++ray_kwargs.ray_init.runtime_env.env_vars.REWARD_EVAL_QUESTIONS="<repo>/eval_5k/eval_5000_question_sha256.json"`
+
+**Worker-side check** (from the run's own dumps, 2026-10-23T01:16Z):
+
+| Dump | Rows | `fmt_coef` | `eval_scope` | `score` | Score values |
+|---|---:|---|---|---|---|
+| validation, step 0 | 5,000 | 0.1 on every row | 1 on every row | `acc + 0.1·fmt` on every row | {0, 0.1, 1.0, 1.1} |
+| training, steps 1, 2, 3 | 2,048 each | 0 on every row | 0 on every row | `acc` on every row | {0, 1.0} |
+
+- Node prep PASS on 16 / 16 nodes; RoPE guard PASS on 64 / 64 ranks; no tracebacks.
+- Step-0 held-out accuracy is 36.18% (format 94.36%). This is inside the 35.76–36.74% range of the earlier step-0 evals of the same initial weights.
 
 ## Initial validation and scope
 
