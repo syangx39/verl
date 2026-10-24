@@ -1,5 +1,7 @@
 # Gemma-4 E2B (`gemma-4-E2B-it`) GRPO (`rl-05` parity) on GKE A4X (GB200)
 
+**Historical learning reference:** [Qwen3-0.6B post-trained results](QWEN3_0P6B_REFERENCE.md) consolidates the GSM8K and OMI2 recipes, fixed-endpoint seed results, eval protocols, timing and artifact provenance for Gemma recipe optimization.
+
 Colocated `verl` GRPO (DAPO clip-higher) launcher, GKE A4X (`a4x-highgpu-4g-a4x-pool-7`) manifests, the 20-step scaling logs (`1n4g`–`16n64g`), and a 4-step smoke of the committed launcher for `google/gemma-4-E2B-it` on the `rl-05` workload.
 
 > [!IMPORTANT]
