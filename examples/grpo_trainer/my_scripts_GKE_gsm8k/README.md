@@ -9,6 +9,8 @@ trainer) on verl, match its curves, then hand the frozen recipe to the TPU side.
 |---|---|
 | `build_gsm8k_boxed_data.py` | Meta jsonl -> verl parquets (train 7,473; test512 = Meta's eval set = head; test 1,319 full), model copy with the frozen stop set (eos [151645,151643]), prompt fixture, token-exact check against Meta's prompt_example.json, MANIFEST |
 | `boxed_math_reward.py` | Meta's `boxed_math` per REPRODUCTION.md §1 (exclusive 1.0 / 0.1 / 0, minimal normalization, last box, unbalanced -> 0) + overlong penalty (training sources only); embeds and passes Meta's 21 fixtures |
+| `boxed_math_reward_v2.py`, `test_boxed_math_reward_v2.py` | scorer v2 (Gemma GSM8K baseline, PR #14): `boxed_math_reward.py` unchanged + one explicit rule crediting decorated numbers with the exact gold value (`\$18`, `18\%`, `540 \text{ meters}`, `28.00`); logs the v1 accuracy as `acc_v1`. The Qwen recipe, its runs and the handoff package use v1 |
+| `rescore_boxed_dumps.py` | re-scores verl eval / rollout dumps under v1 and v2 (same outputs, no regeneration) |
 | `run_qwen3_0p6b_base_gsm8k_boxed.sh` | launcher; FROZEN block = Meta's yaml + REPRODUCTION.md resolved defaults (token IS 3.0, dual clip 5.0, wd 0, token-mean); three pre-flights |
 | `compare_to_meta.py` | overlay ours vs Meta's `train_metrics.csv` / `eval_metrics.csv` (named columns): train-batch acc, eval acc, plus length / cap-hit / zero-std / mean-reward channels |
 | `collapse_guard.py`, `plot_phase0.py`, `band_plot.py`, `paired_eval_bootstrap.py` | shared tools, now parameterized (`--groups/--group_size`, `--metrics`, `--sources`); these copies supersede the `my_scripts_GKE` ones |

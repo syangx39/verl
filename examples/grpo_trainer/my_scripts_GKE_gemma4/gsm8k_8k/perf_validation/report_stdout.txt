@@ -1,0 +1,5 @@
+eval   0: v2 80.67% v1 45.03% boxed 87.64% d +0.00 pp [+0.00, +0.00] w->r 0 r->w 0 trunc 2
+eval  20: v2 91.13% v1 48.75% boxed 99.92% d +10.46 pp [+8.57, +12.36] w->r 157 r->w 19 trunc 1
+finished=True exit=1 last_step=30 ckpt saved=[] skipped=[] dirs=[]
+timing [steps 3-30 excluding eval/checkpoint steps, interval source coordinator_clock]: internal median 28.5s mean 29.7s p90 36.8s (n=27); actual interval median 28.6s mean 29.8s p90 36.9s (n=27); paired gap median 0.1s mean 0.1s p90 0.1s (n=27); components {'timing_s/gen': 14.265304891996493, 'timing_s/update_actor': 7.232198243000312, 'timing_s/update_weights': 3.913075349002611, 'timing_s/dump_rollout_generations': 1.3253943309973693}; launch-to-finish 0.35822795748710634 h, GPU-hours 22.926589279174806, train tokens 2.910e+07
+wrote /tmp/perf_final

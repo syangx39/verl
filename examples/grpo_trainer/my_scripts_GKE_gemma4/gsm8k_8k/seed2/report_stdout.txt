@@ -1,0 +1,17 @@
+eval   0: v2 80.21% v1 44.05% boxed 87.11% d +0.00 pp [+0.00, +0.00] w->r 0 r->w 0 trunc 2
+eval  20: v2 90.98% v1 49.36% boxed 99.92% d +10.77 pp [+8.79, +12.81] w->r 166 r->w 24 trunc 1
+eval  40: v2 92.34% v1 52.84% boxed 100.00% d +12.13 pp [+10.24, +14.18] w->r 178 r->w 18 trunc 0
+eval  60: v2 91.58% v1 54.51% boxed 100.00% d +11.37 pp [+9.33, +13.50] w->r 177 r->w 27 trunc 0
+eval  80: v2 91.28% v1 54.06% boxed 100.00% d +11.07 pp [+9.17, +13.04] w->r 167 r->w 21 trunc 0
+eval 100: v2 91.81% v1 56.41% boxed 100.00% d +11.60 pp [+9.63, +13.57] w->r 173 r->w 20 trunc 0
+eval 120: v2 91.43% v1 57.16% boxed 100.00% d +11.22 pp [+9.25, +13.27] w->r 171 r->w 23 trunc 0
+eval 140: v2 92.57% v1 59.29% boxed 99.92% d +12.36 pp [+10.39, +14.40] w->r 181 r->w 18 trunc 1
+eval 160: v2 92.95% v1 60.05% boxed 99.92% d +12.74 pp [+10.77, +14.71] w->r 182 r->w 14 trunc 1
+eval 180: v2 92.27% v1 61.18% boxed 99.92% d +12.05 pp [+10.08, +14.10] w->r 181 r->w 22 trunc 1
+eval 200: v2 92.80% v1 61.33% boxed 100.00% d +12.59 pp [+10.61, +14.56] w->r 182 r->w 16 trunc 0
+eval 220: v2 92.49% v1 61.11% boxed 99.85% d +12.28 pp [+10.31, +14.33] w->r 183 r->w 21 trunc 2
+eval 240: v2 93.03% v1 60.96% boxed 100.00% d +12.81 pp [+10.84, +14.86] w->r 182 r->w 13 trunc 0
+eval 250: v2 92.49% v1 60.96% boxed 99.92% d +12.28 pp [+10.31, +14.25] w->r 176 r->w 14 trunc 1
+finished=True exit=0 last_step=250 ckpt saved=[100, 250] skipped=[50, 150, 200] dirs=['global_step_100', 'global_step_250']
+timing [steps 20-250 excluding eval/checkpoint steps, interval source coordinator_clock]: internal median 33.1s mean 34.9s p90 44.5s (n=218); actual interval median 33.2s mean 35.0s p90 44.6s (n=218); paired gap median 0.1s mean 0.1s p90 0.1s (n=218); components {'timing_s/gen': 16.778302638500463, 'timing_s/update_actor': 8.928214784496959, 'timing_s/update_weights': 4.215870192500006, 'timing_s/dump_rollout_generations': 1.457556660498085}; launch-to-finish 2.6182648158073425 h, GPU-hours 167.56894821166992, train tokens 3.077e+08; clock check {'metrics_jsonl': 250, 'console': 250, 'both': 250, 'max_abs_diff_s': 0.0}
+wrote /tmp/seed2_final

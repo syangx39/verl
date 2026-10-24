@@ -1,0 +1,142 @@
+{
+ "verdict": "PASS",
+ "ref_log": "/workspace/meta-RL/logs/gemma4_e2b_gsm8k8k_16n64g_s250_seed1_1024_0157.log",
+ "log": "/workspace/meta-RL/logs/gemma4_e2b_gsm8k8k_16n64g_s250_seed2_1024_0847.log",
+ "expect": [
+  "actor_rollout_ref.actor.data_loader_seed=2",
+  "actor_rollout_ref.actor.fsdp_config.seed=2",
+  "actor_rollout_ref.rollout.seed=2",
+  "data.seed=2"
+ ],
+ "allow": [
+  "ray_kwargs\\.ray_init\\.runtime_env\\.env_vars\\.(VERL_CKPT_STEPS_LOG|VERL_FILE_LOGGER_PATH|VERL_STEP_CLOCK)$",
+  "ray_kwargs\\.ray_init\\.runtime_env\\.(py_modules|worker_process_setup_hook)$",
+  "trainer\\.logger$"
+ ],
+ "differences": [
+  {
+   "key": "actor_rollout_ref.actor.data_loader_seed",
+   "ref": 1,
+   "run": 2,
+   "class": "expected",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.actor.fsdp_config.seed",
+   "ref": 1,
+   "run": 2,
+   "class": "expected",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.rollout.seed",
+   "ref": 1,
+   "run": 2,
+   "class": "expected",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.rollout.trace.experiment_name",
+   "ref": "gemma4_e2b_gsm8k8k_16n64g_s250_seed1_1024_0157",
+   "run": "gemma4_e2b_gsm8k8k_16n64g_s250_seed2_1024_0847",
+   "class": "identity",
+   "ok": true
+  },
+  {
+   "key": "data.seed",
+   "ref": 1,
+   "run": 2,
+   "class": "expected",
+   "ok": true
+  },
+  {
+   "key": "ray_kwargs.ray_init.runtime_env.env_vars.VERL_CKPT_STEPS_LOG",
+   "ref": "/workspace/meta-RL/logs/gemma4_gsm8k/gemma4_e2b_gsm8k8k_16n64g_s250_seed1_1024_0157/ckpt_steps.log",
+   "run": "/workspace/meta-RL/logs/gemma4_gsm8k/gemma4_e2b_gsm8k8k_16n64g_s250_seed2_1024_0847/ckpt_steps.log",
+   "class": "allowed",
+   "ok": true
+  },
+  {
+   "key": "ray_kwargs.ray_init.runtime_env.env_vars.VERL_FILE_LOGGER_PATH",
+   "ref": "<absent>",
+   "run": "/workspace/meta-RL/logs/gemma4_gsm8k/gemma4_e2b_gsm8k8k_16n64g_s250_seed2_1024_0847/metrics.jsonl",
+   "class": "allowed",
+   "ok": true
+  },
+  {
+   "key": "ray_kwargs.ray_init.runtime_env.env_vars.VERL_GEMMA4_ROPE_REPORT_DIR",
+   "ref": "/workspace/meta-RL/logs/gemma4_guard/gemma4_e2b_gsm8k8k_16n64g_s250_seed1_1024_0157",
+   "run": "/workspace/meta-RL/logs/gemma4_guard/gemma4_e2b_gsm8k8k_16n64g_s250_seed2_1024_0847",
+   "class": "identity",
+   "ok": true
+  },
+  {
+   "key": "ray_kwargs.ray_init.runtime_env.env_vars.VERL_STEP_CLOCK",
+   "ref": "<absent>",
+   "run": "1",
+   "class": "allowed",
+   "ok": true
+  },
+  {
+   "key": "ray_kwargs.ray_init.runtime_env.py_modules",
+   "ref": [
+    "/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gemma4/gemma4_ckpt_steps"
+   ],
+   "run": [
+    "/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gemma4/gemma4_ckpt_steps",
+    "/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gemma4/gemma4_run_hooks"
+   ],
+   "class": "allowed",
+   "ok": true
+  },
+  {
+   "key": "ray_kwargs.ray_init.runtime_env.worker_process_setup_hook",
+   "ref": "gemma4_ckpt_steps.install",
+   "run": "gemma4_run_hooks.install",
+   "class": "allowed",
+   "ok": true
+  },
+  {
+   "key": "trainer.default_local_dir",
+   "ref": "/workspace/meta-RL/ckpt/gemma4_e2b_gsm8k8k_16n64g_s250_seed1_1024_0157",
+   "run": "/workspace/meta-RL/ckpt/gemma4_e2b_gsm8k8k_16n64g_s250_seed2_1024_0847",
+   "class": "identity",
+   "ok": true
+  },
+  {
+   "key": "trainer.experiment_name",
+   "ref": "gemma4_e2b_gsm8k8k_16n64g_s250_seed1_1024_0157",
+   "run": "gemma4_e2b_gsm8k8k_16n64g_s250_seed2_1024_0847",
+   "class": "identity",
+   "ok": true
+  },
+  {
+   "key": "trainer.logger",
+   "ref": [
+    "console",
+    "tensorboard"
+   ],
+   "run": [
+    "console",
+    "file"
+   ],
+   "class": "allowed",
+   "ok": true
+  },
+  {
+   "key": "trainer.rollout_data_dir",
+   "ref": "/workspace/meta-RL/logs/gemma4_gsm8k/gemma4_e2b_gsm8k8k_16n64g_s250_seed1_1024_0157/train",
+   "run": "/workspace/meta-RL/logs/gemma4_gsm8k/gemma4_e2b_gsm8k8k_16n64g_s250_seed2_1024_0847/train",
+   "class": "identity",
+   "ok": true
+  },
+  {
+   "key": "trainer.validation_data_dir",
+   "ref": "/workspace/meta-RL/logs/gemma4_gsm8k/gemma4_e2b_gsm8k8k_16n64g_s250_seed1_1024_0157/val",
+   "run": "/workspace/meta-RL/logs/gemma4_gsm8k/gemma4_e2b_gsm8k8k_16n64g_s250_seed2_1024_0847/val",
+   "class": "identity",
+   "ok": true
+  }
+ ],
+ "n_keys": 938
+}

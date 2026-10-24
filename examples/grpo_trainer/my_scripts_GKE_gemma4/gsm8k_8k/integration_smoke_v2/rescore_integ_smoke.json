@@ -1,0 +1,137 @@
+{
+ "inputs": {
+  "train": [
+   "integ_smoke_train=/workspace/meta-RL/logs/gemma4_gsm8k/gemma4_e2b_gsm8k8k_smoke_16n64g_s250stop3_seed1_1024_0146/train"
+  ],
+  "val": [
+   "integ_smoke=/workspace/meta-RL/logs/gemma4_gsm8k/gemma4_e2b_gsm8k8k_smoke_16n64g_s250stop3_seed1_1024_0146/val"
+  ]
+ },
+ "scorer": {
+  "path": "/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gsm8k/boxed_math_reward_v2.py",
+  "v1_sha256": "a743cf71e2094b0ebee67506460028b5a27bb9b1d86928f6c19b152561c7015b",
+  "version": 2.0
+ },
+ "train": {
+  "integ_smoke_train": [
+   {
+    "group_sizes": [
+     16
+    ],
+    "groups": 128,
+    "n": 2048,
+    "step": 1,
+    "v1_acc": 0.5068359375,
+    "v1_groups": {
+     "all_correct": 12,
+     "all_wrong": 29,
+     "mixed": 87
+    },
+    "v1_reward_mean": 0.538720703125,
+    "v2_acc": 0.748046875,
+    "v2_groups": {
+     "all_correct": 21,
+     "all_wrong": 5,
+     "mixed": 102
+    },
+    "v2_reward_mean": 0.755810546875
+   },
+   {
+    "group_sizes": [
+     16
+    ],
+    "groups": 128,
+    "n": 2048,
+    "step": 2,
+    "v1_acc": 0.43359375,
+    "v1_groups": {
+     "all_correct": 11,
+     "all_wrong": 43,
+     "mixed": 74
+    },
+    "v1_reward_mean": 0.47373046875,
+    "v2_acc": 0.759765625,
+    "v2_groups": {
+     "all_correct": 26,
+     "all_wrong": 3,
+     "mixed": 99
+    },
+    "v2_reward_mean": 0.76728515625
+   },
+   {
+    "group_sizes": [
+     16
+    ],
+    "groups": 128,
+    "n": 2048,
+    "step": 3,
+    "v1_acc": 0.4453125,
+    "v1_groups": {
+     "all_correct": 8,
+     "all_wrong": 34,
+     "mixed": 86
+    },
+    "v1_reward_mean": 0.479443359375,
+    "v2_acc": 0.7177734375,
+    "v2_groups": {
+     "all_correct": 18,
+     "all_wrong": 2,
+     "mixed": 108
+    },
+    "v2_reward_mean": 0.724658203125
+   }
+  ]
+ },
+ "val": {
+  "integ_smoke": [
+   {
+    "delta_pp": 35.7846853677028,
+    "examples": [
+     {
+      "category": "currency",
+      "gold": "18",
+      "pred": "\\$18"
+     },
+     {
+      "category": "currency+grouping",
+      "gold": "70000",
+      "pred": "\\$70,000"
+     },
+     {
+      "category": "unit",
+      "gold": "540",
+      "pred": "540 \\text{ meters}"
+     },
+     {
+      "category": "unit",
+      "gold": "20",
+      "pred": "20 \\text{ cups}"
+     },
+     {
+      "category": "currency",
+      "gold": "460",
+      "pred": "\\$460"
+     }
+    ],
+    "fmt": 0.8779378316906747,
+    "n": 1319,
+    "step": 0,
+    "stored_acc": 0.8036391205458681,
+    "v1_acc": 0.44579226686884005,
+    "v1_recomputed_mismatch": 472,
+    "v2_acc": 0.8036391205458681,
+    "v2_lost": 0,
+    "v2_only": 472,
+    "v2_only_by_category": {
+     "currency": 168,
+     "currency+exact_value": 87,
+     "currency+grouping": 34,
+     "degree": 2,
+     "grouping+unit": 2,
+     "percent": 17,
+     "unit": 162
+    }
+   }
+  ]
+ }
+}

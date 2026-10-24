@@ -1,0 +1,17 @@
+[OK  ] expected           actor_rollout_ref.actor.data_loader_seed: 1 -> 2
+[OK  ] expected           actor_rollout_ref.actor.fsdp_config.seed: 1 -> 2
+[OK  ] expected           actor_rollout_ref.rollout.seed: 1 -> 2
+[OK  ] identity           actor_rollout_ref.rollout.trace.experiment_name: 'gemma4_e2b_gsm8k8k_16n64g_s250_seed1_1024_0157' -> 'gemma4_e2b_gsm8k8k_16n64g_s250_seed2_1024_0847'
+[OK  ] expected           data.seed: 1 -> 2
+[OK  ] allowed            ray_kwargs.ray_init.runtime_env.env_vars.VERL_CKPT_STEPS_LOG: '/workspace/meta-RL/logs/gemma4_gsm8k/gemma4_e2b_gsm8k8k_16n64g_s250_seed1_1024_0157/ckpt_steps.log' -> '/workspace/meta-RL/logs/gemma4_gsm8k/gemma4_e2b_gsm8k8k_16n64g_s250_seed2_1024_0847/ckpt_steps.log'
+[OK  ] allowed            ray_kwargs.ray_init.runtime_env.env_vars.VERL_FILE_LOGGER_PATH: '<absent>' -> '/workspace/meta-RL/logs/gemma4_gsm8k/gemma4_e2b_gsm8k8k_16n64g_s250_seed2_1024_0847/metrics.jsonl'
+[OK  ] identity           ray_kwargs.ray_init.runtime_env.env_vars.VERL_GEMMA4_ROPE_REPORT_DIR: '/workspace/meta-RL/logs/gemma4_guard/gemma4_e2b_gsm8k8k_16n64g_s250_seed1_1024_0157' -> '/workspace/meta-RL/logs/gemma4_guard/gemma4_e2b_gsm8k8k_16n64g_s250_seed2_1024_0847'
+[OK  ] allowed            ray_kwargs.ray_init.runtime_env.env_vars.VERL_STEP_CLOCK: '<absent>' -> '1'
+[OK  ] allowed            ray_kwargs.ray_init.runtime_env.py_modules: ['/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gemma4/gemma4_ckpt_steps'] -> ['/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gemma4/gemma4_ckpt_steps', '/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gemma4/gemma4_run_hooks']
+[OK  ] allowed            ray_kwargs.ray_init.runtime_env.worker_process_setup_hook: 'gemma4_ckpt_steps.install' -> 'gemma4_run_hooks.install'
+[OK  ] identity           trainer.default_local_dir: '/workspace/meta-RL/ckpt/gemma4_e2b_gsm8k8k_16n64g_s250_seed1_1024_0157' -> '/workspace/meta-RL/ckpt/gemma4_e2b_gsm8k8k_16n64g_s250_seed2_1024_0847'
+[OK  ] identity           trainer.experiment_name: 'gemma4_e2b_gsm8k8k_16n64g_s250_seed1_1024_0157' -> 'gemma4_e2b_gsm8k8k_16n64g_s250_seed2_1024_0847'
+[OK  ] allowed            trainer.logger: ['console', 'tensorboard'] -> ['console', 'file']
+[OK  ] identity           trainer.rollout_data_dir: '/workspace/meta-RL/logs/gemma4_gsm8k/gemma4_e2b_gsm8k8k_16n64g_s250_seed1_1024_0157/train' -> '/workspace/meta-RL/logs/gemma4_gsm8k/gemma4_e2b_gsm8k8k_16n64g_s250_seed2_1024_0847/train'
+[OK  ] identity           trainer.validation_data_dir: '/workspace/meta-RL/logs/gemma4_gsm8k/gemma4_e2b_gsm8k8k_16n64g_s250_seed1_1024_0157/val' -> '/workspace/meta-RL/logs/gemma4_gsm8k/gemma4_e2b_gsm8k8k_16n64g_s250_seed2_1024_0847/val'
+GEMMA4-CONFIG-DIFF: PASS keys_compared=938 differences=16 failures=0

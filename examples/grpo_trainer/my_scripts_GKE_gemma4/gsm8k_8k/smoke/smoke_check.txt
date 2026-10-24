@@ -1,0 +1,69 @@
+EXP gemma4_e2b_gsm8k8k_smoke_16n64g_s250stop3_seed1_1024_0036
+provenance: exp=gemma4_e2b_gsm8k8k_smoke_16n64g_s250stop3_seed1_1024_0036 seed=1 W=64 total_steps=250 test_freq=20 save_freq=-1 launcher_sha256=8d7cbf845dce1d86943041d2ffd4b920ab8f4659a49e68e4aae63ed8cb1898ac reward_sha256=a743cf71e2094b0ebee67506460028b5a27bb9b1d86928f6c19b152561c7015b train_sha256=42e2b6d1fbaeb33ce05b3afb781837f4c8e6aec511c98abc663a8b4bc79497ea test_sha256=0b17cc44db705fe47fd62e5948464924daee249df171af1de8efd0fb283aac6a model_safetensors_sha256=2db5482b20d746879bb3ef79b5203e9075a2e2b98f54ec7c2f281c1477ddc550 dump_dir=/workspace/meta-RL/logs/gemma4_gsm8k/gemma4_e2b_gsm8k8k_smoke_16n64g_s250stop3_seed1_1024_0036
+stop note: [smoke-stop] update 3 logged; SIGTERM to driver pid(s) 105675 at 2026-10-24T00:47:59Z
+driver exit lines: ['[driver] main_ppo finished with exit_code=1', 'LAUNCHER_RC=1']
+ckpt hook lines (0):
+  no checkpoint directory /workspace/meta-RL/ckpt/gemma4_e2b_gsm8k8k_smoke_16n64g_s250stop3_seed1_1024_0036
+eval step 0: n=1319 unique_qid=1319 acc=44.81% boxed=87.72%
+train step 1: rows=2048 groups=128 sizes=[16] acc=50.10% boxed=80.86% mixed_groups=88/128 length_penalty_sum=0.0 same_qids_as_handoff_seed1=True
+train step 2: rows=2048 groups=128 sizes=[16] acc=41.99% boxed=81.10% mixed_groups=77/128 length_penalty_sum=0.0 same_qids_as_handoff_seed1=True
+train step 3: rows=2048 groups=128 sizes=[16] acc=44.97% boxed=79.83% mixed_groups=86/128 length_penalty_sum=0.0 same_qids_as_handoff_seed1=True
+metric steps: [0, 1, 2, 3]
+  actor/lr                                             s0=-  s1=2e-07  s2=4e-07  s3=6e-07
+  actor/grad_norm                                      s0=-  s1=1.3027  s2=0.91983  s3=1.5178
+  actor/pg_loss                                        s0=-  s1=0.0028337  s2=-0.0011025  s3=-0.0054101
+  actor/ppo_kl                                         s0=-  s1=0.00036166  s2=0.00037041  s3=0.00043549
+  actor/entropy_loss                                   s0=-  s1=0.12923  s2=0.13187  s3=0.14304
+  critic/score/mean                                    s0=-  s1=0.53174  s2=0.45903  s3=0.48457
+  critic/rewards/mean                                  s0=-  s1=0.53174  s2=0.45903  s3=0.48457
+  critic/advantages/max                                s0=-  s1=3.75  s2=3.75  s3=3.75
+  critic/advantages/min                                s0=-  s1=-3.75  s2=-3.75  s3=-3.75
+  response_length/mean                                 s0=-  s1=471.74  s2=498.41  s3=497.54
+  response_length/max                                  s0=-  s1=2598  s2=3098  s3=3777
+  response_length/clip_ratio                           s0=-  s1=0  s2=0  s3=0
+  timing_s/step                                        s0=-  s1=155.5  s2=33.475  s3=29.961
+  timing_s/gen                                         s0=-  s1=13.573  s2=15.673  s3=15.989
+  timing_s/update_actor                                s0=-  s1=136.38  s2=12.176  s3=8.4246
+  timing_s/update_weights                              s0=-  s1=3.9147  s2=4.0064  s3=3.9041
+  timing_s/save_checkpoint                             s0=-  s1=-  s2=-  s3=-
+  timing_s/testing                                     s0=-  s1=-  s2=-  s3=-
+  actor/perf/max_memory_allocated_gb                   s0=-  s1=26.744  s2=28.82  s3=29.402
+  actor/perf/max_memory_reserved_gb                    s0=-  s1=53.9  s2=56.713  s3=57.24
+  perf/total_num_tokens                                s0=-  s1=1.1674e+06  s2=1.2196e+06  s3=1.2136e+06
+  actor/rollout_corr/chi2_seq                          s0=-  s1=1.9554  s2=0.40033  s3=0.49215
+  actor/rollout_corr/chi2_token                        s0=-  s1=0.00242  s2=0.0007896  s3=0.00070277
+  actor/rollout_corr/k3_kl                             s0=-  s1=0.00041392  s2=0.00038194  s3=0.00039265
+  actor/rollout_corr/kl                                s0=-  s1=0.00036166  s2=0.00037041  s3=0.00043549
+  actor/rollout_corr/log_ppl_abs_diff                  s0=-  s1=0.0010566  s2=0.0010111  s3=0.0010564
+  actor/rollout_corr/log_ppl_diff                      s0=-  s1=0.00033374  s2=0.00032183  s3=0.00037641
+  actor/rollout_corr/log_ppl_diff_max                  s0=-  s1=0.002769  s2=0.0027836  s3=0.0027728
+  actor/rollout_corr/log_ppl_diff_min                  s0=-  s1=-0.002086  s2=-0.0019213  s3=-0.0019603
+  actor/rollout_corr/ppl_ratio                         s0=-  s1=1.0003  s2=1.0003  s3=1.0004
+  actor/rollout_corr/rollout_is_eff_sample_size        s0=-  s1=0.99923  s2=0.99923  s3=0.99921
+  actor/rollout_corr/rollout_is_max                    s0=-  s1=1.6052  s2=1.5477  s3=1.5493
+  actor/rollout_corr/rollout_is_mean                   s0=-  s1=1  s2=1  s3=0.99996
+  actor/rollout_corr/rollout_is_min                    s0=-  s1=0.60927  s2=0.61046  s3=0.60749
+  actor/rollout_corr/rollout_is_ratio_fraction_high    s0=-  s1=2.0524e-06  s2=0  s3=0
+  actor/rollout_corr/rollout_is_ratio_fraction_low     s0=-  s1=2.081e-06  s2=3.8816e-06  s3=1.9594e-06
+  actor/rollout_corr/rollout_is_seq_fraction_high      s0=-  s1=0  s2=0  s3=0
+  actor/rollout_corr/rollout_is_seq_fraction_low       s0=-  s1=0  s2=0  s3=0
+  actor/rollout_corr/rollout_is_seq_max                s0=-  s1=1.0026  s2=1.0024  s3=1.0024
+  actor/rollout_corr/rollout_is_seq_max_deviation      s0=-  s1=0.0029317  s2=0.002813  s3=0.0029092
+  actor/rollout_corr/rollout_is_seq_mean               s0=-  s1=1  s2=1  s3=0.99997
+  actor/rollout_corr/rollout_is_seq_min                s0=-  s1=0.99771  s2=0.99769  s3=0.99772
+  actor/rollout_corr/rollout_is_seq_std                s0=-  s1=0.0013005  s2=0.0012462  s3=0.0012711
+  actor/rollout_corr/rollout_is_std                    s0=-  s1=0.027583  s2=0.027596  s3=0.027999
+  actor/rollout_corr/rollout_log_ppl                   s0=-  s1=0.091284  s2=0.098716  s3=0.10241
+  actor/rollout_corr/rollout_ppl                       s0=-  s1=1.1002  s2=1.1079  s3=1.1131
+  actor/rollout_corr/training_log_ppl                  s0=-  s1=0.091618  s2=0.099037  s3=0.10279
+  actor/rollout_corr/training_ppl                      s0=-  s1=1.1006  s2=1.1083  s3=1.1135
+  val-aux/gsm8k_boxed_test/fmt/mean@1                  s0=0.87718  s1=-  s2=-  s3=-
+  val-aux/gsm8k_boxed_test/format_credit/mean@1        s0=0.042911  s1=-  s2=-  s3=-
+  val-aux/gsm8k_boxed_test/length_penalty/mean@1       s0=0  s1=-  s2=-  s3=-
+  val-aux/gsm8k_boxed_test/overlong/mean@1             s0=0  s1=-  s2=-  s3=-
+  val-aux/gsm8k_boxed_test/qid/mean@1                  s0=1.0001e+07  s1=-  s2=-  s3=-
+  val-aux/gsm8k_boxed_test/reward/mean@1               s0=0.49098  s1=-  s2=-  s3=-
+  val-aux/gsm8k_boxed_test/reward_raw/mean@1           s0=0.49098  s1=-  s2=-  s3=-
+  val-aux/gsm8k_boxed_test/score/mean@1                s0=0.49098  s1=-  s2=-  s3=-
+  val-core/gsm8k_boxed_test/acc/mean@1                 s0=0.44807  s1=-  s2=-  s3=-
+actor/rollout_corr tags: 27 | missing core keys: ['timing_s/save_checkpoint', 'timing_s/testing']

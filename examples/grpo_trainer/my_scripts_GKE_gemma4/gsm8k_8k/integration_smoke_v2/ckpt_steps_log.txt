@@ -1,0 +1,5 @@
+[GEMMA4-CKPT-STEPS] 2026-10-24T01:47:15Z pid=27132 patched verl.trainer.ppo.ray_trainer.RayPPOTrainer._save_checkpoint allowlist=[2]
+[GEMMA4-CKPT-STEPS] 2026-10-24T01:52:35Z pid=27132 skip save at global_step=1 (allowed [2])
+[GEMMA4-CKPT-STEPS] 2026-10-24T01:53:47Z pid=27132 save at global_step=2 (allowed [2])
+[GEMMA4-CKPT-STEPS] 2026-10-24T01:54:04Z pid=27132 saved global_step=2 in 17.2s
+[GEMMA4-CKPT-STEPS] 2026-10-24T01:55:12Z pid=27132 skip save at global_step=3 (allowed [2])

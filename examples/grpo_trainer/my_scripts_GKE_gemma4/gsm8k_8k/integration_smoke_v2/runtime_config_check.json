@@ -1,0 +1,416 @@
+{
+ "verdict": "PASS",
+ "ref_log": "/workspace/meta-RL/logs/gemma4_e2b_gsm8k8k_smoke_16n64g_s250stop3_seed1_1024_0146.log",
+ "log": "/workspace/meta-RL/logs/gemma4_e2b_gsm8k8k_smoke_16n64g_s250stop3_seed1_1024_0146.log",
+ "expect": [],
+ "allow": [],
+ "differences": [
+  {
+   "key": "actor_rollout_ref.actor.calculate_entropy",
+   "ref": true,
+   "run": true,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.actor.entropy_coeff",
+   "ref": 0,
+   "run": 0,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.actor.fsdp_config.model_dtype",
+   "ref": "fp32",
+   "run": "fp32",
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.actor.kl_loss_coef",
+   "ref": 0.0,
+   "run": 0.0,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.actor.loss_agg_mode",
+   "ref": "token-mean",
+   "run": "token-mean",
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.actor.optim.clip_grad",
+   "ref": 1.0,
+   "run": 1.0,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.actor.optim.lr",
+   "ref": 2e-06,
+   "run": 2e-06,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.actor.optim.lr_scheduler_type",
+   "ref": "cosine",
+   "run": "cosine",
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.actor.optim.lr_warmup_steps",
+   "ref": 10,
+   "run": 10,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.actor.optim.min_lr_ratio",
+   "ref": 0.0,
+   "run": 0.0,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.actor.optim.num_cycles",
+   "ref": 0.5,
+   "run": 0.5,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.actor.optim.weight_decay",
+   "ref": 0.0,
+   "run": 0.0,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.actor.optim.zero_indexed_step",
+   "ref": true,
+   "run": true,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.actor.policy_loss.loss_mode",
+   "ref": "bypass_mode",
+   "run": "bypass_mode",
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.actor.policy_loss.rollout_correction.bypass_mode",
+   "ref": true,
+   "run": true,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.actor.policy_loss.rollout_correction.loss_type",
+   "ref": "reinforce",
+   "run": "reinforce",
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.actor.policy_loss.rollout_correction.rollout_is",
+   "ref": "token",
+   "run": "token",
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.actor.policy_loss.rollout_correction.rollout_is_batch_normalize",
+   "ref": false,
+   "run": false,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.actor.policy_loss.rollout_correction.rollout_is_threshold",
+   "ref": 3.0,
+   "run": 3.0,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.actor.policy_loss.rollout_correction.rollout_rs",
+   "ref": null,
+   "run": null,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.actor.ppo_epochs",
+   "ref": 1,
+   "run": 1,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.actor.ppo_max_token_len_per_gpu",
+   "ref": 16384,
+   "run": 16384,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.actor.ppo_mini_batch_size",
+   "ref": 128,
+   "run": 128,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.actor.use_dynamic_bsz",
+   "ref": true,
+   "run": true,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.actor.use_kl_loss",
+   "ref": false,
+   "run": false,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.rollout.calculate_log_probs",
+   "ref": true,
+   "run": true,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.rollout.n",
+   "ref": 16,
+   "run": 16,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.rollout.temperature",
+   "ref": 1.0,
+   "run": 1.0,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.rollout.top_k",
+   "ref": -1,
+   "run": -1,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.rollout.top_p",
+   "ref": 1.0,
+   "run": 1.0,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.rollout.val_kwargs.do_sample",
+   "ref": false,
+   "run": false,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.rollout.val_kwargs.n",
+   "ref": 1,
+   "run": 1,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.rollout.val_kwargs.temperature",
+   "ref": 0,
+   "run": 0,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.rollout.val_kwargs.top_k",
+   "ref": -1,
+   "run": -1,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "actor_rollout_ref.rollout.val_kwargs.top_p",
+   "ref": 1.0,
+   "run": 1.0,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "algorithm.adv_estimator",
+   "ref": "grpo",
+   "run": "grpo",
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "algorithm.norm_adv_by_std_in_grpo",
+   "ref": true,
+   "run": true,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "algorithm.rollout_correction.bypass_mode",
+   "ref": true,
+   "run": true,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "algorithm.rollout_correction.loss_type",
+   "ref": "reinforce",
+   "run": "reinforce",
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "algorithm.rollout_correction.rollout_is",
+   "ref": "token",
+   "run": "token",
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "algorithm.rollout_correction.rollout_is_batch_normalize",
+   "ref": false,
+   "run": false,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "algorithm.rollout_correction.rollout_is_threshold",
+   "ref": 3.0,
+   "run": 3.0,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "algorithm.rollout_correction.rollout_rs",
+   "ref": null,
+   "run": null,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "algorithm.use_kl_in_reward",
+   "ref": false,
+   "run": false,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "custom_reward_function.name",
+   "ref": "compute_score",
+   "run": "compute_score",
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "custom_reward_function.path",
+   "ref": "/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gsm8k/boxed_math_reward_v2.py",
+   "run": "/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gsm8k/boxed_math_reward_v2.py",
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "data.filter_overlong_prompts",
+   "ref": false,
+   "run": false,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "data.max_prompt_length",
+   "ref": 512,
+   "run": 512,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "data.max_response_length",
+   "ref": 8192,
+   "run": 8192,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "data.shuffle",
+   "ref": true,
+   "run": true,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "data.train_batch_size",
+   "ref": 128,
+   "run": 128,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "data.truncation",
+   "ref": "error",
+   "run": "error",
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "reward.custom_reward_function.name",
+   "ref": "compute_score",
+   "run": "compute_score",
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "reward.custom_reward_function.path",
+   "ref": "/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gsm8k/boxed_math_reward_v2.py",
+   "run": "/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gsm8k/boxed_math_reward_v2.py",
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "trainer.resume_mode",
+   "ref": "disable",
+   "run": "disable",
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "trainer.test_freq",
+   "ref": 20,
+   "run": 20,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "trainer.total_training_steps",
+   "ref": 250,
+   "run": 250,
+   "class": "asserted",
+   "ok": true
+  },
+  {
+   "key": "trainer.val_before_train",
+   "ref": true,
+   "run": true,
+   "class": "asserted",
+   "ok": true
+  }
+ ],
+ "n_keys": 936
+}
