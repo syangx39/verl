@@ -4,9 +4,12 @@
 #
 #   SMOKE  the production recipe and 250-step LR horizon, stopped after STOP_AFTER_STEPS (default 3) updates by a
 #          watcher that SIGTERMs only this run's driver. Step-0 full eval runs (checks the eval path and gives
-#          Gemma's GSM8K starting accuracy). The optimizer probe records the first 3 AdamW steps on every rank
-#          (update 1 has LR 0, update 2 must apply a nonzero FP32 update). No checkpoints.
-#   SEEDk  the fixed 250-step run from the initial checkpoint, full eval every 20 updates and at 250.
+#          Gemma's GSM8K starting accuracy). Default: checkpoint allowlist check, SAVE_FREQ=1 with
+#          CKPT_STEPS=SMOKE_CKPT_STEPS (default 2), so updates 1 and 3 must be skipped and 2 saved.
+#          OPTIM_PROBE=1 instead records the first 3 AdamW steps on every rank (update 1 has LR 0, update 2 must
+#          apply a nonzero FP32 update) and saves no checkpoint (Ray allows one setup hook per job).
+#   SEEDk  the fixed 250-step run from the initial checkpoint, full eval every 20 updates and at 250, full
+#          checkpoints only at CKPT_STEPS (default 100,250; SAVE_FREQ 50 reaches both).
 #
 # The driver runs with PYTHONUNBUFFERED=1 (logging only: the per-step metric line reaches the driver log as the step
 # finishes). The experiment name is written to /tmp/g4_gsm8k_<mode>.current and appended to
@@ -26,12 +29,16 @@ case "${MODE}" in
     STOP_AFTER=${STOP_AFTER_STEPS:-3}
     SEED=1
     EXP=gemma4_e2b_gsm8k8k_smoke_16n64g_s250stop${STOP_AFTER}_seed1_${TS}
-    EXTRA_ENV=(SAVE_FREQ=-1 OPTIM_PROBE_DIR=${LOGS}/gemma4_optim_probe/${EXP} OPTIM_PROBE_STEPS=3) ;;
+    if [ "${OPTIM_PROBE:-0}" = 1 ]; then
+      EXTRA_ENV=(SAVE_FREQ=-1 OPTIM_PROBE_DIR=${LOGS}/gemma4_optim_probe/${EXP} OPTIM_PROBE_STEPS=3)
+    else
+      EXTRA_ENV=(SAVE_FREQ=1 CKPT_STEPS=${SMOKE_CKPT_STEPS:-2})
+    fi ;;
   SEED1|SEED2|SEED3)
     STOP_AFTER=0
     SEED=${MODE#SEED}
     EXP=gemma4_e2b_gsm8k8k_16n64g_s250_seed${SEED}_${TS}
-    EXTRA_ENV=(SAVE_FREQ=${SAVE_FREQ:-50}) ;;
+    EXTRA_ENV=(SAVE_FREQ=${SAVE_FREQ:-50} CKPT_STEPS=${CKPT_STEPS:-100,250}) ;;
   *) echo "unknown mode ${MODE}" >&2; exit 2 ;;
 esac
 LOG=${LOGS}/${EXP}.log

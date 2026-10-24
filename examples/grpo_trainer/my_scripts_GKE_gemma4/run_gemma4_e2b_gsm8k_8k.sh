@@ -13,9 +13,14 @@
 #   optimizer AdamW lr 2e-6, betas (0.9, 0.999), eps 1e-8 (torch default), weight decay 0.0, grad clip 1.0;
 #             linear warmup 10 (update 1 at LR 0, update 2 at 2e-7), cosine to 0 at step 250
 #   sampling  T=1, top_p=1, top_k=-1 (no truncation), response cap 8,192 tokens, prompt cap 512 (all fit: max 249)
-#   reward    boxed_math_reward.py: correct 1 / parseable wrong 0.1 / unparseable 0; NO length penalty
-#             (REWARD_PENALTY_SOURCES empty)
+#   reward    boxed_math_reward_v2.py (scorer v2, PR #14 option B; train and eval use the same version):
+#             correct 1 / parseable wrong 0.1 / unparseable 0; NO length penalty (REWARD_PENALTY_SOURCES empty).
+#             v2 = Meta boxed_math (v1, boxed_math_reward.py, unchanged; the Qwen runs trained with it) + one explicit
+#             rule crediting decorated numbers with the exact gold value ($18, 18%, 540 \text{ meters}, 28.00).
+#             The v1 accuracy of every response is logged next to it as acc_v1 (diagnostic only)
 #   eval      full 1,319, greedy, 8K cap, steps 0, 20, ..., 240, 250
+#   ckpt      full checkpoints (model, optimizer, extra, dataloader) only at the steps in CKPT_STEPS (e.g. 100,250):
+#             save_freq must reach every listed step and the gemma4_ckpt_steps hook skips the others
 # Gemma system settings (validated on the OMI2 line, run_gemma4_e2b_rl05_parity.sh): FP32 persistent weights and
 # Adam moments, BF16 compute / rollout, flex_attention, RoPE fix + per-rank guard via node prep every launch,
 # dynamic micro-batching 16,384 tokens / GPU (memory only; batch, update count and denominator unchanged).
@@ -32,8 +37,11 @@ DATA_DIR=${GSM8K_DATA_DIR:-/workspace/meta-RL/handoff/gsm8k_8k/data}
 TRAIN_FILE=$DATA_DIR/gsm8k_boxed_train.parquet
 VAL_FILE=$DATA_DIR/gsm8k_boxed_test.parquet
 MODEL_PATH=${GEMMA_MODEL_PATH:-/workspace/meta-RL/models/gemma-4-E2B-it}
-REWARD_FN_PATH=${GSM8K_REWARD_FN:-$SCRIPT_DIR/../my_scripts_GKE_gsm8k/boxed_math_reward.py}
-EXPECTED_REWARD_SHA256=a743cf71e2094b0ebee67506460028b5a27bb9b1d86928f6c19b152561c7015b  # == handoff code/ copy
+GSM8K_SCRIPTS=$(cd "$SCRIPT_DIR/../my_scripts_GKE_gsm8k" && pwd)
+REWARD_FN_PATH=${GSM8K_REWARD_FN:-$GSM8K_SCRIPTS/boxed_math_reward_v2.py}
+EXPECTED_REWARD_SHA256=933abb3e7d0b58dce812e1b4a01d0f15bb3ae7054b4c9956d985434a4d01938b  # scorer v2
+REWARD_V1_PATH=$GSM8K_SCRIPTS/boxed_math_reward.py      # imported by v2 (it re-checks this hash at import)
+EXPECTED_REWARD_V1_SHA256=a743cf71e2094b0ebee67506460028b5a27bb9b1d86928f6c19b152561c7015b  # == handoff code/ copy
 LOG_ROOT=${LOG_ROOT:-/workspace/meta-RL/logs}
 CKPT_ROOT=${CKPT_ROOT:-/workspace/meta-RL/ckpt}
 
@@ -45,6 +53,7 @@ W=$(( NNODES * NGPUS_PER_NODE ))
 TOTAL_STEPS=${TOTAL_STEPS:-250}
 TEST_FREQ=${TEST_FREQ:-20}
 SAVE_FREQ=${SAVE_FREQ:-50}
+CKPT_STEPS=${CKPT_STEPS:-}       # e.g. 100,250: save only these steps (empty = verl's save_freq behaviour)
 CKPT_CONTENTS=${CKPT_CONTENTS:-'["model","optimizer","extra"]'}
 PROJECT_NAME=gemma4_gsm8k_8k
 EXPERIMENT_NAME=${EXPERIMENT_NAME:-gemma4_e2b_gsm8k8k_${NNODES}n${W}g_s${TOTAL_STEPS}_seed${SEED}_$(date -u +%m%d_%H%M)}
@@ -81,35 +90,54 @@ max_num_batched_tokens=32768
 
 ########################### sanity ##########################################
 (( (train_batch_size * rollout_n) % W == 0 )) || { echo "ERROR: 2048 completions not divisible by W=${W}" >&2; exit 1; }
-for f in "$TRAIN_FILE" "$VAL_FILE" "$REWARD_FN_PATH" "$MODEL_PATH/config.json"; do
+for f in "$TRAIN_FILE" "$VAL_FILE" "$REWARD_FN_PATH" "$REWARD_V1_PATH" "$MODEL_PATH/config.json"; do
   [ -f "$f" ] || { echo "ERROR: missing $f" >&2; exit 1; }
 done
 REWARD_SHA256=$(sha256sum "$REWARD_FN_PATH" | cut -d' ' -f1)
 [ "$REWARD_SHA256" = "$EXPECTED_REWARD_SHA256" ] || { echo "ERROR: reward sha256 $REWARD_SHA256 != $EXPECTED_REWARD_SHA256" >&2; exit 1; }
+REWARD_V1_SHA256=$(sha256sum "$REWARD_V1_PATH" | cut -d' ' -f1)
+[ "$REWARD_V1_SHA256" = "$EXPECTED_REWARD_V1_SHA256" ] || { echo "ERROR: v1 reward sha256 $REWARD_V1_SHA256 != $EXPECTED_REWARD_V1_SHA256" >&2; exit 1; }
+if [ -n "$CKPT_STEPS" ]; then
+  [ -z "${OPTIM_PROBE_DIR:-}" ] || { echo "ERROR: CKPT_STEPS and OPTIM_PROBE_DIR both need Ray's single worker_process_setup_hook" >&2; exit 1; }
+  (( SAVE_FREQ > 0 )) || { echo "ERROR: CKPT_STEPS needs SAVE_FREQ > 0 (got ${SAVE_FREQ})" >&2; exit 1; }
+  for s in ${CKPT_STEPS//,/ }; do
+    (( s >= 1 && s <= TOTAL_STEPS && (s % SAVE_FREQ == 0 || s == TOTAL_STEPS) )) || {
+      echo "ERROR: CKPT_STEPS entry ${s} is never reached with SAVE_FREQ=${SAVE_FREQ}, TOTAL_STEPS=${TOTAL_STEPS}" >&2; exit 1; }
+  done
+fi
 
 ########################### preflight (no GPU) ##############################
 # data / template / scorer / schedule checks; aborts on any failure. Writes $DUMP_DIR/preflight.json.
 python3 "$SCRIPT_DIR/gemma4_gsm8k_preflight.py" --data-dir "$DATA_DIR" --model "$MODEL_PATH" --reward "$REWARD_FN_PATH" \
-    --max-prompt "$max_prompt_length" --cap "$max_response_length" --total-steps "$TOTAL_STEPS" \
+    --scorer-version 2 --max-prompt "$max_prompt_length" --cap "$max_response_length" --total-steps "$TOTAL_STEPS" \
     --warmup "$lr_warmup_steps" --peak-lr "$actor_lr" --out "$DUMP_DIR/preflight.json"
 
 ########################### node prep (every launch) #########################
 LAUNCHER_SHA256=$(sha256sum "$0" | cut -d' ' -f1)
 echo "[gsm8k-provenance] exp=${EXPERIMENT_NAME} seed=${SEED} W=${W} total_steps=${TOTAL_STEPS} test_freq=${TEST_FREQ}" \
-     "save_freq=${SAVE_FREQ} launcher_sha256=${LAUNCHER_SHA256} reward_sha256=${REWARD_SHA256}" \
+     "save_freq=${SAVE_FREQ} ckpt_steps=${CKPT_STEPS:-all} launcher_sha256=${LAUNCHER_SHA256}" \
+     "reward=${REWARD_FN_PATH} reward_sha256=${REWARD_SHA256} reward_v1_sha256=${REWARD_V1_SHA256}" \
      "train_sha256=$(sha256sum "$TRAIN_FILE" | cut -d' ' -f1) test_sha256=$(sha256sum "$VAL_FILE" | cut -d' ' -f1)" \
      "model_safetensors_sha256=$(sha256sum "$MODEL_PATH/model.safetensors" | cut -d' ' -f1) dump_dir=${DUMP_DIR}"
 python3 "$SCRIPT_DIR/gemma4_node_prep.py" --patch-dir "$SCRIPT_DIR" --report "$GUARD_DIR/node_prep.json" \
     --min-gpu-nodes "$NNODES" --launcher-sha256 "$LAUNCHER_SHA256"
 
 ########################### optional optimizer probe (smoke only) ###########
-PROBE_ARGS=()
+# Ray accepts ONE worker_process_setup_hook per job: the probe and the checkpoint allowlist are mutually exclusive.
+HOOK_ARGS=()
 if [ -n "${OPTIM_PROBE_DIR:-}" ]; then
   mkdir -p "$OPTIM_PROBE_DIR"
-  PROBE_ARGS=("++ray_kwargs.ray_init.runtime_env.py_modules=[\"$SCRIPT_DIR/gemma4_optim_probe\"]"
-              "++ray_kwargs.ray_init.runtime_env.worker_process_setup_hook=gemma4_optim_probe.install"
-              "++ray_kwargs.ray_init.runtime_env.env_vars.VERL_OPTIM_PROBE_DIR=${OPTIM_PROBE_DIR}"
-              "++ray_kwargs.ray_init.runtime_env.env_vars.VERL_OPTIM_PROBE_STEPS=\"${OPTIM_PROBE_STEPS:-3}\"")
+  HOOK_ARGS=("++ray_kwargs.ray_init.runtime_env.py_modules=[\"$SCRIPT_DIR/gemma4_optim_probe\"]"
+             "++ray_kwargs.ray_init.runtime_env.worker_process_setup_hook=gemma4_optim_probe.install"
+             "++ray_kwargs.ray_init.runtime_env.env_vars.VERL_OPTIM_PROBE_DIR=${OPTIM_PROBE_DIR}"
+             "++ray_kwargs.ray_init.runtime_env.env_vars.VERL_OPTIM_PROBE_STEPS=\"${OPTIM_PROBE_STEPS:-3}\"")
+fi
+########################### checkpoint step allowlist #######################
+if [ -n "$CKPT_STEPS" ]; then
+  HOOK_ARGS=("++ray_kwargs.ray_init.runtime_env.py_modules=[\"$SCRIPT_DIR/gemma4_ckpt_steps\"]"
+             "++ray_kwargs.ray_init.runtime_env.worker_process_setup_hook=gemma4_ckpt_steps.install"
+             "++ray_kwargs.ray_init.runtime_env.env_vars.VERL_CKPT_STEPS=\"${CKPT_STEPS}\""
+             "++ray_kwargs.ray_init.runtime_env.env_vars.VERL_CKPT_STEPS_LOG=${DUMP_DIR}/ckpt_steps.log")
 fi
 
 RAY_NUM_GPUS_ARG=""
@@ -221,7 +249,7 @@ python3 -m verl.trainer.main_ppo \
     "++ray_kwargs.ray_init.runtime_env.env_vars.DO_NOT_TRACK=\"1\"" \
     "++ray_kwargs.ray_init.runtime_env.env_vars.VERL_GEMMA4_ROPE_REPORT_DIR=${GUARD_DIR}" \
     ${RAY_NUM_GPUS_ARG} \
-    ${PROBE_ARGS[@]+"${PROBE_ARGS[@]}"} \
+    ${HOOK_ARGS[@]+"${HOOK_ARGS[@]}"} \
     "$@"
 rc=$?
 set -e

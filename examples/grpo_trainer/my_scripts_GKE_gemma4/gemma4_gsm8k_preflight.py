@@ -10,10 +10,12 @@ Checks, all written to --out (JSON):
             system turn, ends with the model turn, carries the boxed instruction once, and fits --max-prompt (no
             truncation or filtering is allowed in the launcher); a fixture (shortest, first, longest examples with
             token IDs) is saved next to --out
-  scorer    boxed_math_reward.py imported in fresh subprocesses: (1) its own self-test under Meta's fixture settings
+  scorer    the reward file imported in fresh subprocesses: (1) its own self-test under Meta's fixture settings
             (cap 2048, penalty on the train source) must PASS; (2) under the run settings (cap --cap, REWARD_PENALTY_SOURCES
             empty): correct box 1.0 (not 1.1), parseable wrong 0.1, unparseable 0, length penalty 0 even without
-            extra_info["response_len"]
+            extra_info["response_len"]; with --scorer-version 2 (boxed_math_reward_v2.py) also scorer_version 2.0 on
+            every case, acc_v1 / v2_only per case, decorated numbers with the gold value credited ($72,
+            72 \\text{ apples}, $72.00) and two-number / multiplier answers left wrong
   model     generation_config eos ids and tokenizer special tokens recorded (Gemma-native stopping; no Qwen ids)
   schedule  update-used and logged LRs for linear warmup --warmup then cosine to 0 at --total-steps, from a copy of
             verl's get_cosine_schedule_with_warmup lambda (zero-indexed): update 1 uses 0, update 2 uses peak/warmup,
@@ -21,7 +23,7 @@ Checks, all written to --out (JSON):
 
 Usage:
     python3 gemma4_gsm8k_preflight.py --data-dir D --model M --reward R --out preflight.json \\
-        [--max-prompt 512 --cap 8192 --total-steps 250 --warmup 10 --peak-lr 2e-6]
+        [--scorer-version 2 --max-prompt 512 --cap 8192 --total-steps 250 --warmup 10 --peak-lr 2e-6]
 """
 
 from __future__ import annotations
@@ -142,20 +144,28 @@ for name, sol, gt, extra in json.loads(sys.argv[2]):
 print(json.dumps(out))
 """
 
-SCORER_CASES = [  # name, solution, ground truth, extra_info, expected (score, acc, fmt)
-    ("correct", "Step by step ... so the answer is \\boxed{72}.", "72", {"index": 0}, (1.0, 1.0, 1.0)),
-    ("correct_8k_no_resp_len", "x " * 100 + "\\boxed{72}", "72", {"index": 1}, (1.0, 1.0, 1.0)),
-    ("correct_with_resp_len_8192", "\\boxed{72}", "72", {"index": 2, "response_len": 8192}, (1.0, 1.0, 1.0)),
-    ("wrong_boxed", "... \\boxed{71}", "72", {"index": 3}, (0.1, 0.0, 1.0)),
-    ("unparseable", "The answer is 72.", "72", {"index": 4}, (0.0, 0.0, 0.0)),
-    ("comma_number", "\\boxed{1,000}", "1000", {"index": 5}, None),
-    ("multiple_boxes", "\\boxed{5} then \\boxed{72}", "72", {"index": 6}, None),
-    ("nested_box", "\\boxed{\\frac{144}{2}}", "72", {"index": 7}, None),
+SCORER_CASES = [  # name, solution, ground truth, extra_info, expected (score, acc, fmt), expected v2 extras or None
+    ("correct", "Step by step ... so the answer is \\boxed{72}.", "72", {"index": 0}, (1.0, 1.0, 1.0), (1.0, 0.0)),
+    ("correct_8k_no_resp_len", "x " * 100 + "\\boxed{72}", "72", {"index": 1}, (1.0, 1.0, 1.0), (1.0, 0.0)),
+    ("correct_with_resp_len_8192", "\\boxed{72}", "72", {"index": 2, "response_len": 8192},
+     (1.0, 1.0, 1.0), (1.0, 0.0)),
+    ("wrong_boxed", "... \\boxed{71}", "72", {"index": 3}, (0.1, 0.0, 1.0), (0.0, 0.0)),
+    ("unparseable", "The answer is 72.", "72", {"index": 4}, (0.0, 0.0, 0.0), (0.0, 0.0)),
+    ("comma_number", "\\boxed{1,000}", "1000", {"index": 5}, None, None),
+    ("multiple_boxes", "\\boxed{5} then \\boxed{72}", "72", {"index": 6}, None, None),
+    ("nested_box", "\\boxed{\\frac{144}{2}}", "72", {"index": 7}, None, None),
+    # scorer v2 only (acc_v1, v2_only): decorated numbers with the exact gold value; ambiguous answers stay wrong
+    ("v2_currency", "... \\boxed{\\$72}", "72", {"index": 8}, (1.0, 1.0, 1.0), (0.0, 1.0)),
+    ("v2_unit", "... \\boxed{72 \\text{ apples}}", "72", {"index": 9}, (1.0, 1.0, 1.0), (0.0, 1.0)),
+    ("v2_exact_value", "... \\boxed{\\$72.00}", "72", {"index": 10}, (1.0, 1.0, 1.0), (0.0, 1.0)),
+    ("v2_two_numbers_stay_wrong", "... \\boxed{72 \\text{ and } 5}", "72", {"index": 11}, (0.1, 0.0, 1.0), (0.0, 0.0)),
+    ("v2_multiplier_stays_wrong", "... \\boxed{72 \\text{ thousand}}", "72", {"index": 12},
+     (0.1, 0.0, 1.0), (0.0, 0.0)),
 ]
 
 
 def check_scorer(a, out, fails):
-    res = {"sha256": sha256(a.reward)}
+    res = {"sha256": sha256(a.reward), "expected_version": a.scorer_version}
     env = {k: v for k, v in os.environ.items() if not k.startswith("REWARD_")}
     # (1) the scorer's own self-test under Meta's fixture settings (validates the rule itself)
     e1 = dict(env, REWARD_MAX_RESP_LEN="2048", REWARD_PENALTY_SOURCES="gsm8k_boxed_train")
@@ -167,7 +177,7 @@ def check_scorer(a, out, fails):
     # (2) the run settings: no length penalty anywhere
     e2 = dict(env, REWARD_FORMAT_SCORE="0.1", REWARD_PENALTY_SOURCES="", REWARD_MAX_RESP_LEN=str(a.cap),
               REWARD_OVERLONG_BUFFER="512", REWARD_OVERLONG_PENALTY="1.0")
-    cases = [[c[0], c[1], c[2], c[3]] for c in SCORER_CASES]
+    cases = [[c[0], c[1], c[2], c[3]] for c in SCORER_CASES if a.scorer_version == 2 or not c[0].startswith("v2_")]
     p = subprocess.run([sys.executable, "-c", SCORER_CHILD, a.reward, json.dumps(cases)], env=e2,
                        capture_output=True, text=True, timeout=300)
     try:
@@ -177,14 +187,20 @@ def check_scorer(a, out, fails):
         out["scorer"] = res
         return
     rows = {}
-    for name, _, _, _, want in SCORER_CASES:
-        g = got.get(name, {})
+    for name, _, _, _, want, want_v2 in SCORER_CASES:
+        if name not in got:
+            continue
+        g = got[name]
         ok = "error" not in g and g.get("length_penalty") == 0.0
         if want is not None:
             ok = ok and abs(g.get("score", -9) - want[0]) < 1e-9 and g.get("acc") == want[1] and g.get("fmt") == want[2]
-        rows[name] = {"got": g, "want": want, "ok": ok}
+        if a.scorer_version == 2:
+            ok = ok and g.get("scorer_version") == 2.0
+            if want_v2 is not None:
+                ok = ok and (g.get("acc_v1"), g.get("v2_only")) == want_v2
+        rows[name] = {"got": g, "want": want, "want_acc_v1_v2_only": want_v2, "ok": ok}
         if not ok:
-            fails.append(f"scorer case {name}: got {g}, want {want}")
+            fails.append(f"scorer case {name}: got {g}, want {want} / (acc_v1, v2_only) {want_v2}")
     res["run_settings_cases"] = rows
     out["scorer"] = res
 
@@ -220,6 +236,8 @@ def main(argv=None) -> int:
     ap.add_argument("--data-dir", required=True)
     ap.add_argument("--model", required=True)
     ap.add_argument("--reward", required=True)
+    ap.add_argument("--scorer-version", type=int, choices=(1, 2), default=2,
+                    help="2: boxed_math_reward_v2.py (acc_v1 / v2_only / scorer_version fields and v2 cases checked)")
     ap.add_argument("--out", required=True)
     ap.add_argument("--max-prompt", type=int, default=512)
     ap.add_argument("--cap", type=int, default=8192)

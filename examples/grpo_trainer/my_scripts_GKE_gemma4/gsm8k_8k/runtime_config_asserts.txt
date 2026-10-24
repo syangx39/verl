@@ -57,3 +57,7 @@ trainer.total_training_steps=250
 trainer.test_freq=20
 trainer.val_before_train=true
 trainer.resume_mode=disable
+custom_reward_function.path=/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gsm8k/boxed_math_reward_v2.py
+custom_reward_function.name=compute_score
+reward.custom_reward_function.path=/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gsm8k/boxed_math_reward_v2.py
+reward.custom_reward_function.name=compute_score
