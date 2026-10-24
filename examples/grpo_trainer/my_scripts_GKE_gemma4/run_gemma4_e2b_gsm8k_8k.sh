@@ -24,6 +24,10 @@
 # Gemma system settings (validated on the OMI2 line, run_gemma4_e2b_rl05_parity.sh): FP32 persistent weights and
 # Adam moments, BF16 compute / rollout, flex_attention, RoPE fix + per-rank guard via node prep every launch,
 # dynamic micro-batching 16,384 tokens / GPU (memory only; batch, update count and denominator unchanged).
+# Logging: console + verl's file logger ($DUMP_DIR/metrics.jsonl, one JSON line per step). TensorBoard is OFF:
+# setup_env.sh points TENSORBOARD_DIR at the GCS-fuse bucket, where tensorboard 2.20 without TensorFlow opens, appends
+# and closes the event file for every scalar. Each close re-uploads the file: about 0.5 s per scalar, measured at
+# 532 ms. With about 120 scalars per step, that is about 50 s per step outside timing_s/step.
 #
 # Usage (Ray head pod): SEED=1 bash run_gemma4_e2b_gsm8k_8k.sh [extra hydra overrides]
 #   TOTAL_STEPS stays 250 even for smokes: the trainer sets the LR schedule horizon to the run length, so a short
@@ -226,7 +230,7 @@ python3 -m verl.trainer.main_ppo \
     reward.custom_reward_function.name=compute_score \
     trainer.use_v1=False \
     trainer.balance_batch=True \
-    trainer.logger='["console","tensorboard"]' \
+    trainer.logger='["console","file"]' \
     trainer.project_name=${PROJECT_NAME} \
     trainer.experiment_name=${EXPERIMENT_NAME} \
     trainer.n_gpus_per_node=${NGPUS_PER_NODE} \
@@ -248,6 +252,7 @@ python3 -m verl.trainer.main_ppo \
     "++ray_kwargs.ray_init.runtime_env.env_vars.VLLM_NO_USAGE_STATS=\"1\"" \
     "++ray_kwargs.ray_init.runtime_env.env_vars.DO_NOT_TRACK=\"1\"" \
     "++ray_kwargs.ray_init.runtime_env.env_vars.VERL_GEMMA4_ROPE_REPORT_DIR=${GUARD_DIR}" \
+    "++ray_kwargs.ray_init.runtime_env.env_vars.VERL_FILE_LOGGER_PATH=${DUMP_DIR}/metrics.jsonl" \
     ${RAY_NUM_GPUS_ARG} \
     ${HOOK_ARGS[@]+"${HOOK_ARGS[@]}"} \
     "$@"

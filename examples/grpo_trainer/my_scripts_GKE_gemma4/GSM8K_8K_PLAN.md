@@ -6,7 +6,7 @@ Establish a **Gemma-4 E2B GPU learning baseline on the GSM8K 8K/no-length-penalt
 
 The historical Qwen reference used 64 GB200, 250 updates × three seeds, and full GSM8K test evaluation every 20 updates: **74.78% → 80.57% mean accuracy, approximately +5.8 pp**, with final seeds **82.26% / 79.61% / 79.83%**. It is a customer-delivered workload reference, not a numerical target for a different model. See the [historical 8K rulebook](../my_scripts_GKE_gsm8k/TPU_GPU_RL_Parity_Rulebook_gsm8k_8k.md) and [Qwen result consolidation PR #13](https://github.com/syangx39/verl/pull/13).
 
-**Status: scorer decision B is implemented as the model-agnostic scorer v2 (§8.1).** All archived Qwen evals were re-scored: only steps 0 and 20 change, by at most +0.61 pp (§8.2). Full checkpoints are limited to steps 100 and 250 (§8.3), and the smoke's TIS evidence is corrected (§8.4). The 3-update v2 integration smoke passed: training uses the v2 reward, and only the allowed checkpoint was written (§8.5). **Seed 1 has been running since 2026-10-24T01:57Z (§8.6).** The frozen boxed scorer (v1) marked 36 pp of Gemma's correct step-0 answers wrong only because of `\$` / units inside the box (§7.3). The model is `google/gemma-4-E2B-it`, not a generic Gemma 4B checkpoint. This is a separate experiment from the OMI2 A4–A6 optimization in [PR #12](https://github.com/syangx39/verl/pull/12); no OMI2 result, eval protocol or experiment configuration is overwritten.
+**Status: scorer decision B is implemented as the model-agnostic scorer v2 (§8.1).** All archived Qwen evals were re-scored: only steps 0 and 20 change, by at most +0.61 pp (§8.2). Full checkpoints are limited to steps 100 and 250 (§8.3), and the smoke's TIS evidence is corrected (§8.4). The 3-update v2 integration smoke passed: training uses the v2 reward, and only the allowed checkpoint was written (§8.5). **Seed 1 has been running since 2026-10-24T01:57Z (§8.6).** At the step-100 review it was stable, at 91.51% v2 vs 80.59% at step 0. The gain is almost entirely the boxing rate, 88% → 100%, and the run continues unchanged to 250. The frozen boxed scorer (v1) marked 36 pp of Gemma's correct step-0 answers wrong only because of `\$` / units inside the box (§7.3). The model is `google/gemma-4-E2B-it`, not a generic Gemma 4B checkpoint. This is a separate experiment from the OMI2 A4–A6 optimization in [PR #12](https://github.com/syangx39/verl/pull/12); no OMI2 result, eval protocol or experiment configuration is overwritten.
 
 ## Plan
 
@@ -377,10 +377,50 @@ Run `gemma4_e2b_gsm8k8k_smoke_16n64g_s250stop3_seed1_1024_0146`: the production 
 
 Restore was not exercised. The smoke checkpoint (`/workspace/meta-RL/ckpt/gemma4_e2b_gsm8k8k_smoke_16n64g_s250stop3_seed1_1024_0146/global_step_2`, 59.2 GB) is kept for a later resume test.
 
-### 8.6 Seed 1 (running)
+### 8.6 Seed 1 (running; step-100 review passed)
 
 Run `gemma4_e2b_gsm8k8k_16n64g_s250_seed1_1024_0157` was launched at 2026-10-24T01:57:34Z from the original `gemma-4-E2B-it`, with `SAVE_FREQ=50 CKPT_STEPS=100,250`. It uses the launcher, scorer and contract that the integration smoke validated: launcher sha256 `541a8b38…`, reward `933abb3e…`. Preflight passed.
 
 - **Updates 1–20 are watched closely, especially after peak LR at update 11.** Signals: grad norm, IS max and the fraction above the cap, `k3_kl`, entropy, unparseable rate, response length and cap hits, and training v2 accuracy.
 - **Step-100 review:** the complete 0–100 eval curve against seed 1's own v2 step 0, paired intervals and diagnostics. If the run is stable, it continues unchanged to 250.
 - The formal learning curve starts at seed 1's own v2 step-0 eval.
+
+#### Step-100 review (2026-10-24T04:26Z): stable, continuing unchanged to 250
+
+Eval on all 1,319 questions, greedy, paired by question against seed 1's own step 0. The 95% intervals come from a 10,000-resample bootstrap over questions.
+
+| Step | v2 acc | v1 acc (diagnostic) | Boxed | Mean output chars | Change vs step 0 (pp) | 95% CI | Wrong→right / right→wrong | Gains that were no box / boxed wrong at step 0 |
+|---:|---:|---:|---:|---:|---:|---|---:|---:|
+| 0 | 80.59 | 44.28 | 87.95 | 1,432 | — | — | — | — |
+| 20 | 91.58 | 51.63 | 100.00 | 1,431 | +10.99 | [+9.17, +12.89] | 161 / 16 | 135 / 26 |
+| 40 | 92.27 | 54.74 | 100.00 | 1,443 | +11.68 | [+9.78, +13.65] | 172 / 18 | 143 / 29 |
+| 60 | 91.36 | 55.19 | 100.00 | 1,512 | +10.77 | [+8.87, +12.74] | 167 / 25 | 142 / 25 |
+| 80 | 92.34 | 58.68 | 100.00 | 1,583 | +11.75 | [+9.93, +13.72] | 171 / 16 | 144 / 27 |
+| 100 | **91.51** | 58.91 | 99.85 | 1,672 | **+10.92** | [+9.02, +12.89] | 167 / 23 | 143 / 24 |
+
+- **The gain is almost entirely formatting.** About 86% of the answers gained by step 100 had no `\boxed{}` at step 0, and the boxed rate went from 88% to 100%. Answers that were boxed but wrong and are now right, minus right→wrong flips, net only +1 answer at step 100 (+10 / +11 / 0 / +11 at steps 20–80). Held-out accuracy has been flat at 91–92% since step 20.
+- **v1 accuracy rises (44% → 59%).** The model writes more bare numbers, although v2 scores `\$18` and `18` the same. This is consistent with pressure away from the forms v2 still marks wrong.
+- **Training batches (T=1).** v2 accuracy is 82–96% from update 10 on. Only 11–35 of 128 prompt groups are mixed, so most groups have zero advantage.
+- **Numerics, updates 1–102.**
+  - Grad norm (pre-clip, clip 1.0) is mostly 0.2–0.7. Isolated spikes: 4.52 at update 4, 1.95 at 14, 2.18 at 21, 1.23 at 27, 1.10 at 98.
+  - Rollout correction: `k3_kl` 3.4–4.3e-4; IS max ≤ 1.63; token fraction above the cap ≤ 3.1e-6; ESS ≥ 0.9991.
+  - No non-finite metric.
+  - One 8,192-token response at update 2; no cap hit since.
+- **Slow drifts to watch through 250:**
+  - Response length: mean eval output 1,432 → 1,672 characters (+17%); training responses about 470 → 510–570 tokens.
+  - Entropy: 0.13 → 0.14–0.18.
+- **Checkpoints.** The hook skipped step 50. It saved step 100 in 19.2 s (`global_step_100/`: 194 actor shards plus `data.pt`; `latest_checkpointed_iteration.txt` = 100).
+
+#### Wall-clock overhead found during seed 1 (TensorBoard on GCS-fuse)
+
+- **Symptom.** Steps take about 75–90 s of wall-clock (tqdm, dump timestamps), but `timing_s/step` is only about 25–40 s.
+- **Where the time goes.** For about 48 s after each step's dump, the TaskRunner sits at 0% CPU, then prints the metric line.
+- **Cause.**
+  - verl writes TensorBoard before the console line.
+  - `setup_env.sh` sets `TENSORBOARD_DIR` on the GCS-fuse bucket.
+  - tensorboard 2.20 without TensorFlow opens, appends and closes the event file for every scalar, and each close re-uploads the file.
+  - Measured on the bucket: 120 scalars took 64 s (532 ms each). On local disk they took 0.01 s.
+- **Not specific to this run.** The OMI2 A4 run shows the same gap (monitor wall ≈ 122 s per step against `timing_s/step` 64 s). The archived Qwen GSM8K runs do not (39.6 s wall-clock against 39.5 s).
+- **Fix for later runs.** The launcher now logs to the console plus verl's file logger (`$DUMP_DIR/metrics.jsonl`; 0.1 ms per step on the bucket). Training is unchanged.
+- **Seed 1 was not restarted.** No answer came on the restart question, and the break-even passed at about update 130. It keeps TensorBoard: launcher sha256 `541a8b38…`, commit `62d369e`.
+- **Timing comparisons** must use `timing_s/step`, or must state that seed 1's wall-clock includes about 48 s per step of logging.
