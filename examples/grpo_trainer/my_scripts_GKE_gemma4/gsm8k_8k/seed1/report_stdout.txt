@@ -1,0 +1,17 @@
+eval   0: v2 80.59% v1 44.28% boxed 87.95% d +0.00 pp [+0.00, +0.00] w->r 0 r->w 0 trunc 1
+eval  20: v2 91.58% v1 51.63% boxed 100.00% d +10.99 pp [+9.10, +12.89] w->r 161 r->w 16 trunc 0
+eval  40: v2 92.27% v1 54.74% boxed 100.00% d +11.68 pp [+9.70, +13.65] w->r 172 r->w 18 trunc 0
+eval  60: v2 91.36% v1 55.19% boxed 100.00% d +10.77 pp [+8.79, +12.74] w->r 167 r->w 25 trunc 0
+eval  80: v2 92.34% v1 58.68% boxed 100.00% d +11.75 pp [+9.86, +13.72] w->r 171 r->w 16 trunc 0
+eval 100: v2 91.51% v1 58.91% boxed 99.85% d +10.92 pp [+8.95, +12.96] w->r 167 r->w 23 trunc 2
+eval 120: v2 92.19% v1 58.68% boxed 99.92% d +11.60 pp [+9.63, +13.57] w->r 173 r->w 20 trunc 1
+eval 140: v2 92.65% v1 61.56% boxed 100.00% d +12.05 pp [+10.01, +14.10] w->r 180 r->w 21 trunc 0
+eval 160: v2 92.57% v1 62.17% boxed 99.85% d +11.98 pp [+9.93, +14.03] w->r 182 r->w 24 trunc 2
+eval 180: v2 92.57% v1 61.64% boxed 99.85% d +11.98 pp [+10.01, +14.03] w->r 179 r->w 21 trunc 2
+eval 200: v2 92.65% v1 61.26% boxed 100.00% d +12.05 pp [+10.01, +14.10] w->r 181 r->w 22 trunc 0
+eval 220: v2 92.87% v1 61.87% boxed 100.00% d +12.28 pp [+10.24, +14.40] w->r 186 r->w 24 trunc 0
+eval 240: v2 92.72% v1 62.02% boxed 99.85% d +12.13 pp [+10.08, +14.18] w->r 183 r->w 23 trunc 2
+eval 250: v2 92.80% v1 61.41% boxed 100.00% d +12.21 pp [+10.16, +14.25] w->r 183 r->w 22 trunc 0
+finished=True exit=0 last_step=250 ckpt saved=[100, 250] skipped=[50, 150, 200] dirs=['global_step_100', 'global_step_250']
+timing: internal median 31.7s (n=218), actual interval median 78.9s (n=206), components {'timing_s/gen': 16.258563590998165, 'timing_s/update_actor': 8.13364593300139, 'timing_s/update_weights': 4.1352488699994865, 'timing_s/dump_rollout_generations': 1.3949841355024546}, launch-to-finish 5.81583216143979 h, GPU-hours 372.21325833214655, train tokens 2.857e+08
+wrote /tmp/seed1_final

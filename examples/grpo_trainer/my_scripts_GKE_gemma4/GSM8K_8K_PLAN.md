@@ -6,7 +6,7 @@ Establish a **Gemma-4 E2B GPU learning baseline on the GSM8K 8K/no-length-penalt
 
 The historical Qwen reference used 64 GB200, 250 updates × three seeds, and full GSM8K test evaluation every 20 updates: **74.78% → 80.57% mean accuracy, approximately +5.8 pp**, with final seeds **82.26% / 79.61% / 79.83%**. It is a customer-delivered workload reference, not a numerical target for a different model. See the [historical 8K rulebook](../my_scripts_GKE_gsm8k/TPU_GPU_RL_Parity_Rulebook_gsm8k_8k.md) and [Qwen result consolidation PR #13](https://github.com/syangx39/verl/pull/13).
 
-**Status: scorer decision B is implemented as the model-agnostic scorer v2 (§8.1).** All archived Qwen evals were re-scored: only steps 0 and 20 change, by at most +0.61 pp (§8.2). Full checkpoints are limited to steps 100 and 250 (§8.3), and the smoke's TIS evidence is corrected (§8.4). The 3-update v2 integration smoke passed: training uses the v2 reward, and only the allowed checkpoint was written (§8.5). **Seed 1 has been running since 2026-10-24T01:57Z (§8.6).** At the step-100 review it was stable: 91.51% v2 vs 80.59% at step 0, +10.92 pp with a paired 95% CI of [+9.02, +12.89]. The improvement is strongly associated with output-format compliance (boxed rate 88% → 100%); the math-ability gain has not been quantified separately. The run continues unchanged to 250, and seeds 2/3 are decided after the fixed step-250 endpoint. The frozen boxed scorer (v1) marked 36 pp of Gemma's correct step-0 answers wrong only because of `\$` / units inside the box (§7.3). The model is `google/gemma-4-E2B-it`, not a generic Gemma 4B checkpoint. This is a separate experiment from the OMI2 A4–A6 optimization in [PR #12](https://github.com/syangx39/verl/pull/12); no OMI2 result, eval protocol or experiment configuration is overwritten.
+**Status: scorer decision B is implemented as the model-agnostic scorer v2 (§8.1).** All archived Qwen evals were re-scored: only steps 0 and 20 change, by at most +0.61 pp (§8.2). Full checkpoints are limited to steps 100 and 250 (§8.3), and the smoke's TIS evidence is corrected (§8.4). The 3-update v2 integration smoke passed: training uses the v2 reward, and only the allowed checkpoint was written (§8.5). **Seed 1 completed the fixed 250 updates; results are in [GSM8K_8K_RESULTS.md](GSM8K_8K_RESULTS.md).** Held-out v2 accuracy went from 80.59% to 92.80% at step 250: +12.21 pp, paired 95% CI [+10.16, +14.25], numerically stable. The improvement is strongly associated with output-format compliance (boxed rate 88% → 100%); the math-ability gain has not been quantified separately. Seeds 2/3 are to be decided now. The frozen boxed scorer (v1) marked 36 pp of Gemma's correct step-0 answers wrong only because of `\$` / units inside the box (§7.3). The model is `google/gemma-4-E2B-it`, not a generic Gemma 4B checkpoint. This is a separate experiment from the OMI2 A4–A6 optimization in [PR #12](https://github.com/syangx39/verl/pull/12); no OMI2 result, eval protocol or experiment configuration is overwritten.
 
 ## Plan
 
@@ -145,7 +145,7 @@ Proposed filenames below are work to implement, not existing runnable commands:
 - [x] Scorer v2: [`boxed_math_reward_v2.py`](../my_scripts_GKE_gsm8k/boxed_math_reward_v2.py) with positive/negative tests [`test_boxed_math_reward_v2.py`](../my_scripts_GKE_gsm8k/test_boxed_math_reward_v2.py), and the offline v1/v2 re-scorer [`rescore_boxed_dumps.py`](../my_scripts_GKE_gsm8k/rescore_boxed_dumps.py) (§8.1–§8.2).
 - [x] Checkpoint step allowlist [`gemma4_ckpt_steps/`](gemma4_ckpt_steps/__init__.py) with [`test_gemma4_ckpt_steps.py`](test_gemma4_ckpt_steps.py), and the run checker [`gemma4_gsm8k_run_check.py`](gemma4_gsm8k_run_check.py) (§8.3–§8.4).
 - [ ] `gsm8k_8k/`: data/model/code manifest, Gemma prompt fixture, scorer results, resolved configs and exact launch commands. — Smoke evidence is in [`gsm8k_8k/smoke/`](gsm8k_8k/smoke/), and the run launcher is [`gsm8k_8k/launch/g4run_gsm8k.sh`](gsm8k_8k/launch/g4run_gsm8k.sh). The model/data manifest for the baseline is still to come.
-- [ ] `GSM8K_8K_RESULTS.md`: seed1 fixed-step results and decision, followed by seeds2/3 only after freeze; report full curves and failed runs.
+- [x] `GSM8K_8K_RESULTS.md`: seed1 fixed-step results and decision, followed by seeds2/3 only after freeze; report full curves and failed runs. — Seed 1 is done ([GSM8K_8K_RESULTS.md](GSM8K_8K_RESULTS.md); figures and tables from [`gemma4_gsm8k_report.py`](gemma4_gsm8k_report.py)). Seeds 2/3 are pending a decision.
 - [ ] Extend comparison/plotting tools to accept the 128×16 batch, boxed scorer fields, full GSM8K eval IDs and explicit cross-model template differences.
 - [ ] Reproducible handoff: immutable model/tokenizer/processor and code/image identity, ordered training prompts, full eval dumps, train diagnostics, checkpoints and SHA256 manifest; model-specific TPU guide.
 
@@ -158,8 +158,8 @@ Proposed filenames below are work to implement, not existing runnable commands:
 - [x] Decide the scorer handling (§7.3): option B, implemented as scorer v2 (§8.1); archived Qwen evals re-scored (§8.2).
 - [x] Checkpoint policy: full checkpoints at steps 100 and 250 only (§8.3).
 - [x] v2 integration smoke, 3 updates (§8.5).
-- [ ] Seed 1 from the initial checkpoint: running since 2026-10-24T01:57Z (§8.6).
-- [ ] Review seed1 at step100, then fixed step250 if continuing.
+- [x] Seed 1 from the initial checkpoint: 2026-10-24T01:57Z–07:46Z, exit code 0 (§8.6).
+- [x] Review seed1 at step100, then fixed step250 if continuing. — Step 100 passed; step 250: 92.80% v2, +12.21 pp ([GSM8K_8K_RESULTS.md](GSM8K_8K_RESULTS.md)).
 - [ ] Freeze or revise the candidate; decide on seeds2/3.
 - [ ] Produce the final GPU baseline and TPU handoff.
 
@@ -377,7 +377,7 @@ Run `gemma4_e2b_gsm8k8k_smoke_16n64g_s250stop3_seed1_1024_0146`: the production 
 
 Restore was not exercised. The smoke checkpoint (`/workspace/meta-RL/ckpt/gemma4_e2b_gsm8k8k_smoke_16n64g_s250stop3_seed1_1024_0146/global_step_2`, 59.2 GB) is kept for a later resume test.
 
-### 8.6 Seed 1 (running; step-100 review passed)
+### 8.6 Seed 1 (completed 2026-10-24T07:46Z; results in [GSM8K_8K_RESULTS.md](GSM8K_8K_RESULTS.md))
 
 Run `gemma4_e2b_gsm8k8k_16n64g_s250_seed1_1024_0157` was launched at 2026-10-24T01:57:34Z from the original `gemma-4-E2B-it`, with `SAVE_FREQ=50 CKPT_STEPS=100,250`. It uses the launcher, scorer and contract that the integration smoke validated: launcher sha256 `541a8b38…`, reward `933abb3e…`. Preflight passed.
 
@@ -429,3 +429,11 @@ Eval on all 1,319 questions, greedy, paired by question against seed 1's own ste
 - **Performance reporting gives both numbers and labels them.** The internal step time is `timing_s/step`, about 30 s (generation, update, weight sync, dump). The actual interval between steps is about 77 s for seed 1, including about 48 s of TensorBoard logging per step. Neither replaces the other. The final timing table also gives full launch-to-finish duration and eval/checkpoint overhead (§4).
 
 Decision (2026-10-24, after the step-100 review): keep the recipe and continue to the fixed step 250 with no change to LR, reward or prompt. Seeds 2/3 are decided after step 250. Until then, every eval (every 20 steps) is reviewed for accuracy, boxed (format) rate, truncation rate, entropy and output length together.
+
+#### Completion (2026-10-24T07:46Z)
+
+- **Run.** All 250 updates finished with driver exit code 0. The RoPE guard passed on 64 ranks and all 58 runtime asserts held.
+- **Checkpoints.** Steps 100 and 250 were saved and 50/150/200 skipped.
+- **Step 250.** v2 accuracy 92.80% (+12.21 pp vs step 0, paired 95% CI [+10.16, +14.25]), boxed 100%, 0 outputs at the cap.
+- **Timing.** Internal step time 31.7 s (median); the actual interval was 78.9 s, including the TensorBoard overhead. Launch-to-finish took 5.82 h, or 372 GPU-hours.
+- Full results, figures and the seeds 2/3 decision request are in [GSM8K_8K_RESULTS.md](GSM8K_8K_RESULTS.md). The pod copy of the launcher has been synced to the console + file-logger version, sha256 `6968e50c…`.
