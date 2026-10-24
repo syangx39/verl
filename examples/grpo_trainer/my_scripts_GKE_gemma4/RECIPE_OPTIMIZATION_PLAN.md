@@ -6,7 +6,7 @@ Find a better **100-step Gemma-4 E2B FP32 recipe** by testing learning-rate deca
 
 PR #11 is merged at `39ca638358c121b83b0f8a1c7646932ca993250a`. Its [result ledger](RECIPE_ABLATION_PLAN.md#result-ledger-update-as-experiments-finish) is the frozen source for A0–A3. A3a improved from **36.06% to 40.96% (+4.90 pp)**; vs A0 at step 100 it gained **+1.34 pp, question-paired 95% CI [+0.32, +2.44]**. LR 4e-6 collapsed, and removing format reward or the inner training wrapper did not produce a detectable accuracy improvement under frozen eval.
 
-**Status: GPU preflight passed (§4.3); A4 running since 2026-10-23T21:05Z.** The RayCluster moved to node pool `a4x-highgpu-4g-a4x-pool-4` (§4.3). The plan and PR description are updated as each arm completes.
+**Status: A4 complete, not a candidate (§A4 result). A5 and A6 are paused at the user's request (2026-10-24); PR #12 is set aside while the GSM8K baseline (PR #14) proceeds.** GPU preflight passed (§4.3), and the A6 2-step smoke passed. The RayCluster runs on node pool `a4x-highgpu-4g-a4x-pool-4`.
 
 ## Plan
 
@@ -315,15 +315,78 @@ If A4–A6 leave a clear unresolved question, write the next single-factor hypot
 
 After choosing a recipe, freeze it and evaluate the longer horizon and additional seeds. The existing customer protocol remains **step 200, three-seed mean, TPU ≥ GPU − 1 percentage point**. PR #12's 100-step seed-1 screens do not complete or redefine that gate.
 
+## A4 result: native half-cosine
+
+**Run.** `gemma4_e2b_rl05fp32_a4cos_16n64g_s100_seed1_1023_2105`, launched 2026-10-23T21:05Z from the initial checkpoint, seed 1, 16n64g on pool-4. The log closed at 00:21:36Z, about 3 h 16 min including start-up, six evals and shutdown.
+
+**Validity.**
+- Driver `exit_code=0`, with 100/100 steps and all six evals.
+- The guard check passes for all 64 ranks. The only traceback is the known exit-phase `DataLoader worker … killed`.
+- The stop monitor saw every step, with a median metric latency of 31 s (153 s at most, at eval steps). No rule triggered and no alert was raised.
+- All 100 logged `actor/lr` values equal the export (maximum relative error 0): 1.9998766e-6 at step 1, 1.7071068e-6 at step 50, 1e-6 at step 100.
+- Training prompts are identical to A3a's at every step (validated per step).
+
+**Held-out accuracy (fixed endpoint, step 100).** Paired by validated `qid` on the frozen `eval_5000`. Evidence: [`a4_vs_a3a_s100.md`](recipe_optimization/a4_cosine/a4_vs_a3a_s100.md), [plot](recipe_optimization/a4_cosine/a4_vs_a3a_s100.png), [eval report](recipe_optimization/a4_cosine/a4_eval_report.md).
+
+| Eval step | A3a | A4 | A4 − A3a, pp (95% CI) | A4 vs own step 0, pp (95% CI) |
+|---:|---:|---:|---|---|
+| 0 | 36.06 | 35.82 | −0.24 [−1.14, +0.72] (identical weights) | — |
+| 20 | 39.26 | 38.52 | −0.74 [−1.74, +0.28] | +2.70 [+1.62, +3.76] |
+| 40 | 39.24 | 39.14 | −0.10 [−1.14, +0.92] | +3.32 [+2.18, +4.34] |
+| 60 | 40.52 | 39.30 | −1.22 [−2.20, −0.18] | +3.48 [+2.38, +4.62] |
+| 80 | 40.92 | 40.14 | −0.78 [−1.84, +0.26] | +4.32 [+3.26, +5.44] |
+| **100** | **40.96** | **40.38** | **−0.58 [−1.60, +0.36]** | **+4.56 [+3.50, +5.66]** |
+
+- A4 learns from its own step 0, +4.56 pp at step 100.
+- At the primary endpoint there is no detectable difference from A3a: the interval includes 0. That does not establish equivalence.
+- A4's point estimate is below A3a at all five post-0 checkpoints, and the step-60 interval excludes 0. Those checks are repeated and the curves are correlated, so this is descriptive.
+- For context, A4 vs A0 at step 100 is +0.76 pp [−0.30, +1.80].
+
+**Training diagnostics vs A3a.** Medians over the A3a / A4 windows:
+
+| Window | `rollout_corr/k3_kl` | `actor/entropy` | Response length | Training accuracy, same prompts |
+|---|---|---|---|---|
+| 1–20 | 0.000723 / 0.000707 | 0.207 / 0.204 | 1,730 / 1,825 | 60.1 / 60.2 % |
+| 81–100 | 0.000962 / 0.000996 | 0.328 / 0.337 | 1,313 / 1,548 | 62.7 / 62.1 % |
+
+- Training accuracy on identical prompts: −0.17 pp mean over steps 1–100. Descriptive only; consecutive steps are not independent.
+- Correctness-mixed groups: 25–27% in both runs.
+- Format: about 98–99% held-out in both runs.
+
+**Stability-candidate screen (§5).** Medians of steps 81–100 against steps 1–20 ([`stability_screen.json`](recipe_optimization/a4_cosine/stability_screen.json)):
+
+| Metric | A3a early → late (drift) | A4 early → late (drift) | Late median lower? | Drift reduction |
+|---|---|---|---|---|
+| Entropy | 0.2069 → 0.3285 (+0.1215) | 0.2039 → 0.3368 (+0.1329) | no | −9.4% (more drift) |
+| `k3_kl` | 0.000723 → 0.000962 (+0.000239) | 0.000707 → 0.000996 (+0.000289) | no | −20.8% (more drift) |
+
+Neither condition holds, so **A4 is not a stability candidate.** Over these 100 updates, the half-cosine's lower LR (mean update-used 1.64e-6, reaching 1.02e-6 by update 100) did not reduce A3a's entropy or mismatch drift.
+
+**Cost** (`timing_s/step` mean / median / p90):
+
+| | A4 | A3a |
+|---|---|---|
+| `timing_s/step` | 66.7 / 64.3 / 80.1 s | 63.1 / 61.4 / 75.8 s |
+| Total tokens | 3.67e8 | 3.31e8 |
+
+A4's responses stayed about 230 tokens longer late in training, so it was slightly more expensive.
+
+**Decision: not a candidate.**
+- No detectable accuracy difference at the fixed endpoint, with a point estimate below A3a at every checkpoint.
+- No stability benefit.
+- A3a remains the best completed 100-step seed-1 recipe.
+
+At the user's request (2026-10-24), A5 and A6 are **paused** and PR #12 is set aside while the GSM8K baseline (PR #14) proceeds. The A6 smoke, monitor and tooling remain ready for a later resume.
+
 ## Result ledger
 
 | Arm | Exact command/config and experiment ID | Validity / completed steps | Step-0 acc | Step-100 acc | Difference vs A3a, pp (paired 95% CI) | Tokens / GPU-hours / decision |
 |---|---|---|---:|---:|---|---|
 | A3a control | PR #11 run `gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753`; [manifest](recipe_optimization/a3a_control/manifest.json) | Complete: 100 steps, all six evals | 36.06% | 40.96% | Reference | Reuse recorded evidence; stability caveat |
-| A4 native cosine | `gemma4_e2b_rl05fp32_a4cos_16n64g_s100_seed1_1023_2105` via `g4run_pr12.sh A4`; [config diff](recipe_optimization/a4_cosine/config_diff.json) | Running since 21:05Z; launch gate passed (config, `Total steps: 100`, logged LR at steps 1–2) | — | — | — | — |
-| A5 T=1 | Not launched; `g4run_pr12.sh A5` | Pending; starts after A4 is recorded and reviewed | — | — | — | — |
+| A4 native cosine | `gemma4_e2b_rl05fp32_a4cos_16n64g_s100_seed1_1023_2105` via `g4run_pr12.sh A4`; [config diff](recipe_optimization/a4_cosine/config_diff.json), [comparison](recipe_optimization/a4_cosine/a4_vs_a3a_s100.md) | **Complete**: 100 steps, all six evals; guards PASS; no stop rule; LR sequence exact | 35.82% | **40.38%** | **−0.58 [−1.60, +0.36]** | 3.67e8 tokens (A3a 3.31e8); 3 h 16 min; **not a candidate** (§A4 result) |
+| A5 T=1 | Not launched; `g4run_pr12.sh A5` | **Paused** (user decision 2026-10-24: PR #12 set aside while GSM8K, PR #14, proceeds) | — | — | — | — |
 | A6 smoke (2 steps) | `gemma4_e2b_rl05fp32_a6n16smoke_16n64g_s2_seed1_1023_2039` via `g4run_pr12.sh A6SMOKE` | **Passed** (§4.3); not an accuracy result | — | — | — | 2 steps: 1.28× step time and 2.0× tokens at step 2; memory unchanged |
-| A6 n=16 | Not launched; `g4run_pr12.sh A6` | Pending | — | — | — | — |
+| A6 n=16 | Not launched; `g4run_pr12.sh A6` | **Paused** (same decision) | — | — | — | — |
 
 Keep completed, null, failed and aborted arms in this ledger. Link commands, manifests, logs, per-question results and plots beside each result. Update the PR description around the final experiments as they are completed.
 

@@ -1,0 +1,56 @@
+{
+ "actor/entropy": {
+  "a4": {
+   "median_1_20": 0.2038721889257431,
+   "median_81_100": 0.3367544114589691,
+   "drift": 0.132882222533226
+  },
+  "a3a": {
+   "median_1_20": 0.20693285763263702,
+   "median_81_100": 0.3284469097852707,
+   "drift": 0.12151405215263367
+  },
+  "late_lower": false,
+  "drift_reduction": -0.09355436823317187,
+  "drift_reduced_25pct": false
+ },
+ "rollout_corr/k3_kl": {
+  "a4": {
+   "median_1_20": 0.0007069388229865581,
+   "median_81_100": 0.0009960460010915995,
+   "drift": 0.0002891071781050414
+  },
+  "a3a": {
+   "median_1_20": 0.0007227142050396651,
+   "median_81_100": 0.0009621028730180115,
+   "drift": 0.00023938866797834635
+  },
+  "late_lower": false,
+  "drift_reduction": -0.20768948900786022,
+  "drift_reduced_25pct": false
+ },
+ "step100_vs_a3a": {
+  "delta_pp": -0.58,
+  "boot95_pp": [
+   -1.6,
+   0.36
+  ],
+  "ci_includes_zero": true
+ },
+ "no_stop_rule": true,
+ "stability_candidate": false,
+ "cost": {
+  "timing_s_step": {
+   "mean": 66.66295422433002,
+   "median": 64.26738148149934,
+   "p90": 80.07871266899929
+  },
+  "a3a_timing_s_step": {
+   "mean": 63.10750366324442,
+   "median": 61.37071059698064,
+   "p90": 75.83384599999408
+  },
+  "total_num_tokens": 367100304.0,
+  "a3a_total_num_tokens": 331011147.0
+ }
+}
