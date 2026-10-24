@@ -1,0 +1,13 @@
+# step-clock install lines: 8
+[36m(pid=51901, ip=10.4.34.10)[0m [GEMMA4-RUN-HOOKS] 2026-10-24T08:48:51Z pid=51901 step clock installed on verl.utils.tracking.Tracking.log (wallclock/coordinator_unix, wallclock/interval_s)
+[36m(pid=60762, ip=10.4.38.10)[0m [GEMMA4-RUN-HOOKS] 2026-10-24T08:49:09Z pid=60762 step clock installed on verl.utils.tracking.Tracking.log (wallclock/coordinator_unix, wallclock/interval_s)
+[36m(pid=61956, ip=10.4.21.9)[0m [GEMMA4-RUN-HOOKS] 2026-10-24T08:49:12Z pid=61956 step clock installed on verl.utils.tracking.Tracking.log (wallclock/coordinator_unix, wallclock/interval_s)[32m [repeated 63x across cluster] (Ray deduplicates logs by default. Set RAY_DEDUP_LOGS=0 to disable log deduplication, or see https://docs.ray.io/en/master/ray-observability/user-guides/configure-logging.h
+# other run-hook lines (errors would appear here):
+# checkpoint decisions:
+[36m(TaskRunner pid=51901, ip=10.4.34.10)[0m [GEMMA4-CKPT-STEPS] 2026-10-24T09:20:36Z pid=51901 skip save at global_step=50 (allowed [100, 250])
+[36m(TaskRunner pid=51901, ip=10.4.34.10)[0m [GEMMA4-CKPT-STEPS] 2026-10-24T09:49:16Z pid=51901 save at global_step=100 (allowed [100, 250])
+[36m(TaskRunner pid=51901, ip=10.4.34.10)[0m [GEMMA4-CKPT-STEPS] 2026-10-24T09:49:57Z pid=51901 saved global_step=100 in 40.4s
+[36m(TaskRunner pid=51901, ip=10.4.34.10)[0m [GEMMA4-CKPT-STEPS] 2026-10-24T10:20:14Z pid=51901 skip save at global_step=150 (allowed [100, 250])
+[36m(TaskRunner pid=51901, ip=10.4.34.10)[0m [GEMMA4-CKPT-STEPS] 2026-10-24T10:51:19Z pid=51901 skip save at global_step=200 (allowed [100, 250])
+[36m(TaskRunner pid=51901, ip=10.4.34.10)[0m [GEMMA4-CKPT-STEPS] 2026-10-24T11:23:43Z pid=51901 save at global_step=250 (allowed [100, 250])
+[36m(TaskRunner pid=51901, ip=10.4.34.10)[0m [GEMMA4-CKPT-STEPS] 2026-10-24T11:24:05Z pid=51901 saved global_step=250 in 22.0s

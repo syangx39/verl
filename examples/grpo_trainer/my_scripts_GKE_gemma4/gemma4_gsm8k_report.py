@@ -19,7 +19,8 @@ rollout dumps (v2 / v1 accuracy, boxed rate, all-correct / all-wrong / mixed pro
 between updates from the dump timestamps.
 Timing: internal step time is timing_s/step: generation through the rollout dump, including a checkpoint save.
 The actual interval between updates comes from the best available coordinator-side clock:
-  * coordinator_clock: wallclock/interval_s, which gemma4_run_hooks adds at every Tracking.log call in the TaskRunner;
+  * coordinator_clock: wallclock/interval_s, which gemma4_run_hooks adds at every Tracking.log call in the TaskRunner,
+    read from metrics.jsonl and the console metric lines and compared where both have it (interval_clock_check);
   * tqdm_elapsed: the TaskRunner's progress-bar elapsed time, at 1 s resolution;
   * dump_mtime: rollout-dump modification times, approximate and not valid after copying files.
 The interval also covers the work outside that timer: validation, logging and data loading. Both are summarized over
@@ -163,24 +164,36 @@ def step_intervals(steps, train, log_text, metrics_jsonl):
   tqdm_elapsed       elapsed time of the TaskRunner's own progress bar, printed after each update's logging
                      (1 s resolution)
   dump_mtime         modification times of consecutive rollout dumps (approximate; not valid after copying files)
+
+  The coordinator clock is read from metrics.jsonl and from the console metric lines (the same dict, logged by both
+  backends); a value missing from one is filled from the other, and the two are compared where both exist. A file
+  read through GCS-fuse can be stale or end in a partial line while the run is going; partial lines are skipped.
+  Returns (intervals, source, check).
   """
-  clock = {}
+  from_file = {}
   if metrics_jsonl and os.path.exists(metrics_jsonl):
-    for rec in jsonl(metrics_jsonl):
-      v = rec.get("data", {}).get("wallclock/interval_s")
-      if v is not None and rec.get("step", 0) > 0:
-        clock[int(rec["step"])] = float(v)
-  if not clock:
-    clock = {s: kv["wallclock/interval_s"] for s, kv in steps.items() if s > 0 and "wallclock/interval_s" in kv}
-  if clock:
-    return clock, "coordinator_clock"
+    with open(metrics_jsonl) as f:
+      for ln in f:
+        try:
+          rec = json.loads(ln)
+        except ValueError:
+          continue
+        v = rec.get("data", {}).get("wallclock/interval_s")
+        if v is not None and rec.get("step", 0) > 0:
+          from_file[int(rec["step"])] = float(v)
+  from_console = {s: kv["wallclock/interval_s"] for s, kv in steps.items() if s > 0 and "wallclock/interval_s" in kv}
+  if from_file or from_console:
+    both = sorted(set(from_file) & set(from_console))
+    check = {"metrics_jsonl": len(from_file), "console": len(from_console), "both": len(both),
+             "max_abs_diff_s": max((abs(from_file[s] - from_console[s]) for s in both), default=None)}
+    return {**from_console, **from_file}, "coordinator_clock", check
   el = {}
   for m in TQDM_RE.finditer(log_text):
     n = int(m.group(1))
     el.setdefault(n, int(m.group(2) or 0) * 3600 + int(m.group(3)) * 60 + int(m.group(4)))
   if len(el) > 2:
-    return {n: el[n] - el[n - 1] for n in sorted(el) if n - 1 in el and n > 0}, "tqdm_elapsed"
-  return {s: t["mtime_interval_s"] for s, t in train.items() if "mtime_interval_s" in t}, "dump_mtime"
+    return {n: el[n] - el[n - 1] for n in sorted(el) if n - 1 in el and n > 0}, "tqdm_elapsed", {"tqdm_lines": len(el)}
+  return {s: t["mtime_interval_s"] for s, t in train.items() if "mtime_interval_s" in t}, "dump_mtime", {}
 
 
 def timing_section(steps, intervals, source, eval_steps, ckpt_steps, launch_utc, end_ts, start=20, end=None):
@@ -452,9 +465,10 @@ def main():
   ckdir = os.path.join(a.ckpt_root, a.exp)
   ckpts = sorted(x for x in os.listdir(ckdir) if x.startswith("global_step_")) if os.path.isdir(ckdir) else []
   eval_steps = [e["step"] for e in ev]
-  intervals, source = step_intervals(steps, train, log_text, os.path.join(dump, "metrics.jsonl"))
+  intervals, source, clock_check = step_intervals(steps, train, log_text, os.path.join(dump, "metrics.jsonl"))
   tim = timing_section(steps, intervals, source, [s for s in eval_steps if s > 0], ck, launch, end_ts, a.window_start,
                        a.window_end)
+  tim["interval_clock_check"] = clock_check
   tr_steps = sorted(s for s in steps if s > 0 and "response_length/mean" in steps[s])
   gen_tokens = sum(steps[s]["response_length/mean"] * 2048 for s in tr_steps)
   rc = re.findall(r"main_ppo finished with exit_code=(\d+)", log_text)
@@ -490,7 +504,7 @@ def main():
   print(f"timing [{t['window']}, interval source {t['interval_source']}]: internal {fmt(t['internal_step_s'])}; "
         f"actual interval {fmt(t['actual_interval_s'])}; paired gap {fmt(t['paired_gap_s'])}; "
         f"components {t['internal_components_median_s']}; launch-to-finish {t['launch_to_finish_h']} h, "
-        f"GPU-hours {t['gpu_hours']}, train tokens {gen_tokens:.3e}")
+        f"GPU-hours {t['gpu_hours']}, train tokens {gen_tokens:.3e}; clock check {clock_check}")
   print("wrote", a.out)
 
 
