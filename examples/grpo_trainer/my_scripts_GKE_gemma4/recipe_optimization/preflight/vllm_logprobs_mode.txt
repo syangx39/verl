@@ -1,0 +1,9 @@
+/workspace/verl-pin/.venv/lib/python3.12/site-packages/vllm/v1/sample/ops/topk_topp_sampler.py:147:        elif self.logprobs_mode == "processed_logprobs":
+/workspace/verl-pin/.venv/lib/python3.12/site-packages/vllm/v1/sample/ops/topk_topp_sampler.py:200:        elif self.logprobs_mode == "processed_logprobs":
+/workspace/verl-pin/.venv/lib/python3.12/site-packages/vllm/v1/sample/rejection_sampler.py:71:        self.is_processed_logprobs_mode = logprobs_mode in PROCESSED_LOGPROBS_MODES
+/workspace/verl-pin/.venv/lib/python3.12/site-packages/vllm/v1/sample/rejection_sampler.py:144:            if self.is_processed_logprobs_mode
+/workspace/verl-pin/.venv/lib/python3.12/site-packages/vllm/v1/sample/rejection_sampler.py:156:        if not self.is_processed_logprobs_mode:
+/workspace/verl-pin/.venv/lib/python3.12/site-packages/vllm/v1/sample/rejection_sampler.py:193:                target_logits if self.is_processed_logprobs_mode else raw_target_logits,
+/workspace/verl-pin/.venv/lib/python3.12/site-packages/vllm/v1/sample/sampler.py:103:        sampled, processed_logprobs = self.sample(logits, sampling_metadata)
+/workspace/verl-pin/.venv/lib/python3.12/site-packages/vllm/v1/sample/sampler.py:104:        if processed_logprobs is not None:
+197:    logprobs_mode: Optional[str] = "processed_logprobs"

@@ -1,0 +1,8 @@
+OK   positive: declared template change: rc=0
+OK   negative: same B in strict mode: rc=1
+OK   negative: changed question: rc=1
+OK   negative: changed ground truth: rc=1
+OK   negative: A not double-wrapped: rc=1
+OK   negative: eval prompts changed: rc=1
+OK   positive: strict mode, identical prompts: rc=0
+PASS: 0 failure(s)

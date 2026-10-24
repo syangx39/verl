@@ -1,0 +1,9 @@
+OK   n=8 indicator
+OK   n=16 c=0/16 -> 0
+OK   n=16 c=1 -> 0.5
+OK   n=16 c=8
+OK   4x16 run with --shape passes; mixed 50%, n8-equivalent lower
+OK   --shape 4x8 on an n=16 run fails
+OK   ragged 15/17 groups fail under --shape
+OK   n=8 run: mixed_n8eq == mixed
+PASS: 0 failure(s)

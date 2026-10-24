@@ -1,0 +1,39 @@
+OK   consecutive: 3 in a row
+OK   consecutive: broken by False
+OK   consecutive: broken by None
+OK   consecutive: broken by a step gap
+OK   consecutive: later run
+OK   parse: np / tensor wrappers, nan / inf kept, strings skipped
+OK   bootstrap: exact point estimate -2.0 pp
+OK   clean A4 run: no trigger, no alert
+OK   split metric line: alert, k3_kl unevaluable at that step (not zero)
+OK   A4 train_acc: triggers at the 3rd consecutive step
+OK   A4 train_acc: -6.25 pp in between breaks the run
+OK   A4 train_acc: partial middle dump is unevaluable, no trigger
+OK   A4 train_acc: prompt identity mismatch -> unevaluable + alert
+OK   A5: persistent initial offset alone never triggers
+OK   same data under the matched rule triggers at step 3 (contrast)
+OK   A5: further drop from step 6 triggers on the 3rd step
+OK   A5: drops in steps 1-5 only never trigger
+OK   A6: 4 x 16 groups vs a 4 x 8 reference are evaluated
+OK   A6 dumps read as n=8 are never complete
+OK   A6: -12.5 pp on 3 consecutive steps triggers
+OK   A6: a 15-row group makes the step invalid (alert, unevaluable)
+OK   missing </answer> 12.5 % x3 triggers
+OK   missing </answer> 9.4 % x3 does not trigger
+OK   k3_kl > 0.003 x3 triggers
+OK   k3_kl: a missing metric line breaks the run
+OK   nonfinite metric triggers at its step
+OK   heldout: -5 pp with CI < 0 triggers at that eval; -1.5 pp does not
+OK   heldout: -2 pp but interval spans 0 -> no trigger
+OK   guard: a failing first-forward record triggers
+OK   process match: exact experiment only
+OK   live --act: SIGTERM only the monitored driver, evidence written
+OK   live: final status marks the arm early-stopped
+OK   live: finished run without triggers exits 0 with a final status
+SKIP real log gemma4_e2b_rl05fp32_a3lr4e6_16n64g_s100_seed1_1023_1116 (not present)
+SKIP real log gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753 (not present)
+SKIP real log gemma4_e2b_rl05fp32_16n64g_s200_seed1_1022_2019 (not present)
+SKIP real log gemma4_e2b_rl05fp32_a1fmt0_16n64g_s100_seed1_1023_0058 (not present)
+SKIP real log gemma4_e2b_rl05fp32_a2wrap1_16n64g_s100_seed1_1023_0423 (not present)
+PASS: 0 failure(s)

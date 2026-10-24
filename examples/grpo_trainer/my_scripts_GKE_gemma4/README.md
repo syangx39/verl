@@ -197,6 +197,12 @@ Component columns are per-component medians, so they do not sum to the step medi
 | `gemma4_ab_compare.py` | Paired comparison of two runs with the same seed / data order: held-out by validated `qid` (bootstrap), training accuracy on identical prompts per step (windows 1–10, 11–20, then every 20 steps), diagnostics from the driver logs, optional 2x2 figure |
 | `gemma4_signal_density.py` | GRPO signal density per step window from training dumps (correctness-mixed / all-correct / all-wrong / format-or-penalty-only groups, sampled accuracy); reads Gemma-4 and Qwen3 dumps alike |
 | `update_precision/` | PR #10 evidence: reference manifest, audit, probe summaries and self-test, FP32 vs BF16 A/B (tables, figure, guard check), FP32 seed 1 steps 0–100 (`fp32_seed1_100steps/`: comparison with BF16, same-recipe reproducibility, eval report, signal density, guard check) |
+| `RECIPE_OPTIMIZATION_PLAN.md` | PR #12: 100-step seed-1 screens A4 (native cosine), A5 (T=1), A6 (n=16) against A3a; stop rules (§4.1), implementation (§4.2), result ledger |
+| `recipe_optimization/` | PR #12: `launch/g4run_pr12.sh` (the only launcher for A4 / A5 / A6 / A6SMOKE), `a3a_control/` (control manifest, resolved runtime config), `a4_cosine/` (exported learning rates) and per-arm evidence |
+| `gemma4_stop_monitor.py` / `test_gemma4_stop_monitor.py` | PR #12 §4.1 stop rules on complete evidence only (256 × n dumps, eval dumps, metric lines), metric latency, experiment-specific termination, `--replay`; self-test incl. replay of the committed PR #11 logs |
+| `gemma4_config_diff.py` / `test_gemma4_config_diff.py` | Compares the TaskRunner-printed runtime configuration of a run with a reference; fails on any undeclared difference (`--expect` / `--assert`) |
+| `gemma4_lr_schedule_export.py` | Exports and checks A4's 100 update-used and logged learning rates (pure re-implementation, or verl's own scheduler with `--use-verl`) |
+| `test_gemma4_ab_compare_groups.py` / `test_gemma4_signal_density_shapes.py` | Per-run batch shapes (n=8 vs n=16) for the comparison and signal-density tools: valid and incomplete / ragged / mismatched cases |
 
 ---
 

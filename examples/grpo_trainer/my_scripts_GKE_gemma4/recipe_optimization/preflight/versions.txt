@@ -1,0 +1,6 @@
+python 3.12.3
+torch 2.13.0+cu130 /workspace/verl-pin/.venv/lib/python3.12/site-packages/torch/__init__.py
+vllm 0.29.0 /workspace/verl-pin/.venv/lib/python3.12/site-packages/vllm/__init__.py
+ray 2.55.1 /workspace/verl-pin/.venv/lib/python3.12/site-packages/ray/__init__.py
+transformers 5.12.1 /workspace/verl-pin/.venv/lib/python3.12/site-packages/transformers/__init__.py
+verl 0.10.0.dev /workspace/verl-pin/verl/__init__.py

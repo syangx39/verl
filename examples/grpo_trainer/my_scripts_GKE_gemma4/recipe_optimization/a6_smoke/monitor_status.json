@@ -1,0 +1,61 @@
+{
+ "a5_baseline_pp": null,
+ "acc_rule": "matched",
+ "acting": false,
+ "alerts": [],
+ "arm": "A6",
+ "arm_status": "finished",
+ "evidence": {
+  "dump_dir": "/workspace/meta-RL/logs/gemma4_eval/gemma4_e2b_rl05fp32_a6n16smoke_16n64g_s2_seed1_1023_2039",
+  "guard_dir": "/workspace/meta-RL/logs/gemma4_guard/gemma4_e2b_rl05fp32_a6n16smoke_16n64g_s2_seed1_1023_2039",
+  "log": "/workspace/meta-RL/logs/gemma4_e2b_rl05fp32_a6n16smoke_16n64g_s2_seed1_1023_2039.log",
+  "ref_dump_dir": "/workspace/meta-RL/logs/gemma4_eval/gemma4_e2b_rl05fp32_a3lr2e6_16n64g_s100_seed1_1023_0753"
+ },
+ "exp": "gemma4_e2b_rl05fp32_a6n16smoke_16n64g_s2_seed1_1023_2039",
+ "final": true,
+ "first_forward_pass_records": 64,
+ "group_size": 16,
+ "heldout": {},
+ "last_complete_eval": null,
+ "last_complete_train_dump": 2,
+ "last_metric_step": 2,
+ "latency": {
+  "max_s": 31.0,
+  "median_s": 30.85,
+  "metric_minus_dump_s": {
+   "1": 31.0,
+   "2": 30.7
+  },
+  "n": 2
+ },
+ "launcher_rc": 0,
+ "not_complete": {},
+ "per_step": {
+  "1": {
+   "acc": 55.664,
+   "d": -0.146,
+   "entropy": 0.20654502511024475,
+   "k3_kl": 0.000722058117389679,
+   "lr": 2e-06,
+   "missing_answer_pct": 0.977,
+   "ref_acc": 55.811
+  },
+  "2": {
+   "acc": 61.255,
+   "d": 0.024,
+   "entropy": 0.2022520750761032,
+   "k3_kl": 0.0007244941662065685,
+   "lr": 2e-06,
+   "missing_answer_pct": 0.317,
+   "ref_acc": 61.23
+  }
+ },
+ "started_utc": "2026-10-23T20:39:22Z",
+ "streaks": {
+  "k3_kl": 0,
+  "missing_answer": 0,
+  "train_acc": 0
+ },
+ "triggers": [],
+ "updated_utc": "2026-10-23T21:02:07Z"
+}
