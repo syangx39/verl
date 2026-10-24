@@ -7,6 +7,7 @@ glued onto the end of a dict line. Cases:
   - identical configs except identity keys -> PASS;
   - a declared change (--expect) -> PASS; the same change undeclared -> FAIL; a wrong declared value -> FAIL;
   - --assert restating the reference value -> PASS; --assert on a misspelt key -> FAIL;
+  - --assert with a list literal (trainer.logger=["console","tensorboard"]) -> PASS; a different list -> FAIL;
   - an extra undeclared key in the run -> FAIL;
   - if the committed PR #11 logs exist: A3b vs A3a declaring only LR 4e-6 -> PASS (LR + 6 identity keys), undeclared
     -> FAIL.
@@ -121,6 +122,20 @@ def main() -> int:
             "asserted-MISMATCH",
         ),
         ("extra undeclared key", ("ref.log", "extra.log"), (), False, "data.shuffle"),
+        (
+            "assert a list value (JSON-style literal)",
+            ("ref.log", "same.log"),
+            ("--assert", 'trainer.logger=["console","tensorboard"]'),
+            True,
+            "asserted",
+        ),
+        (
+            "assert a wrong list value",
+            ("ref.log", "same.log"),
+            ("--assert", 'trainer.logger=["console","file"]'),
+            False,
+            "asserted-MISMATCH",
+        ),
     ]
     fails = 0
     for name, (a, b), extra, want_ok, want in cases:

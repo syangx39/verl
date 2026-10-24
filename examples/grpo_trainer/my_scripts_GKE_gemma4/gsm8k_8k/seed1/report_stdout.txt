@@ -13,5 +13,5 @@ eval 220: v2 92.87% v1 61.87% boxed 100.00% d +12.28 pp [+10.24, +14.40] w->r 18
 eval 240: v2 92.72% v1 62.02% boxed 99.85% d +12.13 pp [+10.08, +14.18] w->r 183 r->w 23 trunc 2
 eval 250: v2 92.80% v1 61.41% boxed 100.00% d +12.21 pp [+10.16, +14.25] w->r 183 r->w 22 trunc 0
 finished=True exit=0 last_step=250 ckpt saved=[100, 250] skipped=[50, 150, 200] dirs=['global_step_100', 'global_step_250']
-timing: internal median 31.7s (n=218), actual interval median 78.9s (n=206), components {'timing_s/gen': 16.258563590998165, 'timing_s/update_actor': 8.13364593300139, 'timing_s/update_weights': 4.1352488699994865, 'timing_s/dump_rollout_generations': 1.3949841355024546}, launch-to-finish 5.81583216143979 h, GPU-hours 372.21325833214655, train tokens 2.857e+08
+timing [steps 20-250 excluding eval/checkpoint steps, interval source tqdm_elapsed]: internal median 31.7s mean 33.1s p90 41.2s (n=218); actual interval median 78.5s mean 81.1s p90 90.0s (n=218); paired gap median 46.3s mean 48.0s p90 52.2s (n=218); components {'timing_s/gen': 16.258563590998165, 'timing_s/update_actor': 8.13364593300139, 'timing_s/update_weights': 4.1352488699994865, 'timing_s/dump_rollout_generations': 1.3949841355024546}; launch-to-finish 5.81583216143979 h, GPU-hours 372.21325833214655, train tokens 2.857e+08
 wrote /tmp/seed1_final

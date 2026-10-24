@@ -10,6 +10,7 @@
 #          apply a nonzero FP32 update) and saves no checkpoint (Ray allows one setup hook per job).
 #   SEEDk  the fixed 250-step run from the initial checkpoint, full eval every 20 updates and at 250, full
 #          checkpoints only at CKPT_STEPS (default 100,250; SAVE_FREQ 50 reaches both).
+#   PERF   step-time acceptance: the SEED1 configuration, stopped after STOP_AFTER_STEPS (default 30) updates.
 #
 # The driver runs with PYTHONUNBUFFERED=1 (logging only: the per-step metric line reaches the driver log as the step
 # finishes). The experiment name is written to /tmp/g4_gsm8k_<mode>.current and appended to
@@ -18,7 +19,7 @@
 #   nohup setsid bash gsm8k_8k/launch/g4run_gsm8k.sh SMOKE > /dev/null 2>&1 < /dev/null &
 # =============================================================================
 set -u
-MODE=${1:?usage: g4run_gsm8k.sh SMOKE|SEED1|SEED2|SEED3}
+MODE=${1:?usage: g4run_gsm8k.sh SMOKE|PERF|SEED1|SEED2|SEED3}
 SCRIPT_DIR=/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gemma4
 LOGS=/workspace/meta-RL/logs
 source /workspace/setup_env.sh
@@ -39,6 +40,13 @@ case "${MODE}" in
     SEED=${MODE#SEED}
     EXP=gemma4_e2b_gsm8k8k_16n64g_s250_seed${SEED}_${TS}
     EXTRA_ENV=(SAVE_FREQ=${SAVE_FREQ:-50} CKPT_STEPS=${CKPT_STEPS:-100,250}) ;;
+  PERF)
+    # Step-time acceptance run: the SEED1 configuration exactly (seed 1 data order and 250-step LR horizon, eval
+    # every 20, CKPT_STEPS=100,250 so no checkpoint is reached), stopped after STOP_AFTER_STEPS updates (default 30).
+    STOP_AFTER=${STOP_AFTER_STEPS:-30}
+    SEED=1
+    EXP=gemma4_e2b_gsm8k8k_perf_16n64g_s250stop${STOP_AFTER}_seed1_${TS}
+    EXTRA_ENV=(SAVE_FREQ=50 CKPT_STEPS=100,250) ;;
   *) echo "unknown mode ${MODE}" >&2; exit 2 ;;
 esac
 LOG=${LOGS}/${EXP}.log

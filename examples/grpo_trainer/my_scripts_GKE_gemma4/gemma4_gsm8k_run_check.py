@@ -15,7 +15,10 @@ Reads /workspace/meta-RL/logs/<EXP>.log, /workspace/meta-RL/logs/gemma4_gsm8k/<E
               score of every row must equal the v2 reward recomputed offline
   metrics     the per-step console metrics: LR, grad norm, losses, entropy (actor/entropy_loss: the token entropy
               of the update batch; no bonus is applied), every actor/rollout_corr/* tag (token TIS), rewards,
-              lengths, timing and memory
+              lengths, timing and memory, and the coordinator step clock wallclock/interval_s when present
+  jsonl       <dump>/metrics.jsonl from verl's file logger: one record per logged step without duplicates or gaps,
+              the required keys in every training record (core metrics, every actor/rollout_corr/* tag,
+              wallclock/coordinator_unix), and every value equal to the console line of the same step
 """
 import argparse
 import glob
@@ -31,7 +34,8 @@ CORE_KEYS = ["actor/lr", "actor/grad_norm", "actor/pg_loss", "actor/ppo_kl", "ac
              "response_length/mean", "response_length/max", "response_length/clip_ratio",
              "timing_s/step", "timing_s/gen", "timing_s/update_actor", "timing_s/update_weights",
              "timing_s/save_checkpoint", "timing_s/testing", "actor/perf/max_memory_allocated_gb",
-             "actor/perf/max_memory_reserved_gb", "perf/total_num_tokens"]
+             "actor/perf/max_memory_reserved_gb", "perf/total_num_tokens", "wallclock/interval_s"]
+NOT_EVERY_STEP = {"timing_s/save_checkpoint", "timing_s/testing", "wallclock/interval_s"}
 
 
 def parse_metric_line(text):
@@ -172,6 +176,40 @@ def main():
         print(f"  {k:52s} {cells}")
     print("actor/rollout_corr tags:", len(rc_keys), "| missing core keys:",
           [k for k in CORE_KEYS if not any(k in steps[s] for s in steps)])
+
+    # metrics JSONL from verl's file logger: one record per logged step, complete, equal to the console values
+    mj = os.path.join(dump, "metrics.jsonl")
+    if not os.path.exists(mj):
+        print("metrics.jsonl: MISSING", mj)
+    else:
+        recs = jsonl(mj)
+        st = [int(r["step"]) for r in recs]
+        seen, dup = set(), set()
+        for s in st:
+            (dup if s in seen else seen).add(s)
+        gaps = [s for s in range(min(seen), max(seen) + 1) if s not in seen] if seen else []
+        need = [k for k in CORE_KEYS if k not in NOT_EVERY_STEP] + rc_keys + ["wallclock/coordinator_unix"]
+        data = {}
+        for r in recs:
+            data.setdefault(int(r["step"]), {}).update(r["data"])
+        incomplete = {s: [k for k in need if k not in d] for s, d in data.items() if s > 0}
+        incomplete = {s: v for s, v in incomplete.items() if v}
+        no_console = sorted(s for s in data if s not in steps)
+        worst, n_cmp = (0.0, None), 0
+        for s, d in data.items():
+            for k, v in d.items():
+                c = steps.get(s, {}).get(k)
+                if isinstance(v, (int, float)) and c is not None:
+                    n_cmp += 1
+                    rel = abs(v - c) / max(abs(c), 1e-12)
+                    if rel > worst[0]:
+                        worst = (rel, f"step {s} {k}: jsonl {v!r} console {c!r}")
+        iv = [d["wallclock/interval_s"] for s, d in data.items() if s > 0 and "wallclock/interval_s" in d]
+        print(f"metrics.jsonl: {len(recs)} records, steps {min(seen) if seen else '-'}..{max(seen) if seen else '-'}, "
+              f"duplicates {sorted(dup)}, gaps {gaps[:10]}, records with missing required keys {len(incomplete)} "
+              f"{dict(list(incomplete.items())[:3])}, steps absent from the console {no_console[:10]}, "
+              f"values compared with the console {n_cmp}, worst relative difference {worst[0]:.2e} ({worst[1]}), "
+              f"records with wallclock/interval_s {len(iv)}")
 
 
 if __name__ == "__main__":

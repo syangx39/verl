@@ -17,10 +17,14 @@ Eval (all 1,319 questions, greedy) per checkpoint:
 Training per update: the console metrics (LR, grad norm, loss, entropy, rollout correction, lengths, timing), the
 rollout dumps (v2 / v1 accuracy, boxed rate, all-correct / all-wrong / mixed prompt groups) and the actual interval
 between updates from the dump timestamps.
-Timing: internal step time is timing_s/step (generation through the rollout dump, including a checkpoint save). The
-actual interval between updates is taken from consecutive rollout-dump timestamps; it also covers the work outside that
-timer: validation, console / TensorBoard logging and data loading. Both are summarized over steps 20-250 excluding eval
-and checkpoint steps (intervals that contain an eval are excluded), plus the launch-to-finish duration.
+Timing: internal step time is timing_s/step: generation through the rollout dump, including a checkpoint save.
+The actual interval between updates comes from the best available coordinator-side clock:
+  * coordinator_clock: wallclock/interval_s, which gemma4_run_hooks adds at every Tracking.log call in the TaskRunner;
+  * tqdm_elapsed: the TaskRunner's progress-bar elapsed time, at 1 s resolution;
+  * dump_mtime: rollout-dump modification times, approximate and not valid after copying files.
+The interval also covers the work outside that timer: validation, logging and data loading. Both are summarized over
+the steady-state window (default steps 20-250, --window-start; eval and checkpoint steps excluded), together with
+the per-update paired gap (interval minus timing_s/step) and the launch-to-finish duration.
 Figures: <label>_eval_curve.png, <label>_eval_flips.png, <label>_training.png, <label>_timing.png.
 """
 import argparse
@@ -144,33 +148,73 @@ def train_section(train_dir, steps):
                    "boxed": sum(float(r["fmt"]) for r in rows) / n, **kinds, "rows": n}
   for s in sorted(mtimes):
     if s - 1 in mtimes:
-      rows_out[s]["interval_s"] = mtimes[s] - mtimes[s - 1]
+      rows_out[s]["mtime_interval_s"] = mtimes[s] - mtimes[s - 1]
   return rows_out
 
 
-def timing_section(steps, train, eval_steps, ckpt_steps, launch_utc, end_ts):
-  last = max(steps)
+TQDM_RE = re.compile(r"Training Progress:\s*\d+%\|[^|]*\|\s*(\d+)/\d+ \[(?:(\d+):)?(\d+):(\d+)<")
+
+
+def step_intervals(steps, train, log_text, metrics_jsonl):
+  """Per-update actual interval and its source, best first.
+
+  coordinator_clock  wallclock/interval_s logged by the TaskRunner (gemma4_run_hooks step clock): read at each
+                     Tracking.log call, so interval k = log(k) - log(k-1)
+  tqdm_elapsed       elapsed time of the TaskRunner's own progress bar, printed after each update's logging
+                     (1 s resolution)
+  dump_mtime         modification times of consecutive rollout dumps (approximate; not valid after copying files)
+  """
+  clock = {}
+  if metrics_jsonl and os.path.exists(metrics_jsonl):
+    for rec in jsonl(metrics_jsonl):
+      v = rec.get("data", {}).get("wallclock/interval_s")
+      if v is not None and rec.get("step", 0) > 0:
+        clock[int(rec["step"])] = float(v)
+  if not clock:
+    clock = {s: kv["wallclock/interval_s"] for s, kv in steps.items() if s > 0 and "wallclock/interval_s" in kv}
+  if clock:
+    return clock, "coordinator_clock"
+  el = {}
+  for m in TQDM_RE.finditer(log_text):
+    n = int(m.group(1))
+    el.setdefault(n, int(m.group(2) or 0) * 3600 + int(m.group(3)) * 60 + int(m.group(4)))
+  if len(el) > 2:
+    return {n: el[n] - el[n - 1] for n in sorted(el) if n - 1 in el and n > 0}, "tqdm_elapsed"
+  return {s: t["mtime_interval_s"] for s, t in train.items() if "mtime_interval_s" in t}, "dump_mtime"
+
+
+def timing_section(steps, intervals, source, eval_steps, ckpt_steps, launch_utc, end_ts, start=20, end=None):
+  last = max(steps) if end is None else min(end, max(steps))
   busy = set(eval_steps) | set(ckpt_steps)
-  win = [s for s in range(20, last + 1) if s in steps and s not in busy]
+  win = [s for s in range(start, last + 1) if s in steps and s not in busy]
+  # coordinator_clock / tqdm_elapsed: interval k covers update k (and its validation); dump_mtime: interval k covers
+  # the tail of update k-1 (validation, logging) and the head of update k.
+  ok = (lambda s: s - 1 not in busy) if source == "dump_mtime" else (lambda s: True)
+  pair = [s for s in win if "timing_s/step" in steps[s] and s in intervals and ok(s)]
   internal = [steps[s]["timing_s/step"] for s in win if "timing_s/step" in steps[s]]
-  interval = [train[s]["interval_s"] for s in win if s in train and "interval_s" in train[s] and s - 1 not in busy]
+  interval = [intervals[s] for s in pair]
+  gap = [intervals[s] - steps[s]["timing_s/step"] for s in pair]
 
   def summ(v):
+    if not v:
+      return {"n": 0}
     v = sorted(v)
     return {"n": len(v), "median": statistics.median(v), "mean": statistics.mean(v), "p90": v[int(0.9 * (len(v) - 1))]}
 
   comp = {k: statistics.median(steps[s][k] for s in win if k in steps[s])
-          for k in ("timing_s/gen", "timing_s/update_actor", "timing_s/update_weights", "timing_s/dump_rollout_generations")}
+          for k in ("timing_s/gen", "timing_s/update_actor", "timing_s/update_weights", "timing_s/dump_rollout_generations")
+          if any(k in steps[s] for s in win)}
   evals = {s: steps[s]["timing_s/testing"] for s in eval_steps if s in steps and "timing_s/testing" in steps[s]}
   saves = {s: steps[s]["timing_s/save_checkpoint"] for s in ckpt_steps if s in steps and "timing_s/save_checkpoint" in steps[s]}
   dur = (end_ts - launch_utc) if (launch_utc and end_ts) else None
-  return {"window": f"steps 20-{last} excluding eval/checkpoint steps", "internal_step_s": summ(internal),
-          "actual_interval_s": summ(interval), "internal_components_median_s": comp, "eval_s": evals,
-          "checkpoint_save_s": saves, "launch_to_finish_h": dur / 3600 if dur else None,
+  return {"window": f"steps {start}-{last} excluding eval/checkpoint steps", "interval_source": source,
+          "internal_step_s": summ(internal), "actual_interval_s": summ(interval),
+          "paired_gap_s": summ(gap), "paired_steps": len(pair), "internal_components_median_s": comp,
+          "eval_s": evals, "checkpoint_save_s": saves, "launch_to_finish_h": dur / 3600 if dur else None,
           "gpu_hours": 64 * dur / 3600 if dur else None}
 
 
-def plots(label, ev, steps, train, tim, qwen, out):
+def plots(label, ev, steps, train, tim, qwen, out, intervals):
   import matplotlib
   matplotlib.use("Agg")
   import matplotlib.pyplot as plt
@@ -326,7 +370,7 @@ def plots(label, ev, steps, train, tim, qwen, out):
   plt.close(fig)
 
   # 4. timing
-  fig, ax = plt.subplots(figsize=(11, 4.4))
+  fig, ax = plt.subplots(figsize=(11, 5.6))
   gen, upd, wsync = ser("timing_s/gen"), ser("timing_s/update_actor"), ser("timing_s/update_weights")
   step_t = ser("timing_s/step")
   other = [max(0.0, st - g - u - w) for st, g, u, w in zip(step_t, gen, upd, wsync)]
@@ -337,19 +381,32 @@ def plots(label, ev, steps, train, tim, qwen, out):
   b3 = [x + w for x, w in zip(b2, wsync)]
   ax.bar(ts, other, width=1.0, bottom=b3, color="C7", label="rest of timing_s/step (checkpoint save, reward, adv, dump)")
   busy = set(tim.get("eval_s", {})) | set(tim.get("checkpoint_save_s", {}))
-  iv = [train.get(s, {}).get("interval_s", float("nan")) if s - 1 not in busy else float("nan") for s in ts]
-  ax.plot(ts, iv, "k.", ms=3, label="actual interval between updates (dump timestamps; intervals containing an eval omitted)")
+  src = tim["interval_source"]
+  skip = (lambda s: s - 1 in busy) if src == "dump_mtime" else (lambda s: s in busy)
+  iv = [intervals.get(s, float("nan")) if not skip(s) else float("nan") for s in ts]
+  src_txt = {"coordinator_clock": "coordinator clock (TaskRunner Tracking.log)",
+             "tqdm_elapsed": "coordinator progress bar elapsed, 1 s resolution",
+             "dump_mtime": "rollout-dump mtimes, approximate"}[src]
+  ax.plot(ts, iv, "k.", ms=3, label=f"actual interval between updates ({src_txt}; intervals containing an eval omitted)")
   ax.axhline(tim["internal_step_s"]["median"], color="C1", ls="--", lw=1,
              label=f"internal step median {tim['internal_step_s']['median']:.1f} s")
-  ax.axhline(tim["actual_interval_s"]["median"], color="k", ls="--", lw=1,
-             label=f"actual interval median {tim['actual_interval_s']['median']:.1f} s")
-  ax.set_ylim(0, max(120, tim["actual_interval_s"]["p90"] * 1.5))
+  if tim["actual_interval_s"].get("n"):
+    ax.axhline(tim["actual_interval_s"]["median"], color="k", ls="--", lw=1,
+               label=f"actual interval median {tim['actual_interval_s']['median']:.1f} s")
+  vals = sorted(x for x in iv if not math.isnan(x))
+  ref = max((vals[int(0.9 * (len(vals) - 1))] if vals else 0.0), max(step_t), 40.0)
+  top = ref * 1.6
+  ax.set_ylim(0, top)
+  for s, x in zip(ts, iv):
+    if not math.isnan(x) and x > top:
+      ax.annotate(f"update {s}: {x:.0f} s (off scale)", (s, top * 0.97), fontsize=7, ha="center", va="top", color="k")
   ax.set_xlabel("update")
   ax.set_ylabel("seconds")
-  ax.set_title("Internal step time (timing_s/step) vs actual interval between updates\n"
-               "(the gap is mostly TensorBoard writes to the GCS-fuse bucket, ~48 s per update; eval runs outside timing_s/step)",
-               fontsize=10)
-  ax.legend(fontsize=7, ncol=2, loc="upper right")
+  g = tim.get("paired_gap_s", {})
+  gap_txt = (f"paired gap (interval - timing_s/step) over {tim['window']}: mean {g['mean']:.1f} s, median {g['median']:.1f} s, "
+             f"p90 {g['p90']:.1f} s" if g.get("n") else "no paired intervals")
+  ax.set_title("Internal step time (timing_s/step) vs actual interval between updates\n" + gap_txt, fontsize=10)
+  ax.legend(fontsize=7, ncol=2, loc="upper center", bbox_to_anchor=(0.5, -0.16))
   ax.grid(alpha=0.3, axis="y")
   fig.tight_layout()
   fig.savefig(os.path.join(out, f"{label}_timing.png"), dpi=130)
@@ -366,6 +423,8 @@ def main():
   ap.add_argument("--model", default="/workspace/meta-RL/models/gemma-4-E2B-it", help="tokenizer for output lengths")
   ap.add_argument("--cap", type=int, default=8192)
   ap.add_argument("--qwen-rescore", help="rescore_v1_v2.json: Qwen 3-seed eval curves under v2, plotted as context")
+  ap.add_argument("--window-start", type=int, default=20, help="first update of the steady-state timing window")
+  ap.add_argument("--window-end", type=int, default=None, help="last update of the timing window (default: last)")
   ap.add_argument("--no-plots", action="store_true")
   a = ap.parse_args()
   os.makedirs(a.out, exist_ok=True)
@@ -393,7 +452,9 @@ def main():
   ckdir = os.path.join(a.ckpt_root, a.exp)
   ckpts = sorted(x for x in os.listdir(ckdir) if x.startswith("global_step_")) if os.path.isdir(ckdir) else []
   eval_steps = [e["step"] for e in ev]
-  tim = timing_section(steps, train, [s for s in eval_steps if s > 0], ck, launch, end_ts)
+  intervals, source = step_intervals(steps, train, log_text, os.path.join(dump, "metrics.jsonl"))
+  tim = timing_section(steps, intervals, source, [s for s in eval_steps if s > 0], ck, launch, end_ts, a.window_start,
+                       a.window_end)
   tr_steps = sorted(s for s in steps if s > 0 and "response_length/mean" in steps[s])
   gen_tokens = sum(steps[s]["response_length/mean"] * 2048 for s in tr_steps)
   rc = re.findall(r"main_ppo finished with exit_code=(\d+)", log_text)
@@ -408,7 +469,7 @@ def main():
              "last_step": max(tr_steps) if tr_steps else None, "eval": ev,
              "checkpoints": {"saved_by_hook": ck, "skipped_by_hook": skipped, "dirs": ckpts},
              "timing": tim, "generated_train_tokens": gen_tokens,
-             "train": {str(s): {**train.get(s, {}), **{k: steps[s].get(k) for k in (
+             "train": {str(s): {**train.get(s, {}), "interval_s": intervals.get(s), **{k: steps[s].get(k) for k in (
                  "actor/lr", "actor/grad_norm", "actor/pg_loss", "actor/entropy_loss", "actor/rollout_corr/k3_kl",
                  "actor/rollout_corr/kl", "actor/rollout_corr/rollout_is_max", "actor/rollout_corr/rollout_is_mean",
                  "actor/rollout_corr/rollout_is_ratio_fraction_high", "actor/rollout_corr/rollout_is_eff_sample_size",
@@ -418,13 +479,18 @@ def main():
   with open(os.path.join(a.out, f"{a.label}_summary.json"), "w") as f:
     json.dump(summary, f, indent=1, sort_keys=True)
   if not a.no_plots:
-    plots(a.label, ev, steps, train, tim, qwen, a.out)
+    plots(a.label, ev, steps, train, tim, qwen, a.out, intervals)
   t = tim
+
+  def fmt(d):
+    return f"median {d['median']:.1f}s mean {d['mean']:.1f}s p90 {d['p90']:.1f}s (n={d['n']})" if d.get("n") else "n=0"
+
   print(f"finished={finished} exit={summary['driver_exit_code']} last_step={summary['last_step']} ckpt saved={ck} "
         f"skipped={skipped} dirs={ckpts}")
-  print(f"timing: internal median {t['internal_step_s']['median']:.1f}s (n={t['internal_step_s']['n']}), actual interval "
-        f"median {t['actual_interval_s']['median']:.1f}s (n={t['actual_interval_s']['n']}), components {t['internal_components_median_s']}, "
-        f"launch-to-finish {t['launch_to_finish_h']} h, GPU-hours {t['gpu_hours']}, train tokens {gen_tokens:.3e}")
+  print(f"timing [{t['window']}, interval source {t['interval_source']}]: internal {fmt(t['internal_step_s'])}; "
+        f"actual interval {fmt(t['actual_interval_s'])}; paired gap {fmt(t['paired_gap_s'])}; "
+        f"components {t['internal_components_median_s']}; launch-to-finish {t['launch_to_finish_h']} h, "
+        f"GPU-hours {t['gpu_hours']}, train tokens {gen_tokens:.3e}")
   print("wrote", a.out)
 
 

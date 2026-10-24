@@ -61,3 +61,4 @@ custom_reward_function.path=/workspace/meta-RL/verl/examples/grpo_trainer/my_scr
 custom_reward_function.name=compute_score
 reward.custom_reward_function.path=/workspace/meta-RL/verl/examples/grpo_trainer/my_scripts_GKE_gsm8k/boxed_math_reward_v2.py
 reward.custom_reward_function.name=compute_score
+trainer.logger=["console","file"]

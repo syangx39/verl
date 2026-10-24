@@ -1,0 +1,3 @@
+[36m(pid=56486, ip=10.4.21.9)[0m [GEMMA4-RUN-HOOKS] 2026-10-24T08:20:42Z pid=56486 step clock installed on verl.utils.tracking.Tracking.log (wallclock/coordinator_unix, wallclock/interval_s)
+[36m(pid=56486, ip=10.4.21.9)[0m [GEMMA4-CKPT-STEPS] 2026-10-24T08:20:43Z pid=56486 patched verl.trainer.ppo.ray_trainer.RayPPOTrainer._save_checkpoint allowlist=[100, 250]
+[36m(pid=56821, ip=10.4.38.10)[0m [GEMMA4-RUN-HOOKS] 2026-10-24T08:20:59Z pid=56821 step clock installed on verl.utils.tracking.Tracking.log (wallclock/coordinator_unix, wallclock/interval_s)

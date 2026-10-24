@@ -126,8 +126,10 @@ echo "[gsm8k-provenance] exp=${EXPERIMENT_NAME} seed=${SEED} W=${W} total_steps=
 python3 "$SCRIPT_DIR/gemma4_node_prep.py" --patch-dir "$SCRIPT_DIR" --report "$GUARD_DIR/node_prep.json" \
     --min-gpu-nodes "$NNODES" --launcher-sha256 "$LAUNCHER_SHA256"
 
-########################### optional optimizer probe (smoke only) ###########
-# Ray accepts ONE worker_process_setup_hook per job: the probe and the checkpoint allowlist are mutually exclusive.
+########################### Ray worker setup hook ###########################
+# Ray accepts ONE worker_process_setup_hook per job. Default: gemma4_run_hooks = coordinator step clock
+# (wallclock/coordinator_unix and wallclock/interval_s in every metrics record) + the checkpoint allowlist when
+# CKPT_STEPS is set. OPTIM_PROBE_DIR replaces it with the optimizer probe (smoke only; no step clock or allowlist).
 HOOK_ARGS=()
 if [ -n "${OPTIM_PROBE_DIR:-}" ]; then
   mkdir -p "$OPTIM_PROBE_DIR"
@@ -135,13 +137,14 @@ if [ -n "${OPTIM_PROBE_DIR:-}" ]; then
              "++ray_kwargs.ray_init.runtime_env.worker_process_setup_hook=gemma4_optim_probe.install"
              "++ray_kwargs.ray_init.runtime_env.env_vars.VERL_OPTIM_PROBE_DIR=${OPTIM_PROBE_DIR}"
              "++ray_kwargs.ray_init.runtime_env.env_vars.VERL_OPTIM_PROBE_STEPS=\"${OPTIM_PROBE_STEPS:-3}\"")
-fi
-########################### checkpoint step allowlist #######################
-if [ -n "$CKPT_STEPS" ]; then
-  HOOK_ARGS=("++ray_kwargs.ray_init.runtime_env.py_modules=[\"$SCRIPT_DIR/gemma4_ckpt_steps\"]"
-             "++ray_kwargs.ray_init.runtime_env.worker_process_setup_hook=gemma4_ckpt_steps.install"
-             "++ray_kwargs.ray_init.runtime_env.env_vars.VERL_CKPT_STEPS=\"${CKPT_STEPS}\""
-             "++ray_kwargs.ray_init.runtime_env.env_vars.VERL_CKPT_STEPS_LOG=${DUMP_DIR}/ckpt_steps.log")
+else
+  HOOK_ARGS=("++ray_kwargs.ray_init.runtime_env.py_modules=[\"$SCRIPT_DIR/gemma4_ckpt_steps\",\"$SCRIPT_DIR/gemma4_run_hooks\"]"
+             "++ray_kwargs.ray_init.runtime_env.worker_process_setup_hook=gemma4_run_hooks.install"
+             "++ray_kwargs.ray_init.runtime_env.env_vars.VERL_STEP_CLOCK=\"1\"")
+  if [ -n "$CKPT_STEPS" ]; then
+    HOOK_ARGS+=("++ray_kwargs.ray_init.runtime_env.env_vars.VERL_CKPT_STEPS=\"${CKPT_STEPS}\""
+                "++ray_kwargs.ray_init.runtime_env.env_vars.VERL_CKPT_STEPS_LOG=${DUMP_DIR}/ckpt_steps.log")
+  fi
 fi
 
 RAY_NUM_GPUS_ARG=""

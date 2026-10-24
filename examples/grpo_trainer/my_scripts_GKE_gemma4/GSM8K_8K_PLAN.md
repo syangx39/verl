@@ -6,7 +6,7 @@ Establish a **Gemma-4 E2B GPU learning baseline on the GSM8K 8K/no-length-penalt
 
 The historical Qwen reference used 64 GB200, 250 updates × three seeds, and full GSM8K test evaluation every 20 updates: **74.78% → 80.57% mean accuracy, approximately +5.8 pp**, with final seeds **82.26% / 79.61% / 79.83%**. It is a customer-delivered workload reference, not a numerical target for a different model. See the [historical 8K rulebook](../my_scripts_GKE_gsm8k/TPU_GPU_RL_Parity_Rulebook_gsm8k_8k.md) and [Qwen result consolidation PR #13](https://github.com/syangx39/verl/pull/13).
 
-**Status: scorer decision B is implemented as the model-agnostic scorer v2 (§8.1).** All archived Qwen evals were re-scored: only steps 0 and 20 change, by at most +0.61 pp (§8.2). Full checkpoints are limited to steps 100 and 250 (§8.3), and the smoke's TIS evidence is corrected (§8.4). The 3-update v2 integration smoke passed: training uses the v2 reward, and only the allowed checkpoint was written (§8.5). **Seed 1 completed the fixed 250 updates; results are in [GSM8K_8K_RESULTS.md](GSM8K_8K_RESULTS.md).** Held-out v2 accuracy went from 80.59% to 92.80% at step 250: +12.21 pp, paired 95% CI [+10.16, +14.25], numerically stable. The improvement is strongly associated with output-format compliance (boxed rate 88% → 100%); the math-ability gain has not been quantified separately. Seeds 2/3 are to be decided now. The frozen boxed scorer (v1) marked 36 pp of Gemma's correct step-0 answers wrong only because of `\$` / units inside the box (§7.3). The model is `google/gemma-4-E2B-it`, not a generic Gemma 4B checkpoint. This is a separate experiment from the OMI2 A4–A6 optimization in [PR #12](https://github.com/syangx39/verl/pull/12); no OMI2 result, eval protocol or experiment configuration is overwritten.
+**Status: scorer decision B is implemented as the model-agnostic scorer v2 (§8.1).** All archived Qwen evals were re-scored: only steps 0 and 20 change, by at most +0.61 pp (§8.2). Full checkpoints are limited to steps 100 and 250 (§8.3), and the smoke's TIS evidence is corrected (§8.4). The 3-update v2 integration smoke passed: training uses the v2 reward, and only the allowed checkpoint was written (§8.5). **Seed 1 completed the fixed 250 updates; results are in [GSM8K_8K_RESULTS.md](GSM8K_8K_RESULTS.md).** Held-out v2 accuracy went from 80.59% to 92.80% at step 250: +12.21 pp, paired 95% CI [+10.16, +14.25], numerically stable. The improvement is strongly associated with output-format compliance (boxed rate 88% → 100%); the math-ability gain has not been quantified separately. The ~48 s per update of logging overhead was removed and verified in a 30-update run, where the actual interval came within 0.1 s of `timing_s/step` (§8.7). Seeds 2/3 are running with the unchanged recipe. The frozen boxed scorer (v1) marked 36 pp of Gemma's correct step-0 answers wrong only because of `\$` / units inside the box (§7.3). The model is `google/gemma-4-E2B-it`, not a generic Gemma 4B checkpoint. This is a separate experiment from the OMI2 A4–A6 optimization in [PR #12](https://github.com/syangx39/verl/pull/12); no OMI2 result, eval protocol or experiment configuration is overwritten.
 
 ## Plan
 
@@ -160,6 +160,8 @@ Proposed filenames below are work to implement, not existing runnable commands:
 - [x] v2 integration smoke, 3 updates (§8.5).
 - [x] Seed 1 from the initial checkpoint: 2026-10-24T01:57Z–07:46Z, exit code 0 (§8.6).
 - [x] Review seed1 at step100, then fixed step250 if continuing. — Step 100 passed; step 250: 92.80% v2, +12.21 pp ([GSM8K_8K_RESULTS.md](GSM8K_8K_RESULTS.md)).
+- [x] Logging overhead removed and accepted in a 30-update run: paired gap 0.1 s vs 48 s before (§8.7).
+- [ ] Seeds 2/3 with the unchanged recipe: seed 2 running since 2026-10-24T08:47Z, then seed 3 (§8.7).
 - [ ] Freeze or revise the candidate; decide on seeds2/3.
 - [ ] Produce the final GPU baseline and TPU handoff.
 
@@ -437,3 +439,38 @@ Decision (2026-10-24, after the step-100 review): keep the recipe and continue t
 - **Step 250.** v2 accuracy 92.80% (+12.21 pp vs step 0, paired 95% CI [+10.16, +14.25]), boxed 100%, 0 outputs at the cap.
 - **Timing.** Internal step time 31.7 s (median); the actual interval was 78.9 s, including the TensorBoard overhead. Launch-to-finish took 5.82 h, or 372 GPU-hours.
 - Full results, figures and the seeds 2/3 decision request are in [GSM8K_8K_RESULTS.md](GSM8K_8K_RESULTS.md). The pod copy of the launcher has been synced to the console + file-logger version, sha256 `6968e50c…`.
+
+### 8.7 Logging overhead removed; accepted in a run (2026-10-24)
+
+Decisions: the ~48 s per update outside `timing_s/step` must be removed, and verified in a run before seeds 2/3. Recipe, precision and batch stay unchanged.
+
+**Changes**
+
+- **Launcher.** It logs to `trainer.logger=["console","file"]`, with `VERL_FILE_LOGGER_PATH=$DUMP_DIR/metrics.jsonl` passed through Ray. At the pin, verl's `FileLogger` keeps the file open and writes one JSON line per step. TensorBoard is off.
+- **Coordinator step clock** ([`gemma4_run_hooks`](gemma4_run_hooks/__init__.py)). This is now the single Ray setup hook, and it also dispatches the checkpoint allowlist.
+  - It wraps `verl.utils.tracking.Tracking.log` in the TaskRunner, so every metrics record carries `wallclock/coordinator_unix` and `wallclock/interval_s`.
+  - The clock is read before the backends write, so interval *k* covers update *k*'s whole cycle plus the logging of update *k−1*.
+  - Tests: [`test_gemma4_run_hooks.py`](test_gemma4_run_hooks.py). On the head pod it patched the real `Tracking` through the TaskRunner import route.
+- **Runtime contract.** It asserts `trainer.logger=["console","file"]`, for 59 keys in total. `gemma4_config_diff.py` now parses list literals, with tests.
+- **Run check.** [`gemma4_gsm8k_run_check.py`](gemma4_gsm8k_run_check.py) checks `metrics.jsonl`: one record per logged step, no duplicates or gaps, the required keys in every training record, and every value equal to the console line.
+- **Report.** [`gemma4_gsm8k_report.py`](gemma4_gsm8k_report.py) takes the actual interval from the coordinator clock. Where that is absent it uses the TaskRunner progress bar's elapsed time (1 s resolution), and only then dump mtimes, labelled approximate. The source is recorded, and the timing figure's title is computed from the data instead of hard-coded.
+
+**Acceptance run.**
+- Run `gemma4_e2b_gsm8k8k_perf_16n64g_s250stop30_seed1_1024_0819` (`g4run_gsm8k.sh PERF`) used the seed-1 configuration and the 250-step LR schedule, stopped after update 30. Launcher sha256 `e0aafe35…`. It took 0.36 h, 22.9 GPU-hours.
+- Evidence: [`gsm8k_8k/perf_validation/`](gsm8k_8k/perf_validation/).
+- **Criterion, declared before the run:** over updates 3–30 excluding the eval step, paired gap (coordinator interval − `timing_s/step`) mean ≤ 5 s and p90 ≤ 10 s.
+
+| Updates 3–30 excluding update 20 (n = 27) | Internal step time (mean / median / p90) | Actual interval (mean / median / p90) | Paired gap (mean / median / p90) |
+|---|---|---|---|
+| Seed 1, old launcher (coordinator progress-bar clock) | 29.1 / 28.1 / 34.0 s | 88.6 / 75.0 / 88.0 s | 59.5 / 46.8 / 51.6 s |
+| **Acceptance run, new launcher (coordinator step clock)** | 29.7 / 28.5 / 36.8 s | **29.8 / 28.6 / 36.9 s** | **0.1 / 0.1 / 0.1 s** |
+
+- **PASS.** The largest per-update gap was 0.3 s, at update 21, just after the eval. In the same run, the coordinator clock and the progress-bar clock agree within 0.75 s, consistent with the progress bar's 1 s resolution.
+- **`metrics.jsonl`:** 31 records (steps 0–30), no duplicates or gaps, no record missing a required key. 3,272 values compared with the console line, all identical.
+- **Runtime contract:** 59/59.
+- **Seed 1 over its full window, re-measured with the progress-bar clock** (steps 20–250 excluding eval and checkpoint steps, n = 218): internal 31.7 / 33.1 / 41.2 s; interval 78.5 / 81.1 / 90.0 s; paired gap 46.3 / 48.0 / 52.2 s (median / mean / p90). Update 24 stalled once, with a 429 s interval.
+- **GCS-fuse note.** Another pod reads `metrics.jsonl` through its own mount, and that view of the size can be stale for minutes: the head pod showed 0 bytes until a few minutes after the stop. Live monitoring therefore reads the console line, which carries the same values including the clock. The JSONL is checked after the run.
+
+**Next.**
+- Seeds 2/3 run with this launcher: seed 2 from 08:47Z, then seed 3 if seed 2 exits 0. Their coordinator-clock intervals replace the earlier "about 2.5 h per seed" estimate.
+- Compute performance comes after this, as a separate step.

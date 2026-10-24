@@ -105,6 +105,11 @@ def parse_value(s: str):
         return low == "true"
     if low in ("none", "null"):
         return None
+    if s[:1] in ("[", "(", "{"):  # list / tuple / dict literal, e.g. trainer.logger=["console","file"]
+        try:
+            return _literal(s)
+        except (ValueError, SyntaxError):
+            pass
     return s
 
 
