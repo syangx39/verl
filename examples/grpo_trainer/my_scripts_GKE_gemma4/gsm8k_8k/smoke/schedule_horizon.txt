@@ -1,0 +1,1 @@
+[36m(WorkerDict pid=22616, ip=10.4.15.10)[0m Total steps: 250, num_warmup_steps: 10

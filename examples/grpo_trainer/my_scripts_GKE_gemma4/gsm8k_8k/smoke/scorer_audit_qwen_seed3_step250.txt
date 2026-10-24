@@ -1,0 +1,9 @@
+n=1319
+  correct (scorer)                                         1053   79.83%
+  boxed wrong                                               166   12.59%
+  no box, very long output (likely cap)                      95    7.20%
+  no box                                                      5    0.38%
+scorer accuracy 79.83%  ->  lenient-normalized accuracy 79.83%
+EXAMPLE [no box, very long output (likely cap)]: " distance he left, which is D, but he's stuck for some time. Let me try to calculate the distance he needs to cover back home.\n\nLet me think of it as:\n\nTotal distance D = 180 miles (from first part) +" | gold '45'
+EXAMPLE [no box]: '25 + 498. 125 + 498. 125 + 498. 125 + 498. 125 + 498. 125 + 498. 125 + 498. 125 + 498. 125 + 498. 125 + 498. 125 + 498. 125 + 498. 125 + 498. 125 + 498. 125 + 498. 125 + 498. 125 + 498. 125 + 498. 125' | gold '623'
+very long outputs (>20k chars): 165

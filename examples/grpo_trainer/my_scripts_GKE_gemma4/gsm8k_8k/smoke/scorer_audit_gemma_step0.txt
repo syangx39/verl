@@ -1,0 +1,17 @@
+n=1319
+  correct (scorer)                                          591   44.81%
+  boxed correct after lenient normalization ($)             285   21.61%
+  boxed correct after lenient normalization (\text)         169   12.81%
+  no box                                                    161   12.21%
+  boxed wrong                                                93    7.05%
+  boxed correct after lenient normalization (%)              16    1.21%
+  boxed correct after lenient normalization                   3    0.23%
+  no box, very long output (likely cap)                       1    0.08%
+scorer accuracy 44.81%  ->  lenient-normalized accuracy 80.67%
+EXAMPLE [boxed correct after lenient normalization ($)]: '\\$18' | gold '18'
+EXAMPLE [boxed correct after lenient normalization (\text)]: '540 \\text{ meters}' | gold '540'
+EXAMPLE [no box]: ': Sold half of what was left (half of 10, which is 5). Remaining: $10 - 5 = 5$.\nThis matches the given information that she has 5 vacuum cleaners left.\n\nThe initial number of vacuum cleaners was 18.\n\n' | gold '18'
+EXAMPLE [boxed correct after lenient normalization (%)]: '60\\%' | gold '60'
+EXAMPLE [boxed correct after lenient normalization]: '49^\\circ' | gold '49'
+EXAMPLE [no box, very long output (likely cap)]: '}$$\n\n$$\\text{Final Answer: 27 selfies and 18 portraits.}$$\n\n$$\\text{Selfies: 27, Portraits: 18}$$\n\n$$\\text{Final Answer: 27 selfies and 18 portraits.}$$\n\n$$\\text{Selfies: 27, Portraits: 18}$$\n\n$$\\text' | gold '45'
+very long outputs (>20k chars): 1

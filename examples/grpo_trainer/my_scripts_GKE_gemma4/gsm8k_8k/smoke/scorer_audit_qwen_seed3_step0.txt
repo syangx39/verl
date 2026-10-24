@@ -1,0 +1,15 @@
+n=1319
+  correct (scorer)                                         1000   75.82%
+  boxed wrong                                               226   17.13%
+  no box, very long output (likely cap)                      80    6.07%
+  boxed correct after lenient normalization                   6    0.45%
+  no box                                                      5    0.38%
+  boxed correct after lenient normalization ($)               1    0.08%
+  no parseable box but 'boxed' text present                   1    0.08%
+scorer accuracy 75.82%  ->  lenient-normalized accuracy 76.35%
+EXAMPLE [no box, very long output (likely cap)]: ". So unless there's a miscalculation here, maybe the problem is different. Wait, maybe the problem says he sells all his toys and uses the money to buy video games. So total money is 195. Then he buys" | gold '2'
+EXAMPLE [boxed correct after lenient normalization]: '28.00' | gold '28'
+EXAMPLE [no box]: "4672\n\n1.2^18 = 26.6216213606\n\nYes, so 1.2^18 is exactly 26.6216213606. Multiply by 20: 532.432427212. \n\nBut according to the step-by-step, after 18 periods, it's 532.4893. \n\nThis suggests that there's" | gold '92'
+EXAMPLE [boxed correct after lenient normalization ($)]: '\\$800' | gold '800'
+EXAMPLE [no parseable box but 'boxed' text present]: ' the problem, but since this is a math problem, and assuming that there is a solution, perhaps I need to assume that the amount of oil is 2 ounces, and the answer is 2. Therefore, the answer is \\boxed' | gold '4'
+very long outputs (>20k chars): 86

@@ -1,0 +1,36 @@
+EXP gemma4_e2b_gsm8k8k_smoke_16n64g_s250stop3_seed1_1024_0036
+stop note: [smoke-stop] update 3 logged; SIGTERM to driver pid(s) 105675 at 2026-10-24T00:47:59Z
+launcher rc lines: ['[driver] main_ppo finished with exit_code=1', 'LAUNCHER_RC=1']
+step-0 eval: n=1319 unique_qid=1319 acc=44.81% fmt(boxed parsed)=87.72% score_mean=0.4910 length_penalty_sum=0.0
+example output tail: "money made from selling the remaining eggs:**\n    She sells the remainder at the farmers' market for $\\$2$ per egg.\n    Total earnings = Remaining eggs $\\times$ Price per egg\n    Total earnings = $9 \\times \\$2 = \\$18$.\n\n**Answer:** Janet makes \\$18 every day at the farmers' market.\n\n$$\\boxed{\\$18}$$"
+example input head: 'system\nYou are a helpful assistant. Please reason step by step, and put your final answer within \\boxed{}.\nuser\nJanet’s ducks lay 16 eggs per day. She eats three for breakfast every morning and bakes '
+train step 1: rows=2048 groups=128 sizes=[16] acc=50.10% fmt=80.86% mixed_groups=88/128 length_penalty_sum=0.0 same_qids_as_qwen_seed1=True
+train step 2: rows=2048 groups=128 sizes=[16] acc=41.99% fmt=81.10% mixed_groups=77/128 length_penalty_sum=0.0 same_qids_as_qwen_seed1=True
+train step 3: rows=2048 groups=128 sizes=[16] acc=44.97% fmt=79.83% mixed_groups=86/128 length_penalty_sum=0.0 same_qids_as_qwen_seed1=True
+metric steps: [0, 1, 2, 3]
+  actor/lr                                       s0=-  s1=2e-07  s2=4e-07  s3=6e-07
+  actor/grad_norm                                s0=-  s1=1.3027  s2=0.91983  s3=1.5178
+  actor/entropy                                  s0=-  s1=-  s2=-  s3=-
+  actor/pg_loss                                  s0=-  s1=0.0028337  s2=-0.0011025  s3=-0.0054101
+  actor/ppo_kl                                   s0=-  s1=0.00036166  s2=0.00037041  s3=0.00043549
+  rollout_corr/k3_kl                             s0=-  s1=-  s2=-  s3=-
+  rollout_corr/rollout_is_mean                   s0=-  s1=-  s2=-  s3=-
+  rollout_corr/rollout_is_max                    s0=-  s1=-  s2=-  s3=-
+  rollout_corr/rollout_is_ratio_fraction_high    s0=-  s1=-  s2=-  s3=-
+  rollout_corr/rollout_is_eff_sample_size        s0=-  s1=-  s2=-  s3=-
+  critic/score/mean                              s0=-  s1=0.53174  s2=0.45903  s3=0.48457
+  critic/advantages/max                          s0=-  s1=3.75  s2=3.75  s3=3.75
+  response_length/mean                           s0=-  s1=471.74  s2=498.41  s3=497.54
+  response_length/max                            s0=-  s1=2598  s2=3098  s3=3777
+  response_length/clip_ratio                     s0=-  s1=0  s2=0  s3=0
+  timing_s/step                                  s0=-  s1=155.5  s2=33.475  s3=29.961
+  timing_s/gen                                   s0=-  s1=13.573  s2=15.673  s3=15.989
+  timing_s/old_log_prob                          s0=-  s1=-  s2=-  s3=-
+  timing_s/update_actor                          s0=-  s1=136.38  s2=12.176  s3=8.4246
+  timing_s/update_weights                        s0=-  s1=3.9147  s2=4.0064  s3=3.9041
+  timing_s/testing                               s0=-  s1=-  s2=-  s3=-
+  actor/perf/max_memory_allocated_gb             s0=-  s1=26.744  s2=28.82  s3=29.402
+  actor/perf/max_memory_reserved_gb              s0=-  s1=53.9  s2=56.713  s3=57.24
+  perf/total_num_tokens                          s0=-  s1=1.1674e+06  s2=1.2196e+06  s3=1.2136e+06
+rollout_corr keys: []
+val keys at step 0: ['val-aux/gsm8k_boxed_test/fmt/mean@1', 'val-aux/gsm8k_boxed_test/format_credit/mean@1', 'val-aux/gsm8k_boxed_test/length_penalty/mean@1', 'val-aux/gsm8k_boxed_test/overlong/mean@1', 'val-aux/gsm8k_boxed_test/qid/mean@1', 'val-aux/gsm8k_boxed_test/reward/mean@1', 'val-aux/gsm8k_boxed_test/reward_raw/mean@1', 'val-aux/gsm8k_boxed_test/score/mean@1', 'val-aux/num_turns/max', 'val-aux/num_turns/mean', 'val-aux/num_turns/min', 'val-core/gsm8k_boxed_test/acc/mean@1']
